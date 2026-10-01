@@ -1,0 +1,14 @@
+diff --git a/src/capability-grant.ts b/src/capability-grant.ts
+index b4196de..38a1780 100644
+--- a/src/capability-grant.ts
++++ b/src/capability-grant.ts
+@@ -150,9 +150,6 @@ export class CapabilityGrantVerifier {
+     if (now < issuedAt) {
+       throw new CapabilityVerificationError("NOT_YET_VALID", "Validation Error: capability is not yet valid");
+     }
+-    if (now >= expiresAt) {
+-      throw new CapabilityVerificationError("EXPIRED", "Validation Error: capability has expired");
+-    }
+ 
+     // 4. Authoritative Invariants Context Enforcement
+     if (verifiedSnapshot.agent_id !== ctx.expectedAgentId) {

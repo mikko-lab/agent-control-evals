@@ -1,0 +1,14 @@
+diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
+index a357b87..e81fc07 100644
+--- a/src/guarded-executor.ts
++++ b/src/guarded-executor.ts
+@@ -483,9 +483,6 @@ export class GuardedExecutor {
+     if (issuedAtMs < pending.createdAtMs) {
+       throw new Error("Approval grant rejected: issued_at is before ASK creation");
+     }
+-    if (issuedAtMs > this.clock.nowMs() + this.approvalFutureSkewMs) {
+-      throw new Error("Approval grant rejected: issued_at is unreasonably in the future");
+-    }
+ 
+     // Expiry check
+     const elapsedMs = this.clock.nowMs() - pending.createdAtMs;

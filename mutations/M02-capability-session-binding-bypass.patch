@@ -1,0 +1,14 @@
+diff --git a/src/capability-grant.ts b/src/capability-grant.ts
+index b4196de..be11c92 100644
+--- a/src/capability-grant.ts
++++ b/src/capability-grant.ts
+@@ -158,9 +158,6 @@ export class CapabilityGrantVerifier {
+     if (verifiedSnapshot.agent_id !== ctx.expectedAgentId) {
+       throw new CapabilityVerificationError("AGENT_MISMATCH", "Invariant Violation: agent_id does not match");
+     }
+-    if (verifiedSnapshot.session_id !== ctx.expectedSessionId) {
+-      throw new CapabilityVerificationError("SESSION_MISMATCH", "Invariant Violation: session_id does not match");
+-    }
+     
+     // Tool Scope Binding
+     if (!verifiedSnapshot.allowed_tools.includes(ctx.requestedTool)) {

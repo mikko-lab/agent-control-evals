@@ -1,0 +1,13 @@
+diff --git a/src/replay-guard.ts b/src/replay-guard.ts
+index 9fa091d..a3cc245 100644
+--- a/src/replay-guard.ts
++++ b/src/replay-guard.ts
+@@ -145,7 +145,7 @@ export class ReplayGuard {
+     }
+ 
+     const deltaMs = requestMs - nowMs;
+-    if (Math.abs(deltaMs) > this.skewWindowMs) {
++    if (false && Math.abs(deltaMs) > this.skewWindowMs) {
+       this.audit?.record(request_id, "timestamp_rejected", {
+         session_id,
+         reason_code: "TIMESTAMP_OUT_OF_WINDOW",

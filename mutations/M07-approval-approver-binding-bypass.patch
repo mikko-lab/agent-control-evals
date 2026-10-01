@@ -1,0 +1,20 @@
+diff --git a/src/approval-verifier.ts b/src/approval-verifier.ts
+index 883b9e3..f205f10 100644
+--- a/src/approval-verifier.ts
++++ b/src/approval-verifier.ts
+@@ -99,15 +99,6 @@ export class ApprovalGrantVerifier {
+     if (v2.tool !== ctx.expectedTool) {
+       throw new ApprovalVerificationError("TOOL_BINDING_MISMATCH", "Invariant Violation: tool does not match expected tool");
+     }
+-    if (
+-      v2.approver.type !== ctx.expectedApproverType ||
+-      v2.approver.id !== ctx.expectedApproverId
+-    ) {
+-      throw new ApprovalVerificationError(
+-        "WRONG_APPROVER_IDENTITY",
+-        "Invariant Violation: approver does not match expected approver"
+-      );
+-    }
+ 
+     return v2;
+   }

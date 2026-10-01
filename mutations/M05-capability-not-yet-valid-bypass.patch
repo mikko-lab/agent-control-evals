@@ -1,0 +1,14 @@
+diff --git a/src/capability-grant.ts b/src/capability-grant.ts
+index b4196de..af1d712 100644
+--- a/src/capability-grant.ts
++++ b/src/capability-grant.ts
+@@ -147,9 +147,6 @@ export class CapabilityGrantVerifier {
+     if (expiresAt <= issuedAt) {
+       throw new CapabilityVerificationError("MALFORMED_GRANT", "Validation Error: expires_at must be strictly after issued_at");
+     }
+-    if (now < issuedAt) {
+-      throw new CapabilityVerificationError("NOT_YET_VALID", "Validation Error: capability is not yet valid");
+-    }
+     if (now >= expiresAt) {
+       throw new CapabilityVerificationError("EXPIRED", "Validation Error: capability has expired");
+     }

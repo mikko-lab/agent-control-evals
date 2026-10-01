@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: harness smoke (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    env:
+      ACE_SUT_CHECKOUT: ${{ github.workspace }}/.work/envs/sut-verify/checkout
+      ACE_SUT_BUILD: ${{ github.workspace }}/.work/envs/sut-verify/build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: 1. install
+        run: npm ci
+      - name: 2. typecheck
+        run: npm run typecheck
+      - name: 3. build (no separate linter in v0.1; tsc strict is the lint gate)
+        run: npm run build
+      - name: 4. unit tests (SUT-dependent tests are skipped here and run in step 11)
+        run: node --test --test-concurrency=1 "dist/test/**/*.test.js"
+        env:
+          ACE_SUT_CHECKOUT: ""
+          ACE_SUT_BUILD: ""
+      - name: 5. oracle dependency-boundary check
+        run: node dist/src/cli.js oracle-boundary
+      - name: 6. SUT checkout SHA verification (read-only clone, pinned SHA, clean tree, SUT's own npm run verify)
+        run: node dist/src/cli.js sut-verify --run-sut-tests
+      - name: 7-8. deterministic smoke corpus + golden SHA + committed bytes
+        run: node dist/src/cli.js golden
+      - name: 9. runtime smoke evaluation (with observation determinism)
+        run: node dist/src/cli.js evaluate --profile smoke --boundary runtime --mutations none --check-observation-determinism --out out/runtime-smoke
+      - name: 10. component smoke evaluation (with observation determinism)
+        run: node dist/src/cli.js evaluate --profile smoke --boundary component --mutations none --check-observation-determinism --out out/component-smoke
+      - name: 11. adapter contract tests (fake adapters + real pinned ACS adapter + protocol schemas)
+        run: node --test --test-concurrency=1 dist/test/adapter-contract.test.js dist/test/sut-integration.test.js dist/test/schemas.test.js
+      - name: 12. mutation reachability validation
+        run: node dist/src/cli.js reachability > out/reachability.json
+      - name: 13. runtime mutation smoke
+        run: node dist/src/cli.js evaluate --profile smoke --boundary runtime --mutations runtime --out out/runtime-mutation-smoke
+      - name: 14. component mutation smoke
+        run: node dist/src/cli.js evaluate --profile smoke --boundary component --mutations component --out out/component-mutation-smoke
+      - name: 15. report schema validation
+        run: |
+          for r in out/*/report.json; do node dist/src/cli.js validate-report --file "$r"; done
+      - name: 16. determinism check (independent generations, byte-for-byte)
+        run: |
+          node dist/src/cli.js generate --profile smoke --out out/det-a
+          node dist/src/cli.js generate --profile smoke --out out/det-b
+          cmp out/det-a/corpus.jsonl out/det-b/corpus.jsonl
+          cmp out/det-a/corpus.jsonl corpus/smoke.jsonl
+          node dist/src/cli.js generate --profile full --out out/det-full-a
+          node dist/src/cli.js generate --profile full --out out/det-full-b
+          cmp out/det-full-a/corpus.jsonl out/det-full-b/corpus.jsonl
+          rm -rf out/det-*
+      - name: upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-reports-node${{ matrix.node }}
+          path: |
+            out/**/report.json
+            out/**/summary.md
+            out/**/corpus-manifest.json
+            out/reachability.json
+          if-no-files-found: warn

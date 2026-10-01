@@ -1,0 +1,14 @@
+diff --git a/src/approval-verifier.ts b/src/approval-verifier.ts
+index 883b9e3..6a59b37 100644
+--- a/src/approval-verifier.ts
++++ b/src/approval-verifier.ts
+@@ -93,9 +93,6 @@ export class ApprovalGrantVerifier {
+     if (v2.session_id !== ctx.expectedSessionId) {
+       throw new ApprovalVerificationError("SESSION_MISMATCH", "Invariant Violation: session_id does not match");
+     }
+-    if (v2.request_id !== ctx.expectedRequestId) {
+-      throw new ApprovalVerificationError("REQUEST_MISMATCH", "Invariant Violation: request_id does not match");
+-    }
+     if (v2.tool !== ctx.expectedTool) {
+       throw new ApprovalVerificationError("TOOL_BINDING_MISMATCH", "Invariant Violation: tool does not match expected tool");
+     }

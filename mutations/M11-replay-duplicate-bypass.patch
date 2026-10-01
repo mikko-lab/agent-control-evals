@@ -1,0 +1,13 @@
+diff --git a/src/replay-guard.ts b/src/replay-guard.ts
+index 9fa091d..f9eed24 100644
+--- a/src/replay-guard.ts
++++ b/src/replay-guard.ts
+@@ -163,7 +163,7 @@ export class ReplayGuard {
+ 
+     // ── 3: Check duplicate request_id within this session ────────────────
+     const sessionSet = this.seenIds.get(session_id);
+-    if (sessionSet?.has(request_id)) {
++    if (false && sessionSet?.has(request_id)) {
+       this.audit?.record(request_id, "replay_rejected", {
+         session_id,
+         reason_code: "REPLAY_DETECTED",

@@ -1,0 +1,14 @@
+diff --git a/src/execution-gate.ts b/src/execution-gate.ts
+index 7b34f96..a6ca60e 100644
+--- a/src/execution-gate.ts
++++ b/src/execution-gate.ts
+@@ -44,8 +44,7 @@ export class ExecutionGate {
+       throw new Error("Execution blocked: valid execution permit required");
+     }
+ 
+-    // Permit is consumed IMMEDIATELY before tool invocation
+-    this.#activePermits.delete(permit);
++    // MUTANT: permit is no longer consumed
+ 
+     // Validate bindings
+     if (permit.sessionId !== params.metadata.session_id) {

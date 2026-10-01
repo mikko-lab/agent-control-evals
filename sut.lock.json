@@ -1,0 +1,14 @@
+{
+  "sut": "acs-guardrail-demo",
+  "sut_repository": "https://github.com/mikko-lab/acs-guardrail-demo",
+  "sut_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9",
+  "sut_version": "0.4.0",
+  "baseline_at_pin": {
+    "test_suites": 26,
+    "tests": 479,
+    "ci_node_versions": [22, 24],
+    "verify_command": "npm run verify"
+  },
+  "follow_upstream": false,
+  "note": "Pinned System Under Test for agent-control-evals v0.1. Do not update automatically. A different commit is a different SUT and requires a new review."
+}

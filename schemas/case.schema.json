@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/case.schema.json",
+  "title": "agent-control-evals case (harness-owned; NOT the ACS wire schema)",
+  "type": "object",
+  "required": ["case_schema_version", "case_id", "family", "variant", "evaluation_boundary", "scenario"],
+  "additionalProperties": false,
+  "$defs": {
+    "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "int": { "type": "integer" },
+    "sig": { "enum": ["valid", "tampered"] },
+    "json": {},
+    "capability": {
+      "type": "object",
+      "required": ["present"],
+      "additionalProperties": false,
+      "properties": {
+        "present": { "type": "boolean" },
+        "agent": { "type": "string" },
+        "session": { "$ref": "#/$defs/label" },
+        "allowed_tools": { "type": "array", "items": { "type": "string" } },
+        "issued_offset_ms": { "$ref": "#/$defs/int" },
+        "expires_offset_ms": { "$ref": "#/$defs/int" },
+        "signature": { "$ref": "#/$defs/sig" }
+      }
+    },
+    "requestBody": {
+      "type": "object",
+      "required": ["request", "session", "agent", "tool", "timestamp_offset_ms", "signature", "capability", "tool_output"],
+      "properties": {
+        "request": { "$ref": "#/$defs/label" },
+        "session": { "$ref": "#/$defs/label" },
+        "agent": { "type": "string" },
+        "tool": { "type": "string" },
+        "timestamp_offset_ms": { "$ref": "#/$defs/int" },
+        "signature": { "$ref": "#/$defs/sig" },
+        "capability": { "$ref": "#/$defs/capability" },
+        "tool_output": { "$ref": "#/$defs/json" }
+      }
+    },
+    "grant": {
+      "type": "object",
+      "required": ["version", "decision", "session", "request", "tool", "approver_id", "issued_offset_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": 2 },
+        "decision": { "enum": ["approve", "reject"] },
+        "session": { "$ref": "#/$defs/label" },
+        "request": { "$ref": "#/$defs/label" },
+        "tool": { "type": "string" },
+        "approver_id": { "type": "string" },
+        "issued_offset_ms": { "$ref": "#/$defs/int" },
+        "tamper": {
+          "type": "object",
+          "required": ["field", "value"],
+          "additionalProperties": false,
+          "properties": { "field": { "enum": ["session", "request", "tool", "approver_id"] }, "value": { "type": "string" } }
+        }
+      }
+    },
+    "step": {
+      "oneOf": [
+        { "allOf": [{ "$ref": "#/$defs/requestBody" }, { "type": "object", "required": ["op"], "properties": { "op": { "const": "request" } } }] },
+        { "type": "object", "required": ["op", "grant"], "additionalProperties": false, "properties": { "op": { "const": "approve" }, "grant": { "$ref": "#/$defs/grant" } } },
+        { "type": "object", "required": ["op", "grants"], "additionalProperties": false, "properties": { "op": { "const": "concurrent_approve" }, "grants": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/grant" } } } },
+        { "type": "object", "required": ["op", "requests"], "additionalProperties": false, "properties": { "op": { "const": "concurrent_request" }, "requests": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/requestBody" } } } },
+        { "type": "object", "required": ["op", "ms"], "additionalProperties": false, "properties": { "op": { "const": "advance_clock" }, "ms": { "type": "integer", "minimum": 0 } } },
+        { "type": "object", "required": ["op", "session"], "additionalProperties": false, "properties": { "op": { "const": "clear_session" }, "session": { "$ref": "#/$defs/label" } } }
+      ]
+    },
+    "assertion": {
+      "type": "object",
+      "required": ["step", "stage", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "step": { "type": "integer", "minimum": 0 },
+        "attempt": { "type": "integer", "minimum": 0 },
+        "stage": { "enum": ["request", "approval", "result", "verifier", "permit"] },
+        "outcome": { "type": "string" },
+        "acceptable_reason_classes": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    }
+  },
+  "properties": {
+    "case_schema_version": { "const": "0.1.0" },
+    "case_id": { "type": "string", "pattern": "^case-[0-9]{6}$" },
+    "family": { "type": "string" },
+    "variant": { "type": "string" },
+    "evaluation_boundary": { "enum": ["runtime", "component"] },
+    "scenario": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "steps"], "additionalProperties": false, "properties": { "kind": { "const": "runtime" }, "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } } } },
+        {
+          "type": "object",
+          "required": ["kind", "component", "grant", "context"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "component" },
+            "component": { "const": "approval_grant_verifier" },
+            "grant": { "$ref": "#/$defs/grant" },
+            "context": { "type": "object", "required": ["session", "request", "tool", "approver_id"], "additionalProperties": false, "properties": { "session": { "type": "string" }, "request": { "type": "string" }, "tool": { "type": "string" }, "approver_id": { "type": "string" } } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "component", "permit", "attempts", "concurrent", "tool_output"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "component" },
+            "component": { "const": "execution_gate" },
+            "permit": { "type": "object", "required": ["session", "request", "tool", "forged"], "additionalProperties": false, "properties": { "session": { "type": "string" }, "request": { "type": "string" }, "tool": { "type": "string" }, "forged": { "type": "boolean" } } },
+            "attempts": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["session", "request", "tool"], "additionalProperties": false, "properties": { "session": { "type": "string" }, "request": { "type": "string" }, "tool": { "type": "string" } } } },
+            "concurrent": { "type": "boolean" },
+            "tool_output": { "$ref": "#/$defs/json" }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "type": "object",
+      "required": ["step", "stage", "outcome", "adversarial", "assertions", "invariants"],
+      "additionalProperties": false,
+      "properties": {
+        "step": { "type": "integer" },
+        "attempt": { "type": "integer" },
+        "stage": { "enum": ["request", "approval", "result", "verifier", "permit"] },
+        "outcome": { "type": "string" },
+        "acceptable_reason_classes": { "type": "array", "items": { "type": "string" } },
+        "adversarial": { "type": "boolean" },
+        "assertions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/assertion" } },
+        "invariants": {
+          "type": "object",
+          "required": ["executions"],
+          "additionalProperties": false,
+          "properties": {
+            "executions": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+            "permit_reuses_accepted": { "type": "integer", "minimum": 0 },
+            "cross_request_targets": { "type": "array", "items": { "type": "string" } },
+            "cross_session_targets": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "unordered_steps": { "type": "array", "items": { "type": "integer" } }
+      }
+    }
+  }
+}

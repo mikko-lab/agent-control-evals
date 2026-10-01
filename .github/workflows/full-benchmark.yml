@@ -1,0 +1,53 @@
+name: full-benchmark
+
+# Manual only. The ~10 000-case benchmark is never claimed as an ordinary CI result.
+on:
+  workflow_dispatch:
+    inputs:
+      mutations:
+        description: "Mutation analysis on the full corpus"
+        type: choice
+        options: [all, none]
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    name: full benchmark (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: preconditions (smoke corpus, oracle boundary, reachability)
+        run: |
+          node dist/src/cli.js golden
+          node dist/src/cli.js oracle-boundary
+          node dist/src/cli.js reachability > /dev/null
+      - name: full benchmark
+        run: >
+          node dist/src/cli.js evaluate --profile full --boundary all
+          --mutations ${{ inputs.mutations }} --check-observation-determinism --run-sut-tests
+          --out out/full
+      - name: validate report
+        if: always()
+        run: node dist/src/cli.js validate-report --file out/full/report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-benchmark-node${{ matrix.node }}
+          path: |
+            out/full/report.json
+            out/full/summary.md
+            out/full/corpus-manifest.json

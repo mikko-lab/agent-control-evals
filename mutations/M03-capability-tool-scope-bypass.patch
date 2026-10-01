@@ -1,0 +1,14 @@
+diff --git a/src/capability-grant.ts b/src/capability-grant.ts
+index b4196de..e4ea0e5 100644
+--- a/src/capability-grant.ts
++++ b/src/capability-grant.ts
+@@ -163,9 +163,6 @@ export class CapabilityGrantVerifier {
+     }
+     
+     // Tool Scope Binding
+-    if (!verifiedSnapshot.allowed_tools.includes(ctx.requestedTool)) {
+-      throw new CapabilityVerificationError("TOOL_SCOPE_MISMATCH", `Invariant Violation: requested tool '${ctx.requestedTool}' is not in allowed_tools`);
+-    }
+ 
+     return verifiedSnapshot;
+   }

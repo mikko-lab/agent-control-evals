@@ -1,0 +1,413 @@
+{
+  "mutation_set_version": "0.1.0",
+  "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9",
+  "mutants": [
+    {
+      "mutation_id": "M01-capability-agent-binding-bypass",
+      "family": "capability_agent_binding",
+      "evaluation_boundary": "runtime",
+      "description": "CapabilityGrantVerifier.verify no longer rejects a capability whose signed agent_id differs from the authenticated request agent.",
+      "target_file": "src/capability-grant.ts",
+      "target_function": "CapabilityGrantVerifier.verify",
+      "target_invariant": "A capability authorises only the agent it is bound to.",
+      "expected_exposed_invariant": "Request with a validly signed capability for another agent must be DENY (CAPABILITY_AGENT_MISMATCH).",
+      "reachability_path": [
+        "GuardedExecutor.process",
+        "CapabilityProvider.resolve (harness-owned)",
+        "CapabilityGrantVerifier.verify",
+        "agent_id binding check"
+      ],
+      "witness_families": [
+        "capability_agent_binding"
+      ],
+      "exposed_reason_classes": [
+        "CAPABILITY_AGENT_MISMATCH"
+      ],
+      "patch_sha256": "6afda8d4807951c0ac1b41a49a847389ae6957e48c1fe686fc585a7403ffa296",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M02-capability-session-binding-bypass",
+      "family": "capability_session_binding",
+      "evaluation_boundary": "runtime",
+      "description": "CapabilityGrantVerifier.verify no longer rejects a capability bound to a different session.",
+      "target_file": "src/capability-grant.ts",
+      "target_function": "CapabilityGrantVerifier.verify",
+      "target_invariant": "A capability authorises only the session it is bound to.",
+      "expected_exposed_invariant": "Request presenting another session's capability must be DENY (CAPABILITY_SESSION_MISMATCH).",
+      "reachability_path": [
+        "GuardedExecutor.process",
+        "CapabilityProvider.resolve (harness-owned)",
+        "CapabilityGrantVerifier.verify",
+        "session_id binding check"
+      ],
+      "witness_families": [
+        "capability_session_binding",
+        "cross_session_isolation"
+      ],
+      "exposed_reason_classes": [
+        "CAPABILITY_SESSION_MISMATCH"
+      ],
+      "patch_sha256": "9abe2f5f260f2da98bf479ade7cb44b774f3abd5fa08a841d4490e7c17dace2a",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M03-capability-tool-scope-bypass",
+      "family": "capability_tool_scope",
+      "evaluation_boundary": "runtime",
+      "description": "CapabilityGrantVerifier.verify no longer requires the requested tool to be in allowed_tools.",
+      "target_file": "src/capability-grant.ts",
+      "target_function": "CapabilityGrantVerifier.verify",
+      "target_invariant": "A capability authorises only tools listed exactly in allowed_tools.",
+      "expected_exposed_invariant": "Request for a tool outside the capability scope must be DENY (CAPABILITY_TOOL_MISMATCH).",
+      "reachability_path": [
+        "GuardedExecutor.process",
+        "CapabilityProvider.resolve (harness-owned)",
+        "CapabilityGrantVerifier.verify",
+        "allowed_tools exact-match check"
+      ],
+      "witness_families": [
+        "capability_tool_scope"
+      ],
+      "exposed_reason_classes": [
+        "CAPABILITY_TOOL_MISMATCH"
+      ],
+      "patch_sha256": "291bfe6cd51a14238f1875f099e72cdd8faccd8eeb4194d4f0803c951b822998",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M04-capability-expiry-bypass",
+      "family": "capability_expired",
+      "evaluation_boundary": "runtime",
+      "description": "CapabilityGrantVerifier.verify no longer rejects capabilities with now >= expires_at.",
+      "target_file": "src/capability-grant.ts",
+      "target_function": "CapabilityGrantVerifier.verify",
+      "target_invariant": "An expired capability authorises nothing.",
+      "expected_exposed_invariant": "Request with an expired capability must be DENY (CAPABILITY_EXPIRED).",
+      "reachability_path": [
+        "GuardedExecutor.process",
+        "CapabilityProvider.resolve (harness-owned)",
+        "CapabilityGrantVerifier.verify",
+        "expires_at check"
+      ],
+      "witness_families": [
+        "capability_expired"
+      ],
+      "exposed_reason_classes": [
+        "CAPABILITY_EXPIRED"
+      ],
+      "patch_sha256": "16ba46d0f38bbb56678235e4e482d6aaec70d6f94d1a8eebbee5b811dbff1eb9",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M05-capability-not-yet-valid-bypass",
+      "family": "capability_not_yet_valid",
+      "evaluation_boundary": "runtime",
+      "description": "CapabilityGrantVerifier.verify no longer rejects capabilities with now < issued_at.",
+      "target_file": "src/capability-grant.ts",
+      "target_function": "CapabilityGrantVerifier.verify",
+      "target_invariant": "A capability is not valid before issued_at.",
+      "expected_exposed_invariant": "Request with a not-yet-valid capability must be DENY (CAPABILITY_NOT_YET_VALID).",
+      "reachability_path": [
+        "GuardedExecutor.process",
+        "CapabilityProvider.resolve (harness-owned)",
+        "CapabilityGrantVerifier.verify",
+        "issued_at check"
+      ],
+      "witness_families": [
+        "capability_not_yet_valid"
+      ],
+      "exposed_reason_classes": [
+        "CAPABILITY_NOT_YET_VALID"
+      ],
+      "patch_sha256": "b1a73aff326925a5adbce5c3a34b2259d4032d21483d44cccecfbaf0384d77f7",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M06-approval-tool-binding-bypass",
+      "family": "approval_tool_binding",
+      "evaluation_boundary": "runtime",
+      "description": "ApprovalGrantVerifier.verifyV2 no longer compares the signed tool with the pending action's tool.",
+      "target_file": "src/approval-verifier.ts",
+      "target_function": "ApprovalGrantVerifier.verifyV2",
+      "target_invariant": "An approval authorises only the tool of the pending action it was issued for.",
+      "expected_exposed_invariant": "Validly signed grant for a different tool must be REJECT and must not execute the pending action.",
+      "reachability_path": [
+        "GuardedExecutor.process (ASK creates pending action)",
+        "GuardedExecutor.resolveApproval",
+        "pending lookup by grant (session_id, request_id)",
+        "ApprovalGrantVerifier.verifyV2 with trusted context from the pending action",
+        "tool binding check"
+      ],
+      "witness_families": [
+        "approval_tool_binding"
+      ],
+      "exposed_reason_classes": [
+        "APPROVAL_TOOL_MISMATCH"
+      ],
+      "patch_sha256": "89e5aae210bf522201bdfac7216d334bb311d9ec03dc8ed6459ef86bbfa5e26d",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M07-approval-approver-binding-bypass",
+      "family": "approval_approver_binding",
+      "evaluation_boundary": "runtime",
+      "description": "ApprovalGrantVerifier.verifyV2 no longer compares the approver claim with the pending action's configured approver.",
+      "target_file": "src/approval-verifier.ts",
+      "target_function": "ApprovalGrantVerifier.verifyV2",
+      "target_invariant": "Only the configured approver claim can resolve a pending action.",
+      "expected_exposed_invariant": "Validly signed grant naming another approver must be REJECT.",
+      "reachability_path": [
+        "GuardedExecutor.process (ASK creates pending action)",
+        "GuardedExecutor.resolveApproval",
+        "pending lookup by grant (session_id, request_id)",
+        "ApprovalGrantVerifier.verifyV2 with trusted context from the pending action",
+        "approver binding check"
+      ],
+      "witness_families": [
+        "approval_approver_binding"
+      ],
+      "exposed_reason_classes": [
+        "APPROVER_MISMATCH"
+      ],
+      "patch_sha256": "92c6ea86a70f51a00eea25c908eb5b80b60bf0d232048040098e112b9239fbbc",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M08-approval-pending-timeout-bypass",
+      "family": "approval_pending_timeout",
+      "evaluation_boundary": "runtime",
+      "description": "GuardedExecutor.resolveApproval no longer expires pending actions after ask_details.timeout_seconds.",
+      "target_file": "src/guarded-executor.ts",
+      "target_function": "GuardedExecutor.resolveApproval",
+      "target_invariant": "A pending action cannot be approved after its timeout.",
+      "expected_exposed_invariant": "Approval after the pending timeout must be REJECT and must not execute.",
+      "reachability_path": [
+        "GuardedExecutor.process (ASK creates pending action at clock t0)",
+        "evaluation clock advanced past timeout",
+        "GuardedExecutor.resolveApproval",
+        "elapsed > timeout check"
+      ],
+      "witness_families": [
+        "approval_pending_timeout"
+      ],
+      "exposed_reason_classes": [
+        "APPROVAL_EXPIRED"
+      ],
+      "patch_sha256": "368589405ba8d7b865cc2a8c3de6ab48cad4764099ece280a23ce3e822bc8120",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M09-approval-issued-before-ask-bypass",
+      "family": "approval_issued_before_ask",
+      "evaluation_boundary": "runtime",
+      "description": "GuardedExecutor.resolveApproval no longer rejects grants with issued_at before the ASK was created.",
+      "target_file": "src/guarded-executor.ts",
+      "target_function": "GuardedExecutor.resolveApproval",
+      "target_invariant": "An approval cannot predate the decision it approves.",
+      "expected_exposed_invariant": "Grant with issued_at < ASK creation must be REJECT.",
+      "reachability_path": [
+        "GuardedExecutor.process (ASK creates pending action)",
+        "GuardedExecutor.resolveApproval",
+        "issued_at >= createdAtMs check"
+      ],
+      "witness_families": [
+        "approval_issued_before_ask"
+      ],
+      "exposed_reason_classes": [
+        "APPROVAL_BEFORE_ASK"
+      ],
+      "patch_sha256": "45178e84c841c41f347bb3dd009fc6ca31abbbb4674d0cacbec77d6205677042",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M10-approval-future-skew-bypass",
+      "family": "approval_future_skew",
+      "evaluation_boundary": "runtime",
+      "description": "GuardedExecutor.resolveApproval no longer rejects grants issued too far in the future.",
+      "target_file": "src/guarded-executor.ts",
+      "target_function": "GuardedExecutor.resolveApproval",
+      "target_invariant": "Approval issued_at may not exceed now + approvalFutureSkewMs.",
+      "expected_exposed_invariant": "Grant with excessive future issued_at must be REJECT.",
+      "reachability_path": [
+        "GuardedExecutor.process (ASK creates pending action)",
+        "GuardedExecutor.resolveApproval",
+        "issued_at <= now + skew check"
+      ],
+      "witness_families": [
+        "approval_future_skew"
+      ],
+      "exposed_reason_classes": [
+        "APPROVAL_FUTURE_SKEW"
+      ],
+      "patch_sha256": "65ce72d12c9bff8b73b287491aec05a3fbbcbe661e793b4809d631ee41c7f1b9",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M11-replay-duplicate-bypass",
+      "family": "replay_duplicate_request",
+      "evaluation_boundary": "runtime",
+      "description": "ReplayGuard.check no longer rejects a duplicate request_id within a session.",
+      "target_file": "src/replay-guard.ts",
+      "target_function": "ReplayGuard.check",
+      "target_invariant": "A request_id is accepted at most once per session.",
+      "expected_exposed_invariant": "Duplicate request in the same session must be DENY (REPLAY_DETECTED) and must not execute again.",
+      "reachability_path": [
+        "GuardedExecutor.process",
+        "ReplayGuard.check",
+        "session-scoped duplicate check"
+      ],
+      "witness_families": [
+        "replay_duplicate_request",
+        "cross_session_isolation"
+      ],
+      "exposed_reason_classes": [
+        "REPLAY_DETECTED"
+      ],
+      "patch_sha256": "5f003b1f24ce2b3d305af68f2813680d0c09c2c96c8c2a0782aee16db1d826b9",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M12-timestamp-freshness-bypass",
+      "family": "timestamp_freshness",
+      "evaluation_boundary": "runtime",
+      "description": "ReplayGuard.check no longer rejects timestamps outside the skew window.",
+      "target_file": "src/replay-guard.ts",
+      "target_function": "ReplayGuard.check",
+      "target_invariant": "Requests outside the freshness window are rejected.",
+      "expected_exposed_invariant": "Stale or future-skewed request must be DENY (TIMESTAMP_OUT_OF_WINDOW).",
+      "reachability_path": [
+        "GuardedExecutor.process",
+        "ReplayGuard.check",
+        "skew window check"
+      ],
+      "witness_families": [
+        "timestamp_freshness"
+      ],
+      "exposed_reason_classes": [
+        "TIMESTAMP_OUT_OF_WINDOW"
+      ],
+      "patch_sha256": "b6d064cecbe38cd1eab81fa43e43ecd18a909e47201765e04647fe63fb2548b7",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M13-result-withhold-bypass",
+      "family": "result_gating",
+      "evaluation_boundary": "runtime",
+      "description": "GuardedExecutor ignores a Result Guardian DENY and delivers the raw tool output.",
+      "target_file": "src/guarded-executor.ts",
+      "target_function": "GuardedExecutor.processResultRequest",
+      "target_invariant": "Result-policy DENY withholds the raw output.",
+      "expected_exposed_invariant": "Restricted output must be WITHHOLD, never DELIVER.",
+      "reachability_path": [
+        "GuardedExecutor.process (ALLOW) or GuardedExecutor.resolveApproval (EXECUTE)",
+        "executeAndProcessResult",
+        "harness tool double returns corpus-defined restricted output",
+        "processResultRequest",
+        "Result Guardian deny branch"
+      ],
+      "witness_families": [
+        "result_gating"
+      ],
+      "exposed_reason_classes": [
+        "RESULT_POLICY_WITHHOLD"
+      ],
+      "patch_sha256": "21d56ca4d4afb9eec67d92950f5c8a88bbe5c8933801d7979e9d3d1dd6b6f55d",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M14-approval-consumption-deferred-past-async-boundary",
+      "family": "concurrent_authority_isolation",
+      "evaluation_boundary": "runtime",
+      "description": "Pending approval authority (pendingActions.delete(key)) is consumed only after the asynchronous execution path instead of synchronously before the first await.",
+      "target_file": "src/guarded-executor.ts",
+      "target_function": "GuardedExecutor.resolveApproval",
+      "target_invariant": "Duplicate concurrent approvals consume the pending authority at most once (consumption happens synchronously before the first asynchronous execution boundary).",
+      "expected_exposed_invariant": "Two or more concurrent duplicate approvals execute the pending action exactly once.",
+      "reachability_path": [
+        "GuardedExecutor.process (ASK creates pending action)",
+        "N concurrent GuardedExecutor.resolveApproval calls started without awaiting",
+        "each passes pending lookup + verifyV2 synchronously",
+        "pendingActions.delete(key) placement relative to await executeAndProcessResult"
+      ],
+      "witness_families": [
+        "concurrent_authority_isolation"
+      ],
+      "exposed_reason_classes": [
+        "PENDING_ACTION_NOT_FOUND"
+      ],
+      "patch_sha256": "7a12caf34375eadc3429cd8c376384174203caf99222f2708223ca1047deb1a4",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M15-verifier-request-binding-bypass",
+      "family": "approval_verifier_request_binding",
+      "evaluation_boundary": "component",
+      "description": "ApprovalGrantVerifier.verifyV2 no longer compares grant.request_id with the trusted expected request.",
+      "target_file": "src/approval-verifier.ts",
+      "target_function": "ApprovalGrantVerifier.verifyV2",
+      "target_invariant": "verifyV2 rejects a grant whose request_id differs from the trusted context.",
+      "expected_exposed_invariant": "verifyV2(grant for request A, context for request B) must REJECT.",
+      "reachability_path": [
+        "ApprovalGrantVerifier.verifyV2 (direct component call)",
+        "request_id binding check"
+      ],
+      "runtime_unreachability": "GuardedExecutor.resolveApproval looks up the pending action by `${grant.session_id}:${grant.request_id}` and builds the trusted context from that pending action, whose ids were stored under the same key. Pending ids are schema-validated UUIDs (no ':'), so no (session_id, request_id) pair different from the pending one can produce the same key; the verifier's request comparison therefore always sees equal values on the public runtime path.",
+      "witness_families": [
+        "approval_verifier_request_binding"
+      ],
+      "exposed_reason_classes": [
+        "APPROVAL_REQUEST_MISMATCH"
+      ],
+      "patch_sha256": "e0f1dd2da74ba4f838f88e0b404362db7a9b0a6ac92315a3888f19893b323ebd",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M16-verifier-session-binding-bypass",
+      "family": "approval_verifier_session_binding",
+      "evaluation_boundary": "component",
+      "description": "ApprovalGrantVerifier.verifyV2 no longer compares grant.session_id with the trusted expected session.",
+      "target_file": "src/approval-verifier.ts",
+      "target_function": "ApprovalGrantVerifier.verifyV2",
+      "target_invariant": "verifyV2 rejects a grant whose session_id differs from the trusted context.",
+      "expected_exposed_invariant": "verifyV2(grant for session A, context for session B) must REJECT.",
+      "reachability_path": [
+        "ApprovalGrantVerifier.verifyV2 (direct component call)",
+        "session_id binding check"
+      ],
+      "runtime_unreachability": "Same as M15: the pending lookup key embeds grant.session_id, and the trusted expected session is read from the pending action stored under that key, so the runtime path cannot present differing session values to verifyV2.",
+      "witness_families": [
+        "approval_verifier_session_binding"
+      ],
+      "exposed_reason_classes": [
+        "APPROVAL_SESSION_MISMATCH"
+      ],
+      "patch_sha256": "9ed9cddd9d5c040bbaef192e0bba540b64ce74a04ba25dca77434b4327a1cb67",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    },
+    {
+      "mutation_id": "M17-execution-permit-reuse-bypass",
+      "family": "execution_permit_single_use",
+      "evaluation_boundary": "component",
+      "description": "ExecutionGate.execute no longer removes a permit from #activePermits when it is used.",
+      "target_file": "src/execution-gate.ts",
+      "target_function": "ExecutionGate.execute",
+      "target_invariant": "An execution permit authorises at most one execution.",
+      "expected_exposed_invariant": "Presenting the same minted permit twice executes the tool at most once.",
+      "reachability_path": [
+        "ExecutionGate.mintPermit (harness-held authority symbol)",
+        "ExecutionGate.execute x N with the same permit",
+        "#activePermits.delete(permit)"
+      ],
+      "runtime_unreachability": "GuardedExecutor mints a fresh permit inside executeAndProcessResult for every execution, passes it to ExecutionGate.execute exactly once and never exposes the permit or the private #permitAuthority symbol through its public API, so no public runtime call can present a used permit again.",
+      "witness_families": [
+        "execution_permit_single_use"
+      ],
+      "exposed_reason_classes": [
+        "PERMIT_REUSE_BLOCKED"
+      ],
+      "patch_sha256": "0960579ae2f98cb9501e7f9cae7b3f2a9789593cd5cffa43e710a796c7273637",
+      "baseline_commit": "403d31593a0d57187df3f5e1ef3df6127baaefb9"
+    }
+  ]
+}

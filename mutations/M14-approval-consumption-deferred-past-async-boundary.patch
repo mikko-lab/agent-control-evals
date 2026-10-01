@@ -1,0 +1,28 @@
+diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
+index a357b87..60f8c9b 100644
+--- a/src/guarded-executor.ts
++++ b/src/guarded-executor.ts
+@@ -495,10 +495,10 @@ export class GuardedExecutor {
+       throw new Error("Approval grant rejected: pending action has expired");
+     }
+ 
+-    // Grant is valid and not expired. Consume pending state.
+-    this.pendingActions.delete(key);
++    // MUTANT: pending state is consumed only after the asynchronous execution path.
+ 
+     if (grant.decision === "reject") {
++      this.pendingActions.delete(key);
+       this.audit.record(grant.request_id, "human_rejection", {
+         approver_type: grant.approver.type,
+         approver_id: grant.approver.id,
+@@ -522,7 +522,9 @@ export class GuardedExecutor {
+       session_id: grant.session_id,
+       request_id: grant.request_id
+     });
+-    return this.executeAndProcessResult(pending.request, pending.response);
++    const executed = await this.executeAndProcessResult(pending.request, pending.response);
++    this.pendingActions.delete(key);
++    return executed;
+   }
+ 
+   /**
