@@ -38,7 +38,10 @@ async function runCase(c: CaseForAdapter, sut: ReturnType<typeof loadSut>, keys:
     return { ...base, status: "ok", observations: r.observations, raw_sut_evidence: r.evidence };
   } catch (e) {
     const err = e as Error;
-    return { ...base, status: "adapter_error", observations: null, raw_sut_evidence: null, error: { message: `${err?.name ?? "Error"}: ${err?.message ?? String(e)}` } };
+    // Observations are withheld (the case is not evaluated), but everything observed before the error,
+    // including tool-double executions, is kept as raw evidence next to the error.
+    const partial = (err as Error & { partial?: unknown })?.partial ?? null;
+    return { ...base, status: "adapter_error", observations: null, raw_sut_evidence: { partial }, error: { message: `${err?.name ?? "Error"}: ${err?.message ?? String(e)}` } };
   }
 }
 

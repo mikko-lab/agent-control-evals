@@ -31,6 +31,25 @@ export interface ObservedAssertion {
   reason_class: ReasonClass;
   sut_reason_code: string;
   enforcement_stage: string;
+  /**
+   * What the SUT itself reported for this stage (return value / thrown error), recorded only when it
+   * disagrees with the effect observed through the harness tool doubles. When set, `outcome` is the
+   * effect-based outcome and `decision_effect_mismatch` is true.
+   */
+  sut_decision?: string;
+  decision_effect_mismatch?: boolean;
+}
+
+/** A disagreement between the SUT's reported decision and the observed tool-execution effect. */
+export interface DecisionEffectMismatch {
+  step: number;
+  attempt?: number;
+  stage: "request" | "approval";
+  /** Session-qualified request label whose execution count disagrees, or null for unattributable executions. */
+  key: string | null;
+  sut_decision: string;
+  decided_executions: number;
+  observed_executions: number;
 }
 
 export interface Observations {
@@ -41,6 +60,8 @@ export interface Observations {
   unattributed_executions: number;
   /** Component permit cases: observed number of accepted permit reuses. */
   permit_reuses_accepted?: number;
+  /** Decision/effect disagreements (adapter >= 0.2.0). The effect, not the decision, determines `outcome`. */
+  decision_effect_mismatches?: DecisionEffectMismatch[];
 }
 
 export interface CaseResult {
@@ -104,6 +125,17 @@ export function validateCaseResult(x: unknown, expectedCaseId: string, expectedB
     if (!STAGE_OUTCOMES[stage].includes(a.outcome as string)) throw new ProtocolError(`observed assertion: outcome ${String(a.outcome)} invalid for stage ${stage}`);
     if (!isReasonClass(a.reason_class)) throw new ProtocolError(`observed assertion: unknown reason_class ${String(a.reason_class)}`);
     if (typeof a.sut_reason_code !== "string" || typeof a.enforcement_stage !== "string") throw new ProtocolError("observed assertion: sut_reason_code/enforcement_stage required");
+    if (a.sut_decision !== undefined && typeof a.sut_decision !== "string") throw new ProtocolError("observed assertion: sut_decision must be a string");
+    if (a.decision_effect_mismatch !== undefined && typeof a.decision_effect_mismatch !== "boolean") throw new ProtocolError("observed assertion: decision_effect_mismatch must be boolean");
+  }
+  if (o.decision_effect_mismatches !== undefined) {
+    if (!Array.isArray(o.decision_effect_mismatches)) throw new ProtocolError("decision_effect_mismatches must be an array");
+    for (const m of o.decision_effect_mismatches) {
+      if (!isObj(m) || !Number.isSafeInteger(m.step) || (m.stage !== "request" && m.stage !== "approval") || typeof m.sut_decision !== "string" ||
+        !Number.isSafeInteger(m.decided_executions) || !Number.isSafeInteger(m.observed_executions) || (m.key !== null && typeof m.key !== "string")) {
+        throw new ProtocolError("malformed decision_effect_mismatches entry");
+      }
+    }
   }
   if (!isObj(o.executions)) throw new ProtocolError("observations.executions must be an object");
   for (const v of Object.values(o.executions)) if (!Number.isSafeInteger(v) || (v as number) < 0) throw new ProtocolError("executions values must be non-negative integers");

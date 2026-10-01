@@ -31,7 +31,22 @@
         "outcome": { "enum": ["ALLOW", "ASK", "DENY", "EXECUTE", "REJECT", "DELIVER", "WITHHOLD", "ACCEPT", "EXECUTE_ONCE", "REUSE_BLOCKED", "REUSE_ACCEPTED"] },
         "reason_class": { "type": "string", "pattern": "^[A-Z_]+$" },
         "sut_reason_code": { "type": "string" },
-        "enforcement_stage": { "type": "string" }
+        "enforcement_stage": { "type": "string" },
+        "sut_decision": { "type": "string", "description": "The SUT's own report, present only when it disagrees with the observed effect (adapter >= 0.2.0)." },
+        "decision_effect_mismatch": { "type": "boolean" }
+      }
+    },
+    "decisionEffectMismatch": {
+      "type": "object",
+      "required": ["step", "stage", "key", "sut_decision", "decided_executions", "observed_executions"],
+      "properties": {
+        "step": { "type": "integer", "minimum": 0 },
+        "attempt": { "type": "integer", "minimum": 0 },
+        "stage": { "enum": ["request", "approval"] },
+        "key": { "type": ["string", "null"] },
+        "sut_decision": { "type": "string" },
+        "decided_executions": { "type": "integer", "minimum": 0 },
+        "observed_executions": { "type": "integer", "minimum": 0 }
       }
     },
     "caseResult": {
@@ -53,7 +68,8 @@
                 "assertions": { "type": "array", "items": { "$ref": "#/$defs/observedAssertion" } },
                 "executions": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
                 "unattributed_executions": { "type": "integer", "minimum": 0 },
-                "permit_reuses_accepted": { "type": "integer", "minimum": 0 }
+                "permit_reuses_accepted": { "type": "integer", "minimum": 0 },
+                "decision_effect_mismatches": { "type": "array", "items": { "$ref": "#/$defs/decisionEffectMismatch" } }
               }
             }
           ]

@@ -107,3 +107,34 @@ test("concurrent steps are compared as multisets; duplicate execution is an inva
   assert.equal(v.invariants.duplicate_execution_count, 1);
   assert.ok(v.mismatches.some((m) => m.kind === "false_allow"));
 });
+
+test("A1: an effect-based ALLOW that contradicts the SUT's DENY is a false allow, a bypass and a decision/effect mismatch", () => {
+  const v = compareCase(mkCase({}), {
+    assertions: [
+      { step: 0, stage: "request", outcome: "ALLOW", reason_class: "DECISION_EFFECT_MISMATCH", sut_reason_code: "x", enforcement_stage: "effect", sut_decision: "DENY:CAPABILITY_AGENT_MISMATCH", decision_effect_mismatch: true },
+      { step: 0, stage: "result", outcome: "WITHHOLD", reason_class: "DECISION_EFFECT_MISMATCH", sut_reason_code: "x", enforcement_stage: "effect", sut_decision: "DENY:CAPABILITY_AGENT_MISMATCH", decision_effect_mismatch: true },
+    ],
+    executions: { "s1/q1": 1 },
+    unattributed_executions: 0,
+    decision_effect_mismatches: [{ step: 0, stage: "request", key: "s1/q1", sut_decision: "DENY:CAPABILITY_AGENT_MISMATCH", decided_executions: 0, observed_executions: 1 }],
+  });
+  const kinds = v.mismatches.map((m) => m.kind);
+  assert.ok(kinds.includes("false_allow"));
+  assert.ok(kinds.includes("decision_effect_mismatch"));
+  assert.ok(kinds.includes("invariant_violation"));
+  assert.equal(v.bypass, true);
+  assert.equal(v.invariants.decision_effect_mismatch_count, 1);
+});
+
+test("A1: a claimed-but-unobserved execution kept as REJECT is evidence only (outcome still matches)", () => {
+  const c = mkCase({ stage: "approval", outcome: "REJECT", acceptable_reason_classes: ["APPROVAL_TOOL_MISMATCH"], assertions: [{ step: 0, stage: "approval", outcome: "REJECT", acceptable_reason_classes: ["APPROVAL_TOOL_MISMATCH"] }] });
+  const v = compareCase(c, {
+    assertions: [{ step: 0, stage: "approval", outcome: "REJECT", reason_class: "DECISION_EFFECT_MISMATCH", sut_reason_code: "x", enforcement_stage: "effect", sut_decision: "EXECUTE:human_approval", decision_effect_mismatch: true }],
+    executions: { "s1/q1": 0 },
+    unattributed_executions: 0,
+    decision_effect_mismatches: [{ step: 0, stage: "approval", key: "s1/q1", sut_decision: "EXECUTE", decided_executions: 1, observed_executions: 0 }],
+  });
+  assert.equal(v.outcome_match, true);
+  assert.equal(v.exact_match, false);
+  assert.equal(v.bypass, false);
+});

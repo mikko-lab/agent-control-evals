@@ -36,7 +36,8 @@ Adapter to harness, with exactly one line per `hello` and per `case`:
 
 | Situation | Classification | Effect |
 |---|---|---|
-| Adapter returns `status: "adapter_error"` | adapter error | The case is not evaluated and enters no metric. The run is invalid (exit 2). |
+| Adapter returns `status: "adapter_error"` | adapter error | The case is not evaluated and enters no metric. The run is invalid (exit 2). Everything observed before the error, including tool-double executions, stays in `raw_sut_evidence.partial` and is counted in the error record (`observed_executions`). |
+| The SUT's reported decision and the observed execution effect disagree | **observation**, not an error (adapter ≥ 0.2.0) | The outcome follows the effect. The SUT's report is kept in `sut_decision`, and the disagreement is listed in `observations.decision_effect_mismatches`. |
 | Invalid JSON, wrong `case_id`, unknown stage, outcome or reason class, missing field | protocol error | The run stops and is invalid. |
 | Adapter exits, hangs past the per-case timeout, or answers unsolicited | protocol or harness error | The run stops and is invalid. |
 | `hello` with the wrong protocol version, SUT commit or worktree state | harness error | No case is sent. |
@@ -51,7 +52,12 @@ Adapter and harness errors **never** become `DENY`, `REJECT` or `WITHHOLD`, and 
 - **Runtime cases** call only `GuardedExecutor.process`, `GuardedExecutor.resolveApproval` and `GuardedExecutor.clearSession`. Each case gets fresh stateful SUT components (replay guard, correlation store, audit collector, executor). The schema validator is stateless and is shared.
 - **Component cases** call `ApprovalGrantVerifier.verifyV2` directly with a trusted context, or `ExecutionGate.mintPermit` and `execute` with a harness-held authority symbol.
 - **Materialisation:** labels become deterministic version-4-shaped UUIDs derived from SHA-256 of the case id, namespace and label. Request envelopes are signed with the SUT's `SignatureService` (HMAC-SHA256). Capabilities and approval grants are Ed25519-signed with harness keys generated per adapter process. A "tampered" value is rewritten after signing.
-- **Normalisation:** an execution is observed through the harness tool doubles, not inferred from return values. A rejection that happens after the tool ran (correlation failure or result-path replay) is therefore EXECUTE or ALLOW plus a result WITHHOLD, never a REJECT or DENY.
+- **Normalisation (adapter 0.2.0): decision and effect are kept apart.** The SUT's report (return value or thrown error) is the *decision*. Executions observed through the harness tool doubles, or through the SUT's fallback-tool counter for tools outside the harness registry, are the *effect*. Outcomes about execution follow the effect:
+  - Request ALLOW means this attempt's execution was observed.
+  - For approval steps, each target request's observed executions are reconciled with the attempts' decisions (`reconcileApprovals` in `src/adapter/acs/runtime.ts`). Surplus executions turn REJECT-decided attempts into EXECUTE. Claimed executions with no observed effect turn into REJECT, preferring claims that were inferred from exceptions.
+  - Whenever the effect overrides the decision, the observation carries `sut_decision` and `decision_effect_mismatch: true`, and an entry is added to `decision_effect_mismatches`. Executions of requests no attempt targeted, and fallback-tool executions, are recorded there too.
+  - A rejection that follows an observed execution (correlation failure or result-path replay) is ALLOW or EXECUTE plus a result WITHHOLD.
+  - **An observed execution is never turned into an `AdapterError`.** `AdapterError` remains only for SUT behaviour that cannot be classified *and* shows no unexplained execution.
 
 ### Clock model
 

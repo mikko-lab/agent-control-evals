@@ -72,7 +72,7 @@ test("real SUT: concurrent cases on one registry are refused rather than allowed
   assert.ok(after.observations.assertions.length > 0, "registry usable again after the refused case");
 });
 
-test("real SUT: the adapter never maps an unclassifiable SUT exception to DENY", { skip }, async () => {
+test("real SUT: the adapter never maps an unclassifiable SUT exception (without execution) to DENY", { skip }, async () => {
   const sut = loadSut(BUILD!);
   const keys = makeKeys();
   const c = forAdapter(smoke.find((x) => x.variant === "positive_agent_match_allow")!);
@@ -80,15 +80,99 @@ test("real SUT: the adapter never maps an unclassifiable SUT exception to DENY",
   await assert.rejects(() => runRuntimeCase(c, broken as typeof sut, keys), /unclassified SUT exception/);
 });
 
-test("real SUT: a post-execution-looking exception without an actual execution is an adapter error, not EXECUTE", { skip }, async () => {
+// ---- A1: decision vs effect -------------------------------------------------------------------
+
+type AnyExec = { process(env: unknown): Promise<unknown>; resolveApproval(g: unknown): Promise<unknown> };
+/** Run `fn` as the SUT's tool for the request carried by an envelope (simulates an execution the SUT does not report). */
+async function runTool(sut: ReturnType<typeof loadSut>, env: { params: { payload: { tool: { name: string }; arguments: Record<string, { value: unknown }> } } }) {
+  const p = env.params.payload;
+  await sut.tools[p.tool.name]({ ace_trace: p.arguments.ace_trace.value });
+}
+
+function withExecutor(sut: ReturnType<typeof loadSut>, patch: (Real: new (...a: unknown[]) => AnyExec) => unknown) {
+  return { ...sut, GuardedExecutor: patch(sut.GuardedExecutor as new (...a: unknown[]) => AnyExec) } as typeof sut;
+}
+
+test("A1: tool executed but SUT reports DENY -> ALLOW (effect) with sut_decision kept, not an AdapterError", { skip }, async () => {
   const sut = loadSut(BUILD!);
-  const keys = makeKeys();
+  const c = forAdapter(smoke.find((x) => x.variant === "agent_mismatch_other_agent")!);
+  const fake = withExecutor(sut, (Real) => class extends Real {
+    override async process(env: unknown): Promise<never> {
+      await runTool(sut, env as never);
+      throw new Error("Execution blocked (deny): simulated");
+    }
+  });
+  const r = await runRuntimeCase(c, fake, makeKeys());
+  const last = r.observations.assertions.filter((a) => a.stage === "request").at(-1)!;
+  assert.equal(last.outcome, "ALLOW");
+  assert.equal(last.decision_effect_mismatch, true);
+  assert.match(last.sut_decision!, /^(DENY:|unclassified:)/);
+  assert.ok((r.observations.decision_effect_mismatches ?? []).some((m) => m.observed_executions === 1 && m.decided_executions === 0));
+  const total = Object.values(r.observations.executions).reduce((a, b) => a + b, 0);
+  assert.ok(total >= 1);
+});
+
+test("A1: SUT returns pending (ASK) but the tool ran -> ALLOW with sut_decision ASK", { skip }, async () => {
+  const sut = loadSut(BUILD!);
+  const c = forAdapter(smoke.find((x) => x.variant === "positive_agent_match_ask")!);
+  const fake = withExecutor(sut, (Real) => class extends Real {
+    override async process(env: unknown): Promise<unknown> {
+      await runTool(sut, env as never);
+      return { status: "pending" };
+    }
+  });
+  const r = await runRuntimeCase(c, fake, makeKeys());
+  const last = r.observations.assertions.filter((a) => a.stage === "request").at(-1)!;
+  assert.equal(last.outcome, "ALLOW");
+  assert.equal(last.sut_decision, "ASK");
+});
+
+test("A1: approval rejected by the SUT but the pending tool ran -> EXECUTE with sut_decision REJECT", { skip }, async () => {
+  const sut = loadSut(BUILD!);
+  const c = forAdapter(smoke.find((x) => x.variant === "grant_for_read_record")!);
+  let pendingEnv: unknown = null;
+  const fake = withExecutor(sut, (Real) => class extends Real {
+    override async process(env: unknown): Promise<unknown> {
+      pendingEnv = env;
+      return super.process(env);
+    }
+    override async resolveApproval(g: unknown): Promise<never> {
+      await runTool(sut, pendingEnv as never);
+      return super.resolveApproval(g) as Promise<never>;
+    }
+  });
+  const r = await runRuntimeCase(c, fake, makeKeys());
+  const ap = r.observations.assertions.filter((a) => a.stage === "approval").at(-1)!;
+  assert.equal(ap.outcome, "EXECUTE");
+  assert.match(ap.sut_decision!, /^REJECT:APPROVAL_TOOL_MISMATCH/);
+});
+
+test("A1: a post-execution-looking exception WITHOUT an execution is REJECT (flagged), never EXECUTE", { skip }, async () => {
+  const sut = loadSut(BUILD!);
   const c = forAdapter(smoke.find((x) => x.variant === "positive_valid_approval")!);
-  const Real = sut.GuardedExecutor;
-  const Fake = class extends Real {
-    async resolveApproval(): Promise<never> {
+  const fake = withExecutor(sut, (Real) => class extends Real {
+    override async resolveApproval(): Promise<never> {
       throw new sut.CorrelationError("simulated correlation failure without execution");
     }
-  };
-  await assert.rejects(() => runRuntimeCase(c, { ...sut, GuardedExecutor: Fake } as typeof sut, keys), /observations but 0 observed tool executions/);
+  });
+  const r = await runRuntimeCase(c, fake, makeKeys());
+  const ap = r.observations.assertions.filter((a) => a.stage === "approval").at(-1)!;
+  assert.equal(ap.outcome, "REJECT");
+  assert.equal(ap.decision_effect_mismatch, true);
+  assert.match(ap.sut_decision!, /^EXECUTE:/);
+});
+
+test("A1: unclassifiable SUT exception without execution is still an AdapterError, with partial evidence kept", { skip }, async () => {
+  const sut = loadSut(BUILD!);
+  const c = forAdapter(smoke.find((x) => x.variant === "positive_valid_approval")!);
+  const fake = withExecutor(sut, (Real) => class extends Real {
+    override async resolveApproval(): Promise<never> {
+      throw new TypeError("random failure");
+    }
+  });
+  await assert.rejects(
+    () => runRuntimeCase(c, fake, makeKeys()),
+    (e: Error & { partial?: { assertions: unknown[]; executions: Record<string, number> } }) =>
+      /unclassified SUT behaviour/.test(e.message) && Array.isArray(e.partial?.assertions) && e.partial!.assertions.length > 0,
+  );
 });
