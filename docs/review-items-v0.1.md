@@ -8,7 +8,7 @@ Line references are to commit `92452ad3c4438bcbe483a11701c47e90a230fc78`. The re
 
 | Category | Where | Mechanism |
 |---|---|---|
-| Expected SUT rejection | `src/adapter/acs/runtime.ts:189-211` (process), `:213-224` (resolveApproval); `src/adapter/acs/component.ts:62-77` (verifier), `:136-144` (gate) | Fixed table of SUT error classes, codes, exact messages and audit-reason metadata mapped to canonical reason classes. Produces DENY or REJECT observations. |
+| Expected SUT rejection | `src/adapter/acs/runtime.ts:189-211` (process), `:213-224` (resolveApproval); `src/adapter/acs/component.ts:64-77` (verifier), `:136-144` (gate) | Fixed table of SUT error classes, codes, exact messages and audit-reason metadata mapped to canonical reason classes. Produces DENY or REJECT observations. |
 | Unexpected SUT exception | `runtime.ts:210`, `:223`, `:268`; `component.ts:67`, `:143` | Throws `AdapterError`. `src/adapter/acs/main.ts:39-41` turns it into `status: "adapter_error"` with `observations: null`. `src/eval/run.ts:86-88` records an adapter error and **no verdict**, so the run becomes invalid (exit 2). `src/mutation/runner.ts:131-134`: a mutant with adapter errors and no valid witness is `invalid`, never `killed`. |
 | Adapter's own error (state or protocol) | `runtime.ts:232`, `:237`, `:244`, `:289`, `:326`, `:348`, `:401`; `tool-doubles.ts` (`ToolStateLeakError`); `src/eval/client.ts` (protocol or timeout leads to a harness or protocol error) | Same `AdapterError` path, or a harness/protocol error that stops the run. |
 | Observed execution (effect) | `src/adapter/acs/tool-doubles.ts` (log of `{tool, trace}`); `runtime.ts:416-422` (per-request `executions`, `unattributed_executions` including ACS `unknownToolMock`) | Kept as separate observation fields (`observations.executions`, `unattributed_executions`) next to the decision observations (`observations.assertions`). The comparator checks them as invariants (`src/eval/compare.ts:183-209`). |
@@ -50,7 +50,7 @@ Within a variant, the cases are seeded pseudo-random draws of the scenario param
 
 ### Finding B1: assertion-level bounds treat dependent checks as independent trials (major)
 
-`oracle_mismatch`, `false_allow` and `false_deny` use assertions as Bernoulli trials. Assertions within one scenario are strongly dependent. A request that wrongly executes produces a wrong request outcome, a wrong result outcome and often wrong later steps together. The binomial independence assumption fails, and these upper bounds are too narrow. The `false_allow` numerator can also contain events outside its denominator (`compare.ts:120`, `:153`).
+`oracle_mismatch`, `false_allow` and `false_deny` use assertions as Bernoulli trials. Assertions within one scenario are strongly dependent. A request that wrongly executes produces a wrong request outcome, a wrong result outcome and often wrong later steps together. The binomial independence assumption fails, and these upper bounds are too narrow. The `false_allow` numerator can also contain events outside its denominator (`compare.ts:120`, `:153`). If that ever made k > n, `clopperPearsonUpper` would throw (`stats.ts:37`), and report generation would fail with a harness error instead of reporting the finding. This has not happened in the committed runs (k = 0 everywhere).
 
 ### Finding B2: the case count overstates evidence breadth (major)
 
