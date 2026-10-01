@@ -1,0 +1,83 @@
+# Open review items for v0.1 (draft review)
+
+Line references are to commit `92452ad3c4438bcbe483a11701c47e90a230fc78`. The referenced files are unchanged in `012ae23` and later documentation-only commits. These items are **reported, not fixed**: each fix would change measurement semantics and needs a separate review.
+
+## A. Adapter masking
+
+### How the outcomes are distinguished today
+
+| Category | Where | Mechanism |
+|---|---|---|
+| Expected SUT rejection | `src/adapter/acs/runtime.ts:189-211` (process), `:213-224` (resolveApproval); `src/adapter/acs/component.ts:62-77` (verifier), `:136-144` (gate) | Fixed table of SUT error classes, codes, exact messages and audit-reason metadata mapped to canonical reason classes. Produces DENY or REJECT observations. |
+| Unexpected SUT exception | `runtime.ts:210`, `:223`, `:268`; `component.ts:67`, `:143` | Throws `AdapterError`. `src/adapter/acs/main.ts:39-41` turns it into `status: "adapter_error"` with `observations: null`. `src/eval/run.ts:86-88` records an adapter error and **no verdict**, so the run becomes invalid (exit 2). `src/mutation/runner.ts:131-134`: a mutant with adapter errors and no valid witness is `invalid`, never `killed`. |
+| Adapter's own error (state or protocol) | `runtime.ts:232`, `:237`, `:244`, `:289`, `:326`, `:348`, `:401`; `tool-doubles.ts` (`ToolStateLeakError`); `src/eval/client.ts` (protocol or timeout leads to a harness or protocol error) | Same `AdapterError` path, or a harness/protocol error that stops the run. |
+| Observed execution (effect) | `src/adapter/acs/tool-doubles.ts` (log of `{tool, trace}`); `runtime.ts:416-422` (per-request `executions`, `unattributed_executions` including ACS `unknownToolMock`) | Kept as separate observation fields (`observations.executions`, `unattributed_executions`) next to the decision observations (`observations.assertions`). The comparator checks them as invariants (`src/eval/compare.ts:183-209`). |
+| Observed result release | `runtime.ts:226-245` | Derived from the SUT's returned result (`exit_status` and the withheld representation). There is no independent effect channel for delivery. |
+
+### Finding A1: an observed unauthorised execution can be turned into `AdapterError` (latent, major)
+
+In three places, an execution observed through the tool doubles that **contradicts** the SUT's reported decision is converted into an `AdapterError` instead of being reported as an unauthorised execution:
+
+1. `runtime.ts:266-268`: the tool ran during `process()`, then the SUT threw an exception that is not a known post-execution class (for example `Execution blocked (deny)`). This is effectively "DENY, but executed".
+2. `runtime.ts:279`: `process()` returned `pending` (ASK), but the tool already ran. That is execution without approval.
+3. `runtime.ts:403-411`: the step-level consistency check. Any mismatch between ALLOW/EXECUTE observations and observed executions in a step raises an error, including a REJECT or DENY while the tool ran.
+
+Consequences:
+
+- The case gets `observations: null` (`main.ts:41`), so the tool-double evidence of the unauthorised execution is **discarded** rather than kept next to the decision.
+- It is **not** a silent pass. A baseline adapter error invalidates the run (exit 2), and a mutant whose only deviations are such adapter errors is `invalid` (mutation gate failure), not `survived` or `killed`.
+- It **is** a misclassification. A real control bypass would be reported as an adapter/infrastructure problem instead of a false allow or bypass finding. A mutant that causes a genuine bypass of this shape could not be credited as killed.
+- **Effect on the committed results: none observed.** Both committed reports have 0 baseline adapter errors and 0 adapter errors in every mutant run (`mutation_sensitivity.by_mutant[*].mutant_adapter_errors = 0`), so none of these paths was taken.
+
+Related inaccuracy in the documentation: `docs/adapter-protocol-v1.md` says executions are "observed through the harness tool doubles, not inferred from return values". That holds for request ALLOW (`runtime.ts:284`). Approval EXECUTE and REJECT (`runtime.ts:308-331`) are classified from the SUT's return or throw, and are only cross-checked against the doubles by the step check in (3).
+
+Proposed direction (**not applied**): record the decision (SUT-reported) and the effect (double log, per attempt where attributable) as separate fields for every step. A restrictive decision together with an observed execution becomes a `decision_effect_mismatch` observation, which the comparator scores as a false allow / bypass with the evidence kept. Reserve `AdapterError` for behaviour that is unclassifiable *and* shows no unauthorised effect.
+
+## B. Statistical experimental unit
+
+Code: `src/eval/metrics.ts:79-117` (counting), `:119-130` (bounds), `src/eval/stats.ts:36-71`; allocation `src/corpus/generate.ts:28-46`.
+
+| Metric (bound) | k counts | n counts | Unit | Dependent checks within a scenario | Stratification |
+|---|---|---|---|---|---|
+| `oracle_mismatch` (`metrics.ts:124`) | assertions not exactly matched | all evaluated assertions (`v.checks`) | **assertion** | Several assertions per scenario (request plus result, setup steps, approval steps, concurrent multisets) are counted as separate trials. **Not independent.** | Pooled over the strata. |
+| `false_allow` (`metrics.ts:125`) | `false_allow` mismatches (`compare.ts:78`, plus unexpected permissive observations at `compare.ts:120` and `:153`) | assertions with a restrictive *expected* outcome | **assertion** | Same problem. In addition, k can include observations **without** a corresponding expected assertion, which are not part of n, so k is not a count of failures among the n units. | Pooled. |
+| `false_deny` (`metrics.ts:126`) | `false_deny` mismatches | assertions with a permissive expected outcome, **including setup preconditions** inside adversarial scenarios | **assertion** | Dependent, and n mixes primary and setup checks. | Pooled. |
+| `bypass` (`metrics.ts:127`) | adversarial scenarios with a false allow or an authority/data invariant violation (`compare.ts:207-209`) | adversarial scenarios | **scenario (case)** | One verdict per scenario; dependent checks are collapsed. | Pooled; equal allocation per family, then per variant. |
+
+### When the binomial model holds
+
+Within a variant, the cases are seeded pseudo-random draws of the scenario parameters, so they are approximately i.i.d. draws from that variant's parameter distribution. The SUT is deterministic. With fixed equal allocation, a pooled k/n per family is a binomial proportion for "a scenario drawn from the declared, equally weighted variant mixture" (up to ±1 rounding of the allocation). The `bypass` bound is valid **for that synthetic mixture only**.
+
+### Finding B1: assertion-level bounds treat dependent checks as independent trials (major)
+
+`oracle_mismatch`, `false_allow` and `false_deny` use assertions as Bernoulli trials. Assertions within one scenario are strongly dependent. A request that wrongly executes produces a wrong request outcome, a wrong result outcome and often wrong later steps together. The binomial independence assumption fails, and these upper bounds are too narrow. The `false_allow` numerator can also contain events outside its denominator (`compare.ts:120`, `:153`).
+
+### Finding B2: the case count overstates evidence breadth (major)
+
+The SUT's control logic is mostly a deterministic function of the variant's *structure*. The random parameters rarely change the outcome, so a defect usually affects all or none of a variant's cases. The number of cases mainly measures replication; the breadth of evidence is closer to the number of variants (102 runtime, of which 70 adversarial; 17 component, of which 14 adversarial). A bound such as a 0.03 % upper bound over 8 500 runtime cases is mathematically valid for the mixture but must not be read as evidence about situations outside the 102 designed variants. The disclaimer does not fix this.
+
+Proposed direction (**not applied**):
+
+- Compute bounds only on scenario-level units (one Bernoulli per case, defined on the primary assertion plus invariants), per variant and per family.
+- Report variant-level coverage, meaning the number of variants with at least one failure, as the primary breadth statistic, with no binomial bound attached.
+- Drop the assertion-level bounds, or relabel them as descriptive counts.
+
+## C. Clock boundary
+
+### Mechanism
+
+- The harness clock is frozen per case: `src/adapter/acs/runtime.ts:340-341` (`base = Date.now()` at case start, `offset` advanced only by `advance_clock`, `:394`). It is injected into `ReplayGuard`, `GuardedExecutor` and `CapabilityGrantVerifier` (`:355-363`).
+- The pinned SUT stamps its internally generated result request with the wall clock: `acs-guardrail-demo@403d315 src/guarded-executor.ts:391` (`timestamp: new Date().toISOString()`). It then checks it with the replay guard, which uses the injected clock (`src/guarded-executor.ts:330`, `src/replay-guard.ts:147-148`, window ±300 000 ms).
+- Hence, for any execution, the result request's delta is approximately `-(virtual offset) - (real ms elapsed in the case)`. If the virtual offset exceeds about 300 s, the result path fails with `TIMESTAMP_OUT_OF_WINDOW` after the tool already ran. That is an artefact of the injected clock, not of production behaviour, where both clocks coincide.
+- Mitigation: `src/spec/declared-policy.ts:40` `MAX_POSITIVE_CLOCK_ADVANCE_MS = 240_000`, used by `src/corpus/builders.ts:105-106` for every scenario that must still execute after a clock advance (`families-runtime-approval.ts:184`, `:191`; `families-runtime-other.ts:44`). The 60 s margin absorbs real elapsed time within a case.
+
+### Time scenarios not measured because of this
+
+1. A successful approval with elapsed time in (240 s, 300 s], including the inclusive boundary of exactly 300 000 ms. Only the rejecting side, timeout plus 1 ms or more, is measured.
+2. Any execution or result delivery after a cumulative virtual advance above 240 s within a scenario. Examples are long-lived pending actions approved late, and requests issued late in a long session.
+3. Replay detection long after the original request, beyond the 300 s skew window. This is the property that replay state is session-scoped rather than time-pruned. `duplicate_after_clock_advance` uses `positiveAdvance` (at most 240 s) although no execution follows, so this case is limited unnecessarily (a corpus design gap, not a SUT finding).
+4. Wall-clock behaviour of the SUT itself (`Date.now()` defaults) is not exercised; the adapter always injects a clock.
+
+### Determinism claim limits
+
+`--check-observation-determinism` shows that two runs of this corpus on the same machine and Node version produced byte-identical observations. It does **not** show determinism for all timing or concurrency situations. Concurrency is limited to calls started in the same tick of a single Node process, interleaved at `await` boundaries with tool doubles that resolve immediately. Real tool latency, timers, multiple processes and different event-loop schedules are not covered.
