@@ -30,6 +30,8 @@ export function ensureMirror(lock: SutLock, workDir: string, sourceOverride?: st
     mkdirSync(workDir, { recursive: true });
     execFileSync("git", ["clone", "--bare", "--quiet", source, mirror], { stdio: ["ignore", "pipe", "pipe"] });
   }
+  // Read-only: make any accidental push from the mirror impossible.
+  git(mirror, ["config", "remote.origin.pushurl", "no-push://read-only-mirror"]);
   try {
     git(mirror, ["cat-file", "-e", `${lock.sut_commit}^{commit}`]);
   } catch {

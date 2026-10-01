@@ -90,6 +90,10 @@ Every `evaluate` run writes `corpus.jsonl`, `corpus-manifest.json`, `report.json
 | 2 | Harness invalid: corpus, oracle, adapter, protocol, SUT SHA or report problem. Adapter and harness errors never become DENY/REJECT/WITHHOLD |
 | 3 | Mutation gate failed: a surviving or invalid mutant, or a reachability problem |
 
+## Reports
+
+Generated reports for the v0.1 review candidate are committed under [`reports/v0.1/`](reports/v0.1/): `smoke/` (the 500-case CI profile) and `full/` (the ~10 000-case benchmark, run locally). Each directory has `report.json`, the `summary.md` rendered from it, and `corpus-manifest.json`. Each report records the `sut_commit`, `harness_commit` and `corpus_sha256` it was produced with. See [`docs/review-v0.1.md`](docs/review-v0.1.md) for the self-review, the deviations from the work order and the open risks.
+
 ## SUT handling
 
 ACS is never installed as an npm or git dependency (it is a `private` package without a stable library API). For every run and every mutant the harness:

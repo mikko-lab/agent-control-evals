@@ -45,3 +45,13 @@ test("clean checkout at the pinned SHA verifies", () => {
   const { d, head } = repo();
   assert.equal(verifyCheckout(lockFor(head), d).head, head);
 });
+
+test("the local SUT mirror cannot push (pushurl disabled) and disposable checkouts have no remote", () => {
+  const { ensureMirror, freshCheckout } = require("../src/sut/checkout") as typeof import("../src/sut/checkout");
+  const { d, head } = repo();
+  const work = mkdtempSync(join(tmpdir(), "ace-mirror-"));
+  const mirror = ensureMirror(lockFor(head), work, d);
+  assert.equal(execFileSync("git", ["config", "--get", "remote.origin.pushurl"], { cwd: mirror, encoding: "utf8" }).trim(), "no-push://read-only-mirror");
+  const co = freshCheckout(lockFor(head), mirror, join(work, "co"));
+  assert.equal(execFileSync("git", ["remote"], { cwd: co.dir, encoding: "utf8" }).trim(), "");
+});
