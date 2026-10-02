@@ -19,7 +19,9 @@
 import { AUTOMOTIVE_ORACLE_VERSION } from "../../spec/automotive/version";
 import {
   ACCEPTED_PRICE_BASES,
+  INTEGER_VALUED_FIELDS,
   PRICE_BASES,
+  STRING_VALUED_FIELDS,
   VEHICLE_FACT_FIELDS,
   type AutomotiveCase,
   type PlantedValue,
@@ -237,10 +239,40 @@ function fail(message: string): never {
 }
 
 const isVehicleFactField = (f: string): f is VehicleFactField => (VEHICLE_FACT_FIELDS as readonly string[]).includes(f);
+const isIn = (list: readonly string[], x: unknown) => typeof x === "string" && list.includes(x);
+
+/**
+ * Oracle-local integrity check of the harness-only planted annotations. Every
+ * entry is checked, whether or not a probe consults it, so expected evidence can
+ * never cite an untrusted source, listing or field that the scenario does not
+ * contain. This deliberately repeats checks the fixture builder also makes: the
+ * oracle does not rely on construction-time validation.
+ */
+function checkPlantedAnnotations(c: AutomotiveCase): void {
+  const listings = new Set(c.scenario.trusted.inventory.map((l) => l.listing_id));
+  const contents = new Set<string>();
+  for (const u of c.scenario.untrusted) {
+    if (contents.has(u.content_id)) fail(`${c.case_id}: duplicate untrusted content_id ${u.content_id}`);
+    contents.add(u.content_id);
+  }
+  c.annotations.planted.forEach((x, i) => {
+    const at = `${c.case_id}: planted[${i}] (${String(x.content_id)}/${String(x.listing_id)}/${String(x.field)})`;
+    if (!contents.has(x.content_id)) fail(`${at}: unknown untrusted content_id ${String(x.content_id)}`);
+    if (!listings.has(x.listing_id)) fail(`${at}: unknown listing ${String(x.listing_id)}`);
+    if (isIn(INTEGER_VALUED_FIELDS, x.field)) {
+      if (!isAmount(x.value)) fail(`${at}: value ${JSON.stringify(x.value)} is not a non-negative integer`);
+    } else if (isIn(STRING_VALUED_FIELDS, x.field)) {
+      if (typeof x.value !== "string" || x.value.length === 0) fail(`${at}: value ${JSON.stringify(x.value)} is not a non-empty string`);
+    } else {
+      fail(`${at}: unsupported planted field ${String(x.field)}`);
+    }
+  });
+}
 
 /** Derives the expected truth of a case. Throws AutomotiveOracleError on impossible input; never returns a partial result. */
 export function deriveAutomotiveExpected(c: AutomotiveCase): AutomotiveExpected {
   const snapshots = snapshotsByTurn(c);
+  checkPlantedAnnotations(c);
   const seen = new Set<string>();
   const probe_expectations: ProbeExpectation[] = c.annotations.probes.map((p) => {
     if (seen.has(p.probe_id)) fail(`${c.case_id}: duplicate probe_id ${p.probe_id}`);

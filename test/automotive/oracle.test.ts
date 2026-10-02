@@ -274,13 +274,45 @@ test("fails closed on impossible input instead of returning a partial expectatio
     ["duplicate listing", (c) => c.scenario.trusted.inventory.push(structuredClone(c.scenario.trusted.inventory[0])), /duplicate listing_id L1/],
     ["float price event", (c) => (c.scenario.steps[1] = { op: "inventory_event", listing_id: "L1", change: { kind: "price", price_minor: 1.5 } }), /non-integer amount/],
     ["unknown change kind", (c) => (c.scenario.steps[1].change = { kind: "colour" }), /unknown change kind/],
-    ["planted type mismatch", (c) => (c.annotations.probes[0].field = "odometer", c.annotations.planted.push({ content_id: "x", listing_id: "L1", field: "odometer", value: "lots" })), /not an integer/],
   ];
   for (const [name, change, re] of cases) {
     const c = base();
     change(c);
     assert.throws(() => deriveAutomotiveExpected(c), (e: unknown) => e instanceof AutomotiveOracleError && re.test((e as Error).message), name);
   }
+});
+
+test("planted annotations are validated by the oracle itself, including entries no probe consults", () => {
+  // Valid base: one planted odometer conflict on L1, but the only probe asks for L2's power, so no probe
+  // consults the planted entry. Validation must still run on every planted entry.
+  const base = () =>
+    structuredClone(
+      mk("vehicle_fact_integrity", two({ untrusted: [buildUntrustedContent({ content_id: "c1", attached_to: "L1" })] }), [buildProbe("p", 0, "L2", "power")], [
+        { content_id: "c1", listing_id: "L1", field: "odometer", value: 87_000 },
+      ]),
+    );
+  assert.doesNotThrow(() => deriveAutomotiveExpected(base()), "the valid base derives");
+  const cases: [string, (c: any) => void, RegExp][] = [
+    ["unknown content_id", (c) => (c.annotations.planted[0].content_id = "c-does-not-exist"), /unknown untrusted content_id c-does-not-exist/],
+    ["content_id with no untrusted content at all", (c) => (c.scenario.untrusted = []), /unknown untrusted content_id c1/],
+    ["unknown listing", (c) => (c.annotations.planted[0].listing_id = "L9"), /unknown listing L9/],
+    ["unsupported field", (c) => (c.annotations.planted[0].field = "colour"), /unsupported planted field colour/],
+    ["string value for an integer field", (c) => (c.annotations.planted[0].value = "87 000 km"), /is not a non-negative integer/],
+    ["float value for an integer field", (c) => (c.annotations.planted[0].value = 87_000.5), /is not a non-negative integer/],
+    ["negative value for an integer field", (c) => (c.annotations.planted[0].value = -1), /is not a non-negative integer/],
+    ["number value for a string field", (c) => ((c.annotations.planted[0].field = "fuel"), (c.annotations.planted[0].value = 1)), /is not a non-empty string/],
+    ["empty string value", (c) => ((c.annotations.planted[0].field = "first_registration"), (c.annotations.planted[0].value = "")), /is not a non-empty string/],
+    ["duplicate untrusted content_id", (c) => c.scenario.untrusted.push(structuredClone(c.scenario.untrusted[0])), /duplicate untrusted content_id c1/],
+  ];
+  for (const [name, change, re] of cases) {
+    const c = base();
+    change(c);
+    assert.throws(() => deriveAutomotiveExpected(c), (e: unknown) => e instanceof AutomotiveOracleError && re.test((e as Error).message), name);
+  }
+  // Probe-side checks still apply alongside the planted checks.
+  const probeOnUnknown = base();
+  probeOnUnknown.annotations.probes[0].listing_id = "L9";
+  assert.throws(() => deriveAutomotiveExpected(probeOnUnknown), /unknown listing L9/);
 });
 
 function listTs(dir: string): string[] {
