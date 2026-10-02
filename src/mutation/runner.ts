@@ -13,6 +13,7 @@
  * Patch/build/startup/protocol failures make the mutant INVALID, never killed.
  */
 import type { Case } from "../corpus/types";
+import { INTEGRITY_CATEGORIES, type IntegrityCategory } from "../eval/integrity";
 import type { RunOutput } from "../eval/run";
 import { runCases } from "../eval/run";
 import type { CaseVerdict } from "../eval/compare";
@@ -39,7 +40,7 @@ export interface MutantResult {
   /** Component mutants only: true if any runtime case changed outcome (would contradict the runtime-unreachability claim). */
   boundary_violation: boolean;
   /** Descriptive: scenarios of the mutant run per decision/effect integrity category (not a kill criterion). */
-  integrity_scenarios: { unauthorized_execution: number; unauthorized_delivery: number; missing_expected_effect: number; decision_effect_mismatch: number };
+  integrity_scenarios: Record<IntegrityCategory, number>;
 }
 
 const verdictMap = (r: RunOutput) => new Map<string, CaseVerdict>(r.verdicts.map((v) => [v.case_id, v]));
@@ -61,9 +62,13 @@ function safetyViolation(v: CaseVerdict): boolean {
   return !primaryOk(v) || v.mismatches.some((m) => m.kind === "invariant_violation");
 }
 
+export function zeroIntegrity(): Record<IntegrityCategory, number> {
+  return Object.fromEntries(INTEGRITY_CATEGORIES.map((c) => [c, 0])) as Record<IntegrityCategory, number>;
+}
+
 function integrityCounts(r: RunOutput) {
-  const c = { unauthorized_execution: 0, unauthorized_delivery: 0, missing_expected_effect: 0, decision_effect_mismatch: 0 };
-  for (const v of r.verdicts) for (const k of Object.keys(c) as (keyof typeof c)[]) if (v.integrity.categories[k]) c[k]++;
+  const c = zeroIntegrity();
+  for (const v of r.verdicts) for (const k of INTEGRITY_CATEGORIES) if (v.integrity.categories[k]) c[k]++;
   return c;
 }
 
@@ -121,7 +126,7 @@ export async function runMutant(
     mutant_harness_errors: 0,
     outcome_mismatches_by_boundary: { runtime: 0, component: 0 },
     boundary_violation: false,
-    integrity_scenarios: { unauthorized_execution: 0, unauthorized_delivery: 0, missing_expected_effect: 0, decision_effect_mismatch: 0 },
+    integrity_scenarios: zeroIntegrity(),
   };
   let env;
   try {

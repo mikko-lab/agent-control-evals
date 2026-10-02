@@ -37,34 +37,43 @@ Adapter to harness, with exactly one line per `hello` and per `case`:
 | Situation | Classification | Effect |
 |---|---|---|
 | Adapter returns `status: "adapter_error"` | adapter error | The case is not evaluated and enters no metric. The run is invalid (exit 2). Everything observed before the error, including tool-double executions, stays in `raw_sut_evidence.partial` and is counted in the error record (`observed_executions`). |
-| The SUT's reported decision and the observed effect disagree | **SUT finding**, not an error (adapter ≥ 0.3.0) | The normalised outcome follows the effect, and the SUT's report is kept in `sut_decision`. The decision point's `effect_record` carries both, and the harness classifies it as `unauthorized_execution`, `unauthorized_delivery` or `missing_expected_effect` (see `docs/evaluation-spec.md` §12). |
+| The SUT's authority decision and the observed effect disagree | **SUT finding**, not an error (adapter ≥ 0.3.0) | The normalised outcome follows the effect, and the SUT's decision is kept in `sut_decision`. The decision point's `effect_record` carries both, and the harness classifies it as `unauthorized_execution`, `unauthorized_delivery` or `missing_expected_effect` (see `docs/evaluation-spec.md` §12). |
+| An effect is observed but no SUT authority decision is attributable to the call | **observability finding**, not an error (adapter ≥ 0.4.0) | The decision is `DECISION_NOT_OBSERVED`; the observed effect is kept. The harness reports `decision_not_observed` and leaves the point out of the clean integrity denominators. |
 | Invalid JSON, wrong `case_id`, unknown stage, outcome or reason class, missing field | protocol error | The run stops and is invalid. |
 | Adapter exits, hangs past the per-case timeout, or answers unsolicited | protocol or harness error | The run stops and is invalid. |
 | `hello` with the wrong protocol version, SUT commit or worktree state | harness error | No case is sent. |
 | Real SUT disagrees with the oracle | **finding** | Reported as a finding (exit 1). It is never relabelled as an error. |
 
-Adapter and harness errors **never** become `DENY`, `REJECT` or `WITHHOLD`, and never improve a safety metric. The ACS adapter raises `AdapterError` for any SUT exception it cannot classify from a fixed table. For example, a `TypeError` from a mutant is an adapter error, not a DENY.
+Adapter and harness errors **never** become `DENY`, `REJECT` or `WITHHOLD`, and never improve a safety metric. When the ACS adapter observes neither a SUT authority decision nor any effect for a call (for example, a `TypeError` from a mutant before anything ran), it raises `AdapterError`; it never maps such a call to DENY.
 
-## ACS adapter (v0.1.0)
+## ACS adapter (v0.4.0)
 
 `node dist/src/adapter/acs/main.js --sut-build <build> --sut-checkout <checkout>`
 
 - **Runtime cases** call only `GuardedExecutor.process`, `GuardedExecutor.resolveApproval` and `GuardedExecutor.clearSession`. Each case gets fresh stateful SUT components (replay guard, correlation store, audit collector, executor). The schema validator is stateless and is shared.
 - **Component cases** call `ApprovalGrantVerifier.verifyV2` directly with a trusted context, or `ExecutionGate.mintPermit` and `execute` with a harness-held authority symbol.
 - **Materialisation:** labels become deterministic version-4-shaped UUIDs derived from SHA-256 of the case id, namespace and label. Request envelopes are signed with the SUT's `SignatureService` (HMAC-SHA256). Capabilities and approval grants are Ed25519-signed with harness keys generated per adapter process. A "tampered" value is rewritten after signing.
-- **Decision and effect are separate evidence (adapter 0.3.0).** Every decision point (request attempt, approval step per target request, permit attempt) yields an `effect_record`. The record holds:
-  - `sut_reports`: what the SUT returned or threw, including the exception.
-  - `sut_decisions`: the SUT's decision, derived only from that report and the SUT's own audit trail. A `ReplayGuardError` counts as request-level only if the SUT's replay/timestamp audit event names this request; otherwise it is a rejection of the SUT's internal result request, i.e. after authorisation.
-  - `result_control_decisions`: the Result Guardian's audit decision for exact calls, else the returned `exit_status`.
-  - `authorized_executions` and `authorized_deliveries`: what those decisions allowed.
-  - `observed_executions`: from the harness tool doubles, or from the SUT's fallback-tool counter for tools outside the harness registry.
-  - `observed_raw_deliveries`: whether a raw tool output recorded by the doubles appears anywhere in the returned value, by key-order-independent structural search.
+- **Authority decisions come only from SUT authority evidence (adapter 0.4.0).** Every decision point (request attempt, approval step per target request, permit attempt) yields an `effect_record`. Its decision fields are:
+  - `sut_decisions` with a parallel `decision_sources` (`audit_event`, `sut_exception`, `none`):
+    - request ALLOW / ASK / DENY by the Guardian: the call's own `guardian_decision` audit event;
+    - pre-Guardian DENY: the classified rejection, backed by its `capability_rejected`, `replay_rejected` or `timestamp_rejected` audit event, or, for request signature and schema failures (the SUT writes no audit event for them), the exception alone (`sut_exception`);
+    - approval EXECUTE: the call's own `human_approval` audit event; REJECT: `human_rejection`, `approval_verification_failed`, `approval_expired`, or the freshness exceptions (`sut_exception`);
+    - permit EXECUTE: the ExecutionGate's `tool_execution_started` audit event; permit REJECT: the gate exception (`sut_exception`);
+    - otherwise `DECISION_NOT_OBSERVED`. A return status (`executed`, `pending`), a returned value, or an exception class alone never yields ALLOW or EXECUTE.
+  - `result_control_decisions` (`DELIVER` / `WITHHOLD`) and `result_control_state` (`observed`, `not_observed`, `ambiguous`, `not_applicable`): only `result_guardian_decision` audit events attributed to the call. `exit_status` is never a decision source; it stays in `sut_reports` as raw evidence.
+  - Audit events are attributed by **window**, never by a search over the whole case audit: a call that runs alone owns the events appended during the call; for concurrent calls, request and approval decisions come from the events written by the call's synchronous prefix (before its first `await`), and Result Guardian events are linked through the SUT's own signed result request (`request_id_ref`), observed pass-through at the harness-owned `SignatureService` instance. Mixed Result Guardian decisions among concurrent attempts on one request id are `ambiguous`.
+  - `sut_reports`: what the SUT returned or threw (status, `exit_status`, exception). Evidence only.
+- **Effects come only from observation channels, each with an explicit state.** `execution_observation` and `delivery_observation` have a `state` (`observed`, `not_observed`, `ambiguous`, `unavailable`) and a `source`:
+  - `harness_tool_trace`: harness tool doubles, attributed by the per-attempt trace argument. Executions without a trace are recorded as an `unattributed`, `ambiguous` record.
+  - `sut_counter`: the SUT's fallback-tool counter for tools outside the harness registry. Attributable only when a single call can have caused the delta; otherwise `ambiguous`.
+  - `return_value_scan`: the exact raw tool output recorded by the doubles, found by key-order-independent structural search anywhere in the value the call returned (also inside wrappers). Thrown exceptions are not scanned. Partial, transformed or semantic leaks are not detected.
+  - `none`: no channel (`unavailable`), e.g. the component execution gate has no delivery channel.
 
-  Effects are never derived from decisions, and decisions are never derived from effects.
-- **Normalised outcomes follow the effect.** Request ALLOW means this attempt's execution was observed. A result is DELIVER iff a raw output was observed in what the call returned. Approval outcomes are reconciled per target request against observed executions: surplus executions turn REJECT or UNCLASSIFIED decisions into EXECUTE, and claimed executions without an effect become REJECT, preferring claims inferred from exceptions, so a random post-execution-looking exception cannot earn a mutation kill. Whenever the effect overrides the decision, the assertion carries `sut_decision` and `decision_effect_mismatch: true`.
-- **An observed execution or delivery is never turned into an `AdapterError`.** This holds whether the SUT threw, reported DENY, ASK or REJECT, or the two simply disagree. `AdapterError` remains only where the adapter cannot produce a reliable observation:
-  - an unclassifiable SUT report with no observed effect;
-  - an adapter bug or invalid scenario operation;
+  Effects are never derived from decisions, and authority decisions are never derived from effects. The normalised outcomes below are effect-based by design and are a separate field from the authority decision.
+- **Normalised outcomes follow the effect.** Request ALLOW means this attempt's execution was observed. A result is DELIVER iff a raw output was observed in what the call returned. Approval outcomes are reconciled per target request against observed executions: surplus executions turn REJECT or not-observed decisions into EXECUTE, and authorised executions without an effect become REJECT, preferring ones that failed on the result path. Whenever the effect overrides the decision or no decision was observed, the assertion carries `sut_decision` and `decision_effect_mismatch: true`.
+- **An observed execution or delivery is never turned into an `AdapterError`.** This holds whether the SUT threw, reported DENY, ASK or REJECT, no authority decision was observed, or the two simply disagree. `AdapterError` remains only where the adapter cannot produce a reliable observation:
+  - no SUT authority decision and no observed effect for a call;
+  - an adapter bug or invalid scenario operation (including an empty capability queue);
   - a protocol failure.
 
   In the first two cases everything observed so far (`effect_records` included) is kept in `raw_sut_evidence.partial`.

@@ -109,8 +109,11 @@ test("concurrent steps are compared as multisets; duplicate execution is an inva
 });
 
 const rec = (o: Partial<import("../src/adapter/protocol").EffectRecord>): import("../src/adapter/protocol").EffectRecord => ({
-  step: 0, stage: "request", key: "s1/q1", attribution: "attempt", sut_reports: [], sut_decisions: [], result_control_decisions: [],
-  authorized_executions: 0, observed_executions: 0, authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observed: true, ...o,
+  step: 0, stage: "request", key: "s1/q1", attribution: "attempt", sut_reports: [], sut_decisions: [],
+  result_control_decisions: [], result_control_state: "not_applicable",
+  authorized_executions: 0, observed_executions: 0, execution_observation: { state: (o.observed_executions ?? 0) > 0 ? "observed" : "not_observed", source: "harness_tool_trace" },
+  authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observation: { state: "not_observed", source: "return_value_scan" }, ...o,
+  decision_sources: (o.sut_decisions ?? []).map(() => "audit_event"),
 });
 
 test("integrity: an effect-based ALLOW contradicting the SUT's DENY is a false allow (oracle) AND an unauthorized execution (integrity), counted separately", () => {
@@ -146,8 +149,9 @@ test("integrity: a missing expected effect is evidence only (outcome still match
   assert.equal(v.integrity.categories.unauthorized_execution, false);
 });
 
-test("integrity: no effect channel is 'not observed', never zero violations", () => {
+test("integrity: no effect channel is 'unavailable', never zero violations", () => {
   const v = compareCase(mkCase({}), { assertions: [{ step: 0, stage: "request", outcome: "DENY", reason_class: "CAPABILITY_AGENT_MISMATCH", sut_reason_code: "x", enforcement_stage: "x" }], executions: {}, unattributed_executions: 0 });
   assert.equal(v.integrity.observed, false);
   assert.equal(v.integrity.decision_points, 0);
+  assert.equal(v.integrity.categories.unavailable_effect_observation, true);
 });

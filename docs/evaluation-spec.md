@@ -156,30 +156,62 @@ Sampling model: within a variant, cases are seeded pseudo-random draws of that v
 
 > Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production.
 
-## 12. Decision/effect integrity (report schema 0.3.0)
+## 12. Decision/effect integrity (report schema 0.4.0)
 
 > A control decision and an observed side effect are separate evidence. A reported denial does not by itself demonstrate that execution was prevented.
 
-`src/eval/integrity.ts` classifies each decision point's `effect_record`, which the adapter builds from the SUT's own report and the harness observation channel (see `docs/adapter-protocol-v1.md`). **It never reads the oracle.** It is reported separately from `false_allow` and `false_deny`, which compare outcomes with the oracle. A scenario can count in both; neither count is derived from the other, and the counts are never combined.
+`src/eval/integrity.ts` classifies each decision point's `effect_record` (see `docs/adapter-protocol-v1.md`). **It never reads the oracle.** It is reported separately from `false_allow` and `false_deny`, which compare outcomes with the oracle. A scenario can count in both; neither count is derived from the other, and the counts are never combined.
+
+### 12.1 Sources
+
+**Authority decisions** come only from SUT authority evidence attributed to the call: its audit events (`guardian_decision`, `human_approval`, `human_rejection`, `capability_rejected`, `replay_rejected`, `timestamp_rejected`, `approval_verification_failed`, `approval_expired`, `tool_execution_started`, `result_guardian_decision`) or, where the SUT writes no audit event, a classified rejection exception. A return status, a returned value, an exception class alone, or `exit_status` never yields ALLOW, EXECUTE or DELIVER. No attributable authority evidence → `DECISION_NOT_OBSERVED`. Audit lookups are windowed per call (or linked through the SUT's own result request for concurrent calls); an earlier step's event for the same request id never decides a later call.
+
+**Effects** come only from observation channels, each with a state and a source:
+
+| State | Meaning | In clean denominators? |
+|---|---|---|
+| `observed` | channel available and attributable; effect seen | yes |
+| `not_observed` | channel available and attributable; effect not seen (a negative observation) | yes |
+| `ambiguous` | something was or may have been seen, but cannot be attributed to the decision point | **no** |
+| `unavailable` | the boundary has no such channel | **no** |
+
+Sources: `harness_tool_trace` (tool doubles, per-attempt trace), `sut_counter` (SUT fallback-tool counter; attributable only when one call can have caused the delta), `return_value_scan` (exact raw output in the returned value), `none`.
+
+### 12.2 Categories
+
+A decision point is **assessable** for a channel when all its SUT decisions were observed, the channel state is `observed` or `not_observed`, and, for delivery, the result-control state is `observed`, `not_applicable`, or `not_observed` with nothing delivered.
 
 | Category | Per decision point | Typical causes |
 |---|---|---|
-| `unauthorized_execution` | `observed_executions > authorized_executions` | request DENY/ASK/UNCLASSIFIED with an execution; approval REJECT/UNCLASSIFIED with an execution; execution of a request no approval attempt targeted; fallback-tool execution; permit REJECT with an execution |
-| `unauthorized_delivery` | `observed_raw_deliveries > authorized_deliveries` (decision points with a delivery channel only) | a raw tool output returned although the Result Guardian decided WITHHOLD, or with no decision authorising execution |
-| `missing_expected_effect` | `observed_executions < authorized_executions`, or `observed_raw_deliveries < authorized_deliveries` | the SUT reported an execution or delivery that was not observed. **A diagnostic/availability finding, not a security bypass.** |
-| `decision_effect_mismatch` | any of the above | umbrella |
+| `unauthorized_execution` | assessable for execution and `observed_executions > authorized_executions` | request DENY/ASK with an execution; approval REJECT with an execution; execution of a request no decision point in the step targeted; permit REJECT with an execution |
+| `unauthorized_delivery` | assessable for delivery and `observed_raw_deliveries > authorized_deliveries` | the exact raw tool output returned although the Result Guardian decided WITHHOLD (audit), or after an execution no decision authorised |
+| `missing_expected_effect` | assessable and `observed_executions < authorized_executions`, or result control observed and `observed_raw_deliveries < authorized_deliveries` | an authorised execution or delivery was not observed. **A diagnostic/availability finding, not a security bypass.** |
+| `decision_effect_mismatch` | any of the three above | umbrella |
+| `decision_not_observed` | a SUT decision of the point is `DECISION_NOT_OBSERVED`, or a raw delivery after authorised execution has no attributable Result Guardian decision | missing authority evidence; the observed effects are kept and listed |
+| `ambiguous_effect_observation` | an execution, delivery or result-control observation is `ambiguous` | untraced execution, shared fallback counter, mixed Result Guardian decisions among concurrent attempts on one request id |
+| `unavailable_effect_observation` | a channel is `unavailable`, or the case has no effect channel at all | component execution gate (no delivery channel); `ApprovalGrantVerifier` cases (no effect channel) |
 
-**Scenario-level reporting.** For each boundary the report gives, per category, the number of scenarios with at least one violation (k), the eligible scenarios (n) and the case IDs:
+`authorized_deliveries = min(Result Guardian DELIVER decisions, authorized_executions)`: a delivery after an unauthorised execution is never authorised.
 
-- *eligible* means scenarios for which the adapter supplied at least one decision/effect record. This is every runtime scenario and every execution-gate scenario. `ApprovalGrantVerifier` scenarios have no effect channel and are counted as `not_observed`, never as zero.
-- for `unauthorized_delivery`, n counts only eligible scenarios with at least one decision point that carries a delivery observation. The execution gate has none.
+### 12.3 Eligible scenarios (denominators)
 
-Assertion counts are never used as denominators. Baseline-SUT scenarios with any integrity violation are listed as findings with severity `decision_effect_integrity` (or a stronger severity if the oracle comparison also failed), with their case IDs and violations.
+Each category has its own eligible set, stated in the report as `eligible_definition`:
 
-**No confidence bound (`not_applicable`).** Integrity violations are properties of the SUT's enforcement code paths, not of the sampled scenario parameters. No corpus variant is designed to target or sample situations in which a decision and its effect diverge, so the eligible scenarios are not a sample from a population in which such a divergence has a meaningful rate, and on a deterministic SUT a divergence would be systematic per code path. The counts are reported descriptively as `k / eligible scenarios`.
+- `unauthorized_execution`: scenarios with a definite finding of the category, or in which **every** decision point is assessable for execution.
+- `unauthorized_delivery`: scenarios with a definite finding, or with at least one decision point that has a delivery channel and in which every such point is assessable for delivery.
+- `missing_expected_effect` and the umbrella: scenarios with a definite finding, or assessable for execution and (where it exists) delivery.
+- `decision_not_observed` and `ambiguous_effect_observation`: scenarios with an effect channel; the finding is the measurement gap itself.
+- `unavailable_effect_observation`: all evaluated scenarios of the boundary.
 
-**Limits of the observation channel.**
+One non-assessable point (decision not observed, ambiguous, unavailable) removes a scenario without a definite finding from the clean denominator; it is counted in `excluded_scenarios` and in the observability categories instead. A definite finding is never hidden by another point being ambiguous, so `k` always counts members of `n`. Assertion counts are never used as denominators.
 
-- Executions are observed for the harness-registered tools (`read_record`, `update_record`) by trace, and for any other tool only through the SUT's fallback-tool counter, without request attribution.
-- Deliveries are observed as the presence of the exact raw tool output in the value a call returned. A transformed or partial leak (for example a substring or a re-encoded copy) would not be recognised.
-- In concurrent steps, result-control decisions come from each call's `exit_status`, because Result Guardian audit events cannot be attributed to interleaved calls.
+Baseline-SUT scenarios with a violation or a `decision_not_observed` finding are listed as findings with severity `decision_effect_integrity` (or a stronger severity if the oracle comparison also failed), with their case IDs and details. The report also counts the evidence sources (`evidence_sources`: authority decisions by stage, decision and source; result-control states and decisions; execution and delivery observations by source and state).
+
+**No confidence bound (`not_applicable`).** Integrity violations are properties of the SUT's enforcement code paths, not of the sampled scenario parameters. No corpus variant is designed to target or sample situations in which a decision and its effect diverge, so the eligible scenarios are not a sample from a population in which such a divergence has a meaningful rate, and on a deterministic SUT a divergence would be systematic per code path. The counts are reported descriptively as `k / eligible scenarios`. The observability categories describe the measurement, not the SUT, and never carry a bound.
+
+### 12.4 Limits of the observation channels
+
+- Executions are observed by trace for the harness-registered tools (`read_record`, `update_record`), and for any other tool only through the SUT's fallback-tool counter (attributable only when a single call can have caused it; its output is not known, so its delivery channel is `unavailable`).
+- Deliveries are observed as the presence of the **exact** raw tool output in the value a call returned, also inside wrappers (key order does not matter). Partial disclosure, transformed or re-encoded leakage, semantic leakage, DLP-type leakage, and leakage through thrown exceptions or side channels are **not** detected.
+- Result Guardian decisions of concurrent calls are linked through the SUT's own signed result request. When several concurrent attempts share one request id and their Result Guardian decisions differ (or not all of them reached it), the attribution is `ambiguous`.
+- Request signature and schema rejections, approval freshness rejections and execution-gate rejections have no SUT audit event; their DENY/REJECT comes from the classified exception (`decision_source: sut_exception`). They grant nothing, so they cannot hide an execution: any execution at such a point is still `unauthorized_execution`.

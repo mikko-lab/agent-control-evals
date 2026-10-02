@@ -9,7 +9,7 @@
 import { sign } from "node:crypto";
 import type { ReasonClass } from "../../spec/reason-taxonomy";
 import type { CaseForAdapter, PermitScenario, VerifierScenario } from "../../corpus/types";
-import type { EffectRecord, Observations, SutDecision, SutReport } from "../protocol";
+import type { DecisionSource, EffectRecord, Observations, SutDecision, SutReport } from "../protocol";
 import type { SutModules } from "./sut";
 import { AdapterError, HARNESS_TOOLS, uuidFor, type AdapterKeys } from "./runtime";
 import { makeTrace, ToolDoubles, TRACE_ARG, traceKey } from "./tool-doubles";
@@ -106,19 +106,28 @@ export async function runPermitCase(c: CaseForAdapter, sut: SutModules): Promise
     };
   });
   const unknownBefore = sut.executionCounters.unknown_tool ?? 0;
+  const auditLen = () => (audit.getEvents() as unknown[]).length;
+  // Audit window per attempt: the synchronous prefix of gate.execute() for concurrent attempts (everything up to
+  // the tool invocation, including tool_execution_started), the whole call otherwise.
+  const windows: [number, number][] = [];
   doubles.install();
   let settled: PromiseSettledResult<unknown>[];
   try {
+    const settle = (p: Promise<unknown>) => p.then((value): PromiseSettledResult<unknown> => ({ status: "fulfilled", value }), (reason): PromiseSettledResult<unknown> => ({ status: "rejected", reason }));
     if (s.concurrent) {
-      settled = await Promise.allSettled(envelopes.map((env) => gate.execute(env, permit)));
+      const started = envelopes.map((env) => {
+        const from = auditLen();
+        const pr = settle(gate.execute(env, permit));
+        windows.push([from, auditLen()]);
+        return pr;
+      });
+      settled = await Promise.all(started);
     } else {
       settled = [];
       for (const env of envelopes) {
-        try {
-          settled.push({ status: "fulfilled", value: await gate.execute(env, permit) });
-        } catch (e) {
-          settled.push({ status: "rejected", reason: e });
-        }
+        const from = auditLen();
+        settled.push(await settle(gate.execute(env, permit)));
+        windows.push([from, auditLen()]);
       }
     }
   } finally {
@@ -127,8 +136,11 @@ export async function runPermitCase(c: CaseForAdapter, sut: SutModules): Promise
   const evidence = settled.map((r) =>
     r.status === "fulfilled" ? { returned: (r.value as { exit_status?: string })?.exit_status ?? null } : { thrown: (r.reason as Error)?.message ?? String(r.reason) },
   );
-  // Decision (what the gate reported) and effect (what the tool doubles observed) per attempt. Each attempt
-  // has its own trace, so attribution is exact even for concurrent attempts.
+  // Decision (the gate's own authority evidence) and effect (what the tool doubles observed) per attempt. Each
+  // attempt has its own trace, so execution attribution is exact even for concurrent attempts. EXECUTE comes only
+  // from the gate's tool_execution_started audit event in the attempt's window (the gate records it after the
+  // permit and binding checks pass); a returned value alone never grants EXECUTE. Rejections are reported by the
+  // gate only as exceptions (it writes no audit event for them).
   const records: EffectRecord[] = [];
   const rejectionReasons: { reason: ReasonClass; code: string }[] = [];
   let executedAttempts = 0;
@@ -136,34 +148,43 @@ export async function runPermitCase(c: CaseForAdapter, sut: SutModules): Promise
     const at = s.attempts[j];
     const trace = makeTrace(`${at.session}/${at.request}`, 0, j);
     const observed = doubles.log.filter((x) => x.trace === trace).length;
-    let decision: SutDecision;
+    const harnessTool = (HARNESS_TOOLS as readonly string[]).includes(at.tool);
+    const started = (audit.getEvents() as { event_type: string; request_id: string }[])
+      .slice(windows[j][0], windows[j][1])
+      .some((e) => e.event_type === "tool_execution_started" && e.request_id === id("request", at.request));
+    let decision: SutDecision = "DECISION_NOT_OBSERVED";
+    let source: DecisionSource = "none";
     let report: SutReport;
-    if (r.status === "fulfilled") {
+    if (started) {
       decision = "EXECUTE";
+      source = "audit_event";
+    }
+    if (r.status === "fulfilled") {
       report = { kind: "returned", status: "result", ...(typeof (r.value as { exit_status?: unknown })?.exit_status === "string" ? { exit_status: (r.value as { exit_status: string }).exit_status } : {}) };
     } else {
       const err = r.reason as Error & { code?: unknown };
       const msg = err?.message ?? "";
       report = { kind: "threw", exception: { name: err?.name ?? "Error", code: err?.code !== undefined ? String(err.code) : "", message: msg } };
-      if (msg === "Execution blocked: valid execution permit required") {
+      if (!started && msg === "Execution blocked: valid execution permit required") {
         decision = "REJECT";
+        source = "sut_exception";
         rejectionReasons.push({ reason: p.forged ? "PERMIT_INVALID" : "PERMIT_REUSE_BLOCKED", code: "permit_required" });
-      } else if (/^Execution blocked: permit (session|request|tool) mismatch$/.test(msg)) {
+      } else if (!started && /^Execution blocked: permit (session|request|tool) mismatch$/.test(msg)) {
         decision = "REJECT";
+        source = "sut_exception";
         rejectionReasons.push({ reason: "PERMIT_BINDING_MISMATCH", code: msg.replace("Execution blocked: ", "").replace(/ /g, "_") });
-      } else {
-        decision = "UNCLASSIFIED";
       }
     }
-    if (decision === "UNCLASSIFIED" && observed === 0) {
-      throw new AdapterError(`unclassified ExecutionGate report without an observed execution: ${report.exception?.message ?? ""}`);
+    if (decision === "DECISION_NOT_OBSERVED" && observed === 0) {
+      throw new AdapterError(`no ExecutionGate authority evidence and no observed execution: ${report.exception?.message ?? report.status ?? ""}`);
     }
     if (observed > 0) executedAttempts++;
     records.push({
       step: 0, attempt: j, stage: "permit", key: `${at.session}/${at.request}`, attribution: "attempt",
-      sut_reports: [report], sut_decisions: [decision], result_control_decisions: [],
+      sut_reports: [report], sut_decisions: [decision], decision_sources: [source], result_control_decisions: [], result_control_state: "not_applicable",
       authorized_executions: decision === "EXECUTE" ? 1 : 0, observed_executions: observed,
-      authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observed: false,
+      execution_observation: harnessTool ? { state: observed > 0 ? "observed" : "not_observed", source: "harness_tool_trace" } : { state: "ambiguous", source: "harness_tool_trace", detail: "non_harness_tool_see_fallback_record" },
+      authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observation: { state: "unavailable", source: "none", detail: "execution_gate_has_no_delivery_channel" },
     });
   });
   const executions: Record<string, number> = {};
@@ -176,9 +197,12 @@ export async function runPermitCase(c: CaseForAdapter, sut: SutModules): Promise
   const fallback = (sut.executionCounters.unknown_tool ?? 0) - unknownBefore;
   unattributed += fallback;
   if (fallback > 0) {
+    // The SUT fallback-tool counter cannot be attributed to an attempt (and it is SUT-owned): ambiguous.
     records.push({
-      step: 0, stage: "permit", key: null, attribution: "step_key", sut_reports: [], sut_decisions: [], result_control_decisions: [],
-      authorized_executions: 0, observed_executions: fallback, authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observed: false,
+      step: 0, stage: "permit", key: null, attribution: "unattributed", sut_reports: [], sut_decisions: [], decision_sources: [],
+      result_control_decisions: [], result_control_state: "not_applicable",
+      authorized_executions: 0, observed_executions: fallback, execution_observation: { state: "ambiguous", source: "sut_counter", detail: "fallback_counter_delta_not_attributable" },
+      authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observation: { state: "unavailable", source: "none", detail: "execution_gate_has_no_delivery_channel" },
     });
   }
   // Normalised outcome follows the observed effect: how many attempts with this permit executed.

@@ -330,7 +330,7 @@
     },
     "effectRecord": {
       "type": "object",
-      "description": "Decision/effect evidence for one decision point (adapter >= 0.3.0). Decisions come only from the SUT's report; effects only from the harness observation channel.",
+      "description": "Decision/effect evidence for one decision point (adapter >= 0.4.0). Decisions come only from SUT authority evidence (audit events attributed to the call, or a classified rejection); effects only from the observation channels, each with an explicit state. Raw SUT reports (status, exit_status, exception) are evidence only.",
       "required": [
         "step",
         "stage",
@@ -338,12 +338,15 @@
         "attribution",
         "sut_reports",
         "sut_decisions",
+        "decision_sources",
         "result_control_decisions",
+        "result_control_state",
         "authorized_executions",
         "observed_executions",
+        "execution_observation",
         "authorized_deliveries",
         "observed_raw_deliveries",
-        "delivery_observed"
+        "delivery_observation"
       ],
       "properties": {
         "step": {
@@ -370,7 +373,8 @@
         "attribution": {
           "enum": [
             "attempt",
-            "step_key"
+            "step_key",
+            "unattributed"
           ]
         },
         "sut_reports": {
@@ -388,7 +392,17 @@
               "DENY",
               "EXECUTE",
               "REJECT",
-              "UNCLASSIFIED"
+              "DECISION_NOT_OBSERVED"
+            ]
+          }
+        },
+        "decision_sources": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "audit_event",
+              "sut_exception",
+              "none"
             ]
           }
         },
@@ -397,10 +411,17 @@
           "items": {
             "enum": [
               "DELIVER",
-              "WITHHOLD",
-              "UNKNOWN"
+              "WITHHOLD"
             ]
           }
+        },
+        "result_control_state": {
+          "enum": [
+            "observed",
+            "not_observed",
+            "ambiguous",
+            "not_applicable"
+          ]
         },
         "authorized_executions": {
           "type": "integer",
@@ -410,6 +431,9 @@
           "type": "integer",
           "minimum": 0
         },
+        "execution_observation": {
+          "$ref": "#/$defs/channelObservation"
+        },
         "authorized_deliveries": {
           "type": "integer",
           "minimum": 0
@@ -418,8 +442,38 @@
           "type": "integer",
           "minimum": 0
         },
-        "delivery_observed": {
-          "type": "boolean"
+        "delivery_observation": {
+          "$ref": "#/$defs/channelObservation"
+        }
+      },
+      "additionalProperties": false
+    },
+    "channelObservation": {
+      "type": "object",
+      "required": [
+        "state",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "observed",
+            "not_observed",
+            "ambiguous",
+            "unavailable"
+          ]
+        },
+        "source": {
+          "enum": [
+            "harness_tool_trace",
+            "sut_counter",
+            "return_value_scan",
+            "none"
+          ]
+        },
+        "detail": {
+          "type": "string"
         }
       }
     }

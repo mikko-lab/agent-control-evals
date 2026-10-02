@@ -79,13 +79,19 @@ export function renderSummary(r: Report): string {
   L.push("");
   L.push("## Decision/effect integrity (separate from oracle metrics; no confidence bounds)");
   L.push("");
-  L.push("A control decision and an observed side effect are separate evidence. These counts compare the SUT's own decisions with what the harness observation channel saw (tool executions, raw-output deliveries). They do not use the oracle and are not combined with false allow / false deny.");
+  L.push("A control decision and an observed side effect are separate evidence. These counts compare the SUT's authority evidence (audit events attributed to the call, classified rejections) with what the observation channels saw (tool executions, exact raw-output deliveries). They do not use the oracle and are not combined with false allow / false deny. Each category has its own eligible set (k / eligible); decision points whose decision was not observed or whose observation is ambiguous or unavailable are excluded from the clean denominators and listed separately.");
   L.push("");
-  L.push("| Boundary | Eligible scenarios | Unauthorized execution | Unauthorized delivery (k/delivery-eligible) | Missing expected effect | Any mismatch | Not observed |");
-  L.push("|---|---:|---|---|---|---|---:|");
+  L.push("| Boundary | Unauthorized execution | Unauthorized delivery | Missing expected effect | Any mismatch | Decision not observed | Ambiguous observation | Unavailable observation |");
+  L.push("|---|---|---|---|---|---|---|---|");
   for (const b of [r.decision_effect_integrity.runtime, r.decision_effect_integrity.component]) {
-    const ids = (c: { count: number; case_ids: string[] }) => (c.count === 0 ? "0" : `${c.count} (${c.case_ids.slice(0, 5).join(", ")}${c.case_ids.length > 5 ? ", ..." : ""})`);
-    L.push(`| ${b.boundary} | ${b.eligible_scenarios} | ${ids(b.unauthorized_execution)} / ${b.eligible_scenarios} | ${ids(b.unauthorized_delivery)} / ${b.delivery_eligible_scenarios} | ${ids(b.missing_expected_effect)} / ${b.eligible_scenarios} | ${ids(b.decision_effect_mismatch)} / ${b.eligible_scenarios} | ${b.not_observed_scenarios} |`);
+    const ids = (c: { count: number; eligible_scenarios: number; case_ids: string[] }) =>
+      `${c.count}${c.count === 0 ? "" : ` (${c.case_ids.slice(0, 3).join(", ")}${c.case_ids.length > 3 ? ", ..." : ""})`} / ${c.eligible_scenarios}`;
+    L.push(`| ${b.boundary} | ${ids(b.unauthorized_execution)} | ${ids(b.unauthorized_delivery)} | ${ids(b.missing_expected_effect)} | ${ids(b.decision_effect_mismatch)} | ${ids(b.decision_not_observed)} | ${ids(b.ambiguous_effect_observation)} | ${ids(b.unavailable_effect_observation)} |`);
+  }
+  L.push("");
+  for (const b of [r.decision_effect_integrity.runtime, r.decision_effect_integrity.component]) {
+    L.push(`Authority evidence sources (${b.boundary}, ${b.decision_points} decision points): ${Object.entries(b.evidence_sources.authority).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}.`);
+    L.push(`Result control (${b.boundary}): ${Object.entries(b.evidence_sources.result_control).map(([k, n]) => `${k} ${n}`).join(", ") || "none"}.`);
   }
   L.push("");
   L.push(`Confidence bound: not applicable. ${r.decision_effect_integrity.confidence_bound_reason.replace(/^not_applicable: /, "")}`);
@@ -96,10 +102,10 @@ export function renderSummary(r: Report): string {
   else {
     L.push(`Runtime: ${ms.runtime.kill_ratio} killed. Component: ${ms.component.kill_ratio} killed. (Reported per boundary; not combined.)`);
     L.push("");
-    L.push("| Mutant | Boundary | Status | Witnesses / baseline-valid candidates / candidates | Integrity scenarios (exec / delivery / missing) | Example witness cases |");
+    L.push("| Mutant | Boundary | Status | Witnesses / baseline-valid candidates / candidates | Integrity scenarios (exec / delivery / missing / decision not observed / ambiguous) | Example witness cases |");
     L.push("|---|---|---|---|---|---|");
     for (const m of ms.by_mutant) {
-      L.push(`| ${m.mutation_id} | ${m.evaluation_boundary} | ${m.status} | ${m.witness_count} / ${m.baseline_valid_witness_candidates} / ${m.witness_candidates} | ${m.integrity_scenarios.unauthorized_execution} / ${m.integrity_scenarios.unauthorized_delivery} / ${m.integrity_scenarios.missing_expected_effect} | ${m.witness_case_ids.slice(0, 3).join(", ")} |`);
+      L.push(`| ${m.mutation_id} | ${m.evaluation_boundary} | ${m.status} | ${m.witness_count} / ${m.baseline_valid_witness_candidates} / ${m.witness_candidates} | ${m.integrity_scenarios.unauthorized_execution} / ${m.integrity_scenarios.unauthorized_delivery} / ${m.integrity_scenarios.missing_expected_effect} / ${m.integrity_scenarios.decision_not_observed} / ${m.integrity_scenarios.ambiguous_effect_observation} | ${m.witness_case_ids.slice(0, 3).join(", ")} |`);
     }
   }
   L.push("");

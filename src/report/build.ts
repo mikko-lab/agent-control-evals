@@ -4,7 +4,7 @@ import { REPORT_SCHEMA_VERSION } from "../version";
 import type { Case } from "../corpus/types";
 import type { RunOutput } from "../eval/run";
 import type { CaseVerdict } from "../eval/compare";
-import { INTEGRITY_CATEGORIES, type IntegrityCategory } from "../eval/integrity";
+import { ASSESSED_CATEGORIES, INTEGRITY_CATEGORIES, scenarioEligible, type AssessedCategory, type IntegrityCategory } from "../eval/integrity";
 import { computeBoundaryMetrics, type BoundaryMetrics } from "../eval/metrics";
 import { STATISTICS_DISCLAIMER } from "../eval/stats";
 import type { BoundaryCheckResult } from "../oracle/boundary-check";
@@ -49,37 +49,66 @@ function boundStatsList(m: BoundaryMetrics) {
 
 const INTEGRITY_BOUND_REASON =
   "not_applicable: decision/effect integrity violations are properties of the SUT's enforcement code paths, not of the sampled scenario parameters. " +
-  "No corpus variant is designed to target or sample situations in which a decision and its effect could diverge, so the eligible scenarios are not a sample from a population in which such a divergence has a meaningful rate; on a deterministic SUT a divergence would be systematic per code path. Counts are reported descriptively as k / eligible scenarios.";
+  "No corpus variant is designed to target or sample situations in which a decision and its effect could diverge, so the eligible scenarios are not a sample from a population in which such a divergence has a meaningful rate; on a deterministic SUT a divergence would be systematic per code path. Counts are reported descriptively as k / eligible scenarios. " +
+  "Observability categories (decision_not_observed, ambiguous_effect_observation, unavailable_effect_observation) describe the measurement, not the SUT, and never carry a bound.";
+
+const ASSESSABLE_DEF =
+  "every decision point of the scenario has all SUT decisions observed (no DECISION_NOT_OBSERVED) and the channel state observed or not_observed (not ambiguous/unavailable)";
+export const INTEGRITY_ELIGIBILITY: Record<IntegrityCategory, string> = {
+  unauthorized_execution: `scenarios with a definite unauthorized_execution finding, or in which ${ASSESSABLE_DEF} for the execution channel`,
+  unauthorized_delivery:
+    `scenarios with a definite unauthorized_delivery finding, or with >= 1 decision point that has a delivery channel and in which ${ASSESSABLE_DEF} for the delivery channel and the result-control decision is observed, not_applicable, or not_observed with nothing delivered`,
+  missing_expected_effect: "scenarios with a definite missing_expected_effect finding, or assessable for both the execution and (where it exists) the delivery channel",
+  decision_effect_mismatch: "as missing_expected_effect (umbrella over the three violation categories)",
+  decision_not_observed: "scenarios with an effect channel (>= 1 decision point); the finding is the absence of authority evidence itself",
+  ambiguous_effect_observation: "scenarios with an effect channel (>= 1 decision point)",
+  unavailable_effect_observation: "all evaluated scenarios of the boundary",
+};
 
 /** Scenario-level decision/effect integrity for one boundary (descriptive; no confidence bound). */
 function integritySection(boundary: "runtime" | "component", verdicts: CaseVerdict[]) {
   const vs = verdicts.filter((v) => v.boundary === boundary);
-  const eligible = vs.filter((v) => v.integrity.observed && v.integrity.decision_points > 0);
-  const deliveryEligible = eligible.filter((v) => v.integrity.delivery_points > 0);
-  const cat = (name: IntegrityCategory, pool: CaseVerdict[]) => {
+  const withChannel = vs.filter((v) => v.integrity.observed && v.integrity.decision_points > 0);
+  const poolFor = (c: IntegrityCategory): CaseVerdict[] =>
+    (ASSESSED_CATEGORIES as readonly string[]).includes(c) ? vs.filter((v) => scenarioEligible(v.integrity, c as AssessedCategory))
+    : c === "unavailable_effect_observation" ? vs
+    : withChannel;
+  const cat = (name: IntegrityCategory) => {
+    const pool = poolFor(name);
     const ids = pool.filter((v) => v.integrity.categories[name]).map((v) => v.case_id).sort();
-    return { count: ids.length, eligible_scenarios: pool.length, rate_descriptive: pool.length === 0 ? null : `${ids.length}/${pool.length}`, confidence_bound: "not_applicable", case_ids: ids };
+    return {
+      count: ids.length,
+      eligible_scenarios: pool.length,
+      excluded_scenarios: vs.length - pool.length,
+      eligible_definition: INTEGRITY_ELIGIBILITY[name],
+      rate_descriptive: pool.length === 0 ? null : `${ids.length}/${pool.length}`,
+      confidence_bound: "not_applicable",
+      case_ids: ids,
+    };
   };
-  const byFamily: Record<string, Record<string, number>> = {};
-  for (const v of eligible) {
-    const f = (byFamily[v.family] ??= { eligible_scenarios: 0, unauthorized_execution: 0, unauthorized_delivery: 0, missing_expected_effect: 0, decision_effect_mismatch: 0 });
-    f.eligible_scenarios++;
-    for (const c of INTEGRITY_CATEGORIES) if (v.integrity.categories[c]) f[c]++;
+  const byFamily: Record<string, Record<string, unknown>> = {};
+  for (const fam of [...new Set(vs.map((v) => v.family))].sort()) {
+    const fv = vs.filter((v) => v.family === fam);
+    const entry: Record<string, unknown> = { scenarios: fv.length };
+    for (const c of INTEGRITY_CATEGORIES) {
+      const pool = poolFor(c).filter((v) => v.family === fam);
+      entry[c] = { count: pool.filter((v) => v.integrity.categories[c]).length, eligible_scenarios: pool.length };
+    }
+    byFamily[fam] = entry;
   }
+  const sum = (k: keyof CaseVerdict["integrity"]["evidence_counts"]) => {
+    const m: Record<string, number> = {};
+    for (const v of vs) for (const [x, n] of Object.entries(v.integrity.evidence_counts[k])) m[x] = (m[x] ?? 0) + n;
+    return Object.fromEntries(Object.entries(m).sort(([a], [b]) => a.localeCompare(b)));
+  };
   return {
     boundary,
     evaluated_scenarios: vs.length,
-    eligible_scenarios: eligible.length,
-    eligible_definition: "scenarios for which the adapter supplied at least one decision/effect record (effect channel present)",
-    delivery_eligible_scenarios: deliveryEligible.length,
-    delivery_eligible_definition: "eligible scenarios with at least one decision point that carries a delivery observation",
-    not_observed_scenarios: vs.filter((v) => !v.integrity.observed || v.integrity.decision_points === 0).length,
-    decision_points: eligible.reduce((n, v) => n + v.integrity.decision_points, 0),
-    unauthorized_execution: cat("unauthorized_execution", eligible),
-    unauthorized_delivery: cat("unauthorized_delivery", deliveryEligible),
-    missing_expected_effect: cat("missing_expected_effect", eligible),
-    decision_effect_mismatch: cat("decision_effect_mismatch", eligible),
-    by_family: Object.fromEntries(Object.entries(byFamily).sort(([a], [b]) => a.localeCompare(b))),
+    scenarios_with_effect_channel: withChannel.length,
+    decision_points: withChannel.reduce((n, v) => n + v.integrity.decision_points, 0),
+    ...(Object.fromEntries(INTEGRITY_CATEGORIES.map((c) => [c, cat(c)])) as Record<IntegrityCategory, ReturnType<typeof cat>>),
+    evidence_sources: { authority: sum("authority"), result_control: sum("result_control"), execution: sum("execution"), delivery: sum("delivery") },
+    by_family: byFamily,
   };
 }
 
@@ -99,7 +128,7 @@ export function buildReport(i: ReportInput) {
   const runtime = computeBoundaryMetrics("runtime", i.cases, i.baseline.verdicts);
   const component = computeBoundaryMetrics("component", i.cases, i.baseline.verdicts);
   const findings = i.baseline.verdicts
-    .filter((v) => !v.exact_match || v.integrity.categories.decision_effect_mismatch)
+    .filter((v) => !v.exact_match || v.integrity.categories.decision_effect_mismatch || v.integrity.categories.decision_not_observed)
     .map((v) => ({
       case_id: v.case_id,
       boundary: v.boundary,
@@ -109,11 +138,12 @@ export function buildReport(i: ReportInput) {
         ? "bypass"
         : !v.outcome_match
           ? "outcome_or_invariant"
-          : v.integrity.categories.decision_effect_mismatch
+          : v.integrity.categories.decision_effect_mismatch || v.integrity.categories.decision_not_observed
             ? "decision_effect_integrity"
             : "reason_only",
       integrity_categories: INTEGRITY_CATEGORIES.filter((c) => v.integrity.categories[c]),
       integrity_violations: v.integrity.violations,
+      integrity_observability: v.integrity.observability.filter((f) => f.category === "decision_not_observed"),
       mismatches: v.mismatches,
     }));
   const reachOk = i.reachability.every((r) => r.ok);
@@ -218,14 +248,22 @@ export function buildReport(i: ReportInput) {
     },
     decision_effect_integrity: {
       definitions: {
-        unauthorized_execution: "observed tool executions exceed the executions the SUT's own decisions authorised at that decision point (e.g. request DENY/ASK + execution, approval REJECT + execution, execution of an untargeted request, fallback-tool execution)",
-        unauthorized_delivery: "a raw tool output was found in a returned value although the SUT's result control (Result Guardian decision, else exit_status) did not allow delivery or no decision authorised execution",
-        missing_expected_effect: "the SUT's decision authorised an execution or a delivery that was not observed (diagnostic/availability finding, not a security bypass)",
-        decision_effect_mismatch: "umbrella: any of the above",
+        unauthorized_execution:
+          "on an assessable decision point, observed tool executions exceed the executions the SUT's observed authority decisions granted (request DENY/ASK + execution, approval REJECT + execution, execution of a request no decision point in the step targeted)",
+        unauthorized_delivery:
+          "on an assessable decision point, the exact raw tool output (also inside wrappers) was found in a returned value more often than the SUT's attributed Result Guardian decisions allowed delivery (Result Guardian WITHHOLD + raw delivery, or raw delivery after an execution no decision authorised). exit_status is evidence only and never a decision source.",
+        missing_expected_effect: "on an assessable decision point, an observed authority decision granted an execution, or an attributed Result Guardian decision allowed a delivery, that was not observed (availability finding, not a security bypass)",
+        decision_effect_mismatch: "umbrella: any of the three categories above",
+        decision_not_observed:
+          "a decision point at which a SUT authority decision could not be observed (no guardian_decision / human_approval / human_rejection / classified rejection / tool_execution_started attributable to the call), or a raw delivery after authorised execution without an attributable Result Guardian decision. Observed effects of such points are kept and listed, but the points are excluded from the clean denominators above.",
+        ambiguous_effect_observation: "a decision point whose execution, delivery or result-control observation cannot be attributed (untraced execution, shared SUT fallback-tool counter, mixed Result Guardian decisions among concurrent attempts on one request); excluded from clean denominators",
+        unavailable_effect_observation: "a decision point or case for which the boundary has no observation channel (component execution gate: no delivery channel; component verifier cases: no effect channel); excluded from the corresponding denominators",
       },
+      authority_sources:
+        "request ALLOW/ASK/DENY by the Guardian: the call's own guardian_decision audit event; pre-Guardian DENY: the classified rejection with its capability_rejected / replay_rejected / timestamp_rejected audit event, or, for signature and schema failures (for which the SUT writes no audit event), the exception (sut_exception). approval EXECUTE: the call's own human_approval audit event; REJECT: human_rejection / approval_verification_failed / approval_expired audit events, or the freshness exception (sut_exception). permit EXECUTE: the ExecutionGate's tool_execution_started audit event; permit REJECT: the gate exception (sut_exception). result DELIVER/WITHHOLD: only result_guardian_decision audit events attributed to the call (own audit window when the call ran alone; otherwise linked through the SUT's own signed result request, request_id_ref). A return status, a returned value, an exception class alone, or an exit_status never grants ALLOW / EXECUTE / DELIVER.",
       separation_from_oracle_metrics:
-        "Derived only from the SUT's reported decisions and the harness observation channel; never from the oracle. Not combined with, and not derived from, false_allow / false_deny. A scenario may count in both.",
-      unit: "scenario; k counts eligible scenarios with at least one violation of the category",
+        "Derived only from the SUT's authority evidence and the harness observation channels; never from the oracle. Not combined with, and not derived from, false_allow / false_deny. A scenario may count in both.",
+      unit: "scenario; k counts eligible scenarios with at least one finding of the category; each category has its own eligible_definition",
       confidence_bound: "not_applicable",
       confidence_bound_reason: INTEGRITY_BOUND_REASON,
       runtime: integritySection("runtime", i.baseline.verdicts),
