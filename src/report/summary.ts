@@ -22,6 +22,9 @@ function boundaryTable(m: BoundaryMetrics): string[] {
   return out;
 }
 
+/** Rendering of a category whose eligible set is empty: not a rate, not a success. */
+export const NO_ELIGIBLE = "N/A — no eligible scenario (no observable channel or all excluded)";
+
 export function renderSummary(r: Report): string {
   const h = r.headline;
   const ms = r.mutation_sensitivity;
@@ -85,7 +88,7 @@ export function renderSummary(r: Report): string {
   L.push("|---|---|---|---|---|---|---|---|");
   for (const b of [r.decision_effect_integrity.runtime, r.decision_effect_integrity.component]) {
     const ids = (c: { count: number; eligible_scenarios: number; case_ids: string[] }) =>
-      `${c.count}${c.count === 0 ? "" : ` (${c.case_ids.slice(0, 3).join(", ")}${c.case_ids.length > 3 ? ", ..." : ""})`} / ${c.eligible_scenarios}`;
+      c.eligible_scenarios === 0 ? NO_ELIGIBLE : `${c.count}${c.count === 0 ? "" : ` (${c.case_ids.slice(0, 3).join(", ")}${c.case_ids.length > 3 ? ", ..." : ""})`} / ${c.eligible_scenarios}`;
     L.push(`| ${b.boundary} | ${ids(b.unauthorized_execution)} | ${ids(b.unauthorized_delivery)} | ${ids(b.missing_expected_effect)} | ${ids(b.decision_effect_mismatch)} | ${ids(b.decision_not_observed)} | ${ids(b.ambiguous_effect_observation)} | ${ids(b.unavailable_effect_observation)} |`);
   }
   L.push("");
@@ -102,10 +105,14 @@ export function renderSummary(r: Report): string {
   else {
     L.push(`Runtime: ${ms.runtime.kill_ratio} killed. Component: ${ms.component.kill_ratio} killed. (Reported per boundary; not combined.)`);
     L.push("");
-    L.push("| Mutant | Boundary | Status | Witnesses / baseline-valid candidates / candidates | Integrity scenarios (exec / delivery / missing / decision not observed / ambiguous) | Example witness cases |");
-    L.push("|---|---|---|---|---|---|");
+    L.push("Integrity columns are descriptive (not a kill criterion), k / eligible scenarios of the mutant's own boundary only; the other boundary's scenarios are never pooled into them.");
+    L.push("");
+    L.push("| Mutant | Boundary | Status | Witnesses / baseline-valid candidates / candidates | Unauthorized execution | Unauthorized delivery | Missing expected effect | Decision not observed | Ambiguous | Unavailable | Example witness cases |");
+    L.push("|---|---|---|---|---|---|---|---|---|---|---|");
     for (const m of ms.by_mutant) {
-      L.push(`| ${m.mutation_id} | ${m.evaluation_boundary} | ${m.status} | ${m.witness_count} / ${m.baseline_valid_witness_candidates} / ${m.witness_candidates} | ${m.integrity_scenarios.unauthorized_execution} / ${m.integrity_scenarios.unauthorized_delivery} / ${m.integrity_scenarios.missing_expected_effect} / ${m.integrity_scenarios.decision_not_observed} / ${m.integrity_scenarios.ambiguous_effect_observation} | ${m.witness_case_ids.slice(0, 3).join(", ")} |`);
+      const t = m.integrity_scenarios.by_boundary[m.integrity_scenarios.primary_boundary].categories;
+      const k = (c: { count: number; eligible_scenarios: number }) => (c.eligible_scenarios === 0 ? NO_ELIGIBLE : `${c.count} / ${c.eligible_scenarios}`);
+      L.push(`| ${m.mutation_id} | ${m.evaluation_boundary} | ${m.status} | ${m.witness_count} / ${m.baseline_valid_witness_candidates} / ${m.witness_candidates} | ${k(t.unauthorized_execution)} | ${k(t.unauthorized_delivery)} | ${k(t.missing_expected_effect)} | ${k(t.decision_not_observed)} | ${k(t.ambiguous_effect_observation)} | ${k(t.unavailable_effect_observation)} | ${m.witness_case_ids.slice(0, 3).join(", ")} |`);
     }
   }
   L.push("");

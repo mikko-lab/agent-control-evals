@@ -301,9 +301,14 @@ interface ResultControl {
   state: ResultControlState;
 }
 
+/**
+ * Result control for one decision point. Never picks a winner: an unrecognised Result Guardian decision, or both
+ * DELIVER and WITHHOLD attributed to the same point, make the point ambiguous (no authority decision).
+ */
 function resultControl(decisions: (ResultControlDecision | null)[], need: boolean, ambiguous: boolean): ResultControl {
   if (ambiguous) return { decisions: [], state: "ambiguous" };
   if (decisions.some((d) => d === null)) return { decisions: [], state: "ambiguous" };
+  if (new Set(decisions).size > 1) return { decisions: [], state: "ambiguous" };
   const ds = decisions as ResultControlDecision[];
   if (ds.length > 0) return { decisions: ds, state: "observed" };
   return { decisions: [], state: need ? "not_observed" : "not_applicable" };
@@ -630,8 +635,7 @@ async function runApprovalStep(ctx: Ctx, step: number, grants: GrantSpec[], conc
     else {
       const [sLabel, rLabel] = key.split("/");
       const linked = rg.filter((e) => e.link !== undefined && e.link.session === sid(ctx, sLabel) && e.link.ref === rid(ctx, rLabel)).map((e) => e.control);
-      const mixed = new Set(linked).size > 1;
-      rc = resultControl(linked, need, mixed || (need && linked.length === 0 && rg.some((e) => e.link === undefined)));
+      rc = resultControl(linked, need, need && linked.length === 0 && rg.some((e) => e.link === undefined));
     }
     if (key !== null) controlByKey.set(key, rc);
     const viaCounter = key !== null && key === counterKey;

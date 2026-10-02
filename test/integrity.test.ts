@@ -91,12 +91,46 @@ test("ambiguous result-control attribution excludes the delivery channel only", 
   assert.equal(scenarioEligible(got, "unauthorized_execution"), true);
 });
 
-test("component permit points: no delivery channel (unavailable), execution still assessable", () => {
+test("component permit points: no delivery channel (unavailable) -> execution assessable, every delivery-related denominator excluded", () => {
   const got = classifyIntegrity(obs([rec({ stage: "permit", sut_decisions: ["EXECUTE"], authorized_executions: 1, observed_executions: 1, execution_observation: OBS, delivery_observation: { state: "unavailable", source: "none" } })]));
   assert.equal(got.categories.unavailable_effect_observation, true);
   assert.equal(scenarioEligible(got, "unauthorized_execution"), true);
-  assert.equal(scenarioEligible(got, "missing_expected_effect"), true);
-  assert.equal(scenarioEligible(got, "unauthorized_delivery"), false);
+  for (const c of ["unauthorized_delivery", "missing_expected_effect", "decision_effect_mismatch"] as const) assert.equal(scenarioEligible(got, c), false, c);
+  // A definite finding from the execution channel is still kept (and stays inside its denominator).
+  const missing = classifyIntegrity(obs([rec({ stage: "permit", sut_decisions: ["EXECUTE"], authorized_executions: 1, delivery_observation: { state: "unavailable", source: "none" } })]));
+  assert.equal(missing.categories.missing_expected_effect, true);
+  assert.equal(scenarioEligible(missing, "missing_expected_effect"), true);
+});
+
+const DELIVERY_RELATED = ["unauthorized_delivery", "missing_expected_effect", "decision_effect_mismatch"] as const;
+const cleanAllow = (key: string): Partial<EffectRecord> => ({ key, sut_decisions: ["ALLOW"], authorized_executions: 1, observed_executions: 1, execution_observation: OBS, result_control_decisions: ["DELIVER"], result_control_state: "observed", authorized_deliveries: 1, observed_raw_deliveries: 1, delivery_observation: DOBS });
+
+test("MEDIUM-2: decision observed + delivery unavailable -> excluded from every delivery-related clean denominator, not a clean zero", () => {
+  // Second point: an observed decision whose execution was observed through the SUT fallback counter; its delivery channel is unavailable.
+  const got = classifyIntegrity(obs([rec(cleanAllow("s1/q1")), rec({ key: "s1/q2", sut_decisions: ["DENY"], execution_observation: { state: "not_observed", source: "sut_counter" }, delivery_observation: { state: "unavailable", source: "none", detail: "no_raw_output_for_sut_fallback_tool" } })]));
+  assert.equal(got.categories.unavailable_effect_observation, true);
+  for (const c of DELIVERY_RELATED) {
+    assert.equal(got.categories[c], false, c);
+    assert.equal(scenarioEligible(got, c), false, `${c}: unavailable must not count as clean`);
+  }
+  assert.equal(scenarioEligible(got, "unauthorized_execution"), true, "the execution channel is still assessable");
+});
+
+test("MEDIUM-2: decision observed + delivery ambiguous -> excluded from every delivery-related clean denominator", () => {
+  const got = classifyIntegrity(obs([rec(cleanAllow("s1/q1")), rec({ ...cleanAllow("s1/q2"), delivery_observation: { state: "ambiguous", source: "return_value_scan" } })]));
+  assert.equal(got.categories.ambiguous_effect_observation, true);
+  for (const c of DELIVERY_RELATED) assert.equal(scenarioEligible(got, c), false, c);
+  assert.equal(scenarioEligible(got, "unauthorized_execution"), true);
+});
+
+test("MEDIUM-2: a definite unauthorized_delivery is kept even when another point is ambiguous or unavailable", () => {
+  const leak: Partial<EffectRecord> = { key: "s1/q1", sut_decisions: ["ALLOW"], authorized_executions: 1, observed_executions: 1, execution_observation: OBS, result_control_decisions: ["WITHHOLD"], result_control_state: "observed", observed_raw_deliveries: 1, delivery_observation: DOBS };
+  for (const other of [{ state: "ambiguous", source: "return_value_scan" }, { state: "unavailable", source: "none" }] as const) {
+    const got = classifyIntegrity(obs([rec(leak), rec({ ...cleanAllow("s1/q2"), delivery_observation: other })]));
+    assert.equal(got.categories.unauthorized_delivery, true, other.state);
+    assert.equal(scenarioEligible(got, "unauthorized_delivery"), true, `${other.state}: k stays inside n`);
+    assert.equal(got.categories.decision_effect_mismatch, true);
+  }
 });
 
 test("absent effect channel is reported as unavailable, never as zero violations", () => {

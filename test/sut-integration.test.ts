@@ -438,3 +438,125 @@ test("integrity (component): a gate return value without tool_execution_started 
   assert.equal(integ.categories.decision_not_observed, true);
   assert.equal(integ.categories.unauthorized_execution, false);
 });
+
+// ---- Concurrent result authority must remain attributable to the originating request (MEDIUM-1) ----------
+
+type Step = Record<string, unknown> & { op: string };
+const stepsOf = (variant: string) => (smoke.find((x) => x.variant === variant)!.scenario as unknown as { steps: Step[] }).steps;
+const withSteps = (variant: string, steps: Step[]) => ({ ...caseOf(variant), scenario: { kind: "runtime", steps } }) as unknown as ReturnType<typeof caseOf>;
+/** Request A: ordinary output (the Result Guardian allows it). Request B: restricted output (the Result Guardian denies it). */
+const reqA = (): Step => ({ ...stepsOf("positive_ordinary_output_on_allow").at(-1)!, request: "ra" });
+const reqB = (): Step => ({ ...stepsOf("restricted_output_on_allow").at(-1)!, request: "rb" });
+/**
+ * The real SUT, except that harness-tool executions of `slowKey` finish after a timer tick, so that request's result
+ * path (and its Result Guardian decision) completes after the other concurrent calls'. `completed` records the order
+ * in which tool executions finished (by request key), proving the interleaving actually happened.
+ */
+function slowing(sut: Sut, slowKey: string, completed: string[]): Sut {
+  const wrap = () => {
+    for (const t of ["read_record", "update_record"]) {
+      const inner = sut.tools[t] as ((a: Record<string, unknown>) => Promise<unknown>) & { slowed?: boolean };
+      if (inner.slowed) continue;
+      const slowed = Object.assign(async (args: Record<string, unknown>) => {
+        const key = String(args.ace_trace).split("#")[0];
+        if (key === slowKey) await new Promise((r) => setTimeout(r, 5));
+        const out = await inner(args);
+        completed.push(key);
+        return out;
+      }, { slowed: true });
+      sut.tools[t] = slowed; // discarded when the adapter restores the registry snapshot at the end of the case
+    }
+  };
+  return withExecutor(sut, (Real) => class extends Real {
+    override async process(env: unknown): Promise<unknown> {
+      wrap();
+      return super.process(env);
+    }
+    override async resolveApproval(g: unknown): Promise<unknown> {
+      wrap();
+      return super.resolveApproval(g);
+    }
+  });
+}
+const resultAuthority = (recs: EffectRecord[], stage: EffectRecord["stage"], key: string) => {
+  const r = recs.filter((x) => x.stage === stage && x.key === key);
+  assert.equal(r.length, 1, `exactly one ${stage} record for ${key}`);
+  return { state: r[0].result_control_state, decisions: r[0].result_control_decisions, delivered: r[0].observed_raw_deliveries };
+};
+
+test("concurrent result authority stays with the originating request (process): A DELIVER, B WITHHOLD, never swapped or pooled", { skip }, async () => {
+  const sut = loadSut(BUILD!);
+  const keys = makeKeys();
+  // Ground truth: each request alone; its Result Guardian decision is the only one in its own call window.
+  const alone = async (s: Step, key: string) => resultAuthority((await runRuntimeCase(withSteps("positive_ordinary_output_on_allow", [s]), sut, keys)).observations.effect_records!, "request", key);
+  const truthA = await alone(reqA(), "s1/ra");
+  const truthB = await alone(reqB(), "s1/rb");
+  assert.deepEqual([truthA.state, truthA.decisions, truthA.delivered], ["observed", ["DELIVER"], 1]);
+  assert.deepEqual([truthB.state, truthB.decisions, truthB.delivered], ["observed", ["WITHHOLD"], 0]);
+  // Both start orders, with natural completion and with A's result path forced to complete last (so neither the
+  // start order nor the completion order of the Result Guardian events can stand in for the originating request).
+  for (const [order, slow] of [[[reqA(), reqB()], false], [[reqB(), reqA()], false], [[reqA(), reqB()], true], [[reqB(), reqA()], true]] as const) {
+    const completed: string[] = [];
+    const s = slow ? slowing(sut, "s1/ra", completed) : sut;
+    const r = await runRuntimeCase(withSteps("positive_ordinary_output_on_allow", [{ op: "concurrent_request", requests: [...order] }]), s, keys);
+    if (slow) assert.deepEqual(completed, ["s1/rb", "s1/ra"], "A's execution finished after B's");
+    const recs = r.observations.effect_records!;
+    assert.deepEqual(resultAuthority(recs, "request", "s1/ra"), truthA, "A keeps its own result authority");
+    assert.deepEqual(resultAuthority(recs, "request", "s1/rb"), truthB, "B keeps its own result authority");
+    const integ = classifyIntegrity(r.observations);
+    assert.equal(integ.categories.decision_effect_mismatch, false);
+    assert.equal(integ.categories.ambiguous_effect_observation, false);
+    const results = r.observations.assertions.filter((x) => x.stage === "result").map((x) => [order[x.attempt!].request, x.outcome, x.reason_class]).sort();
+    assert.deepEqual(results, [["ra", "DELIVER", "RESULT_POLICY_DELIVER"], ["rb", "WITHHOLD", "RESULT_POLICY_WITHHOLD"]]);
+  }
+});
+
+test("concurrent result authority stays with the originating request (resolveApproval): A DELIVER, B WITHHOLD", { skip }, async () => {
+  const sut = loadSut(BUILD!);
+  const keys = makeKeys();
+  const base = stepsOf("positive_valid_approval");
+  const ask = base.find((s) => s.op === "request" && s.tool === "update_record")!;
+  const grant = base.find((s) => s.op === "approve")!.grant as Record<string, unknown>;
+  const askA: Step = { ...ask, request: "pa" };
+  const askB: Step = { ...ask, request: "pb", tool_output: { classification: "restricted" } };
+  const gA = { ...grant, request: "pa" };
+  const gB = { ...grant, request: "pb" };
+  const run = async (steps: Step[]) => (await runRuntimeCase(withSteps("positive_valid_approval", steps), sut, keys)).observations;
+  // Ground truth: one approval at a time.
+  const seq = (await run([askA, askB, { op: "approve", grant: gA }, { op: "approve", grant: gB }])).effect_records!;
+  const truthA = resultAuthority(seq, "approval", "s1/pa");
+  const truthB = resultAuthority(seq, "approval", "s1/pb");
+  assert.deepEqual([truthA.state, truthA.decisions, truthA.delivered], ["observed", ["DELIVER"], 1]);
+  assert.deepEqual([truthB.state, truthB.decisions, truthB.delivered], ["observed", ["WITHHOLD"], 0]);
+  for (const [grants, slow] of [[[gA, gB], false], [[gB, gA], false], [[gA, gB], true], [[gB, gA], true]] as const) {
+    const completed: string[] = [];
+    const s = slow ? slowing(sut, "s1/pa", completed) : sut;
+    const o = (await runRuntimeCase(withSteps("positive_valid_approval", [askA, askB, { op: "concurrent_approve", grants: [...grants] }]), s, keys)).observations;
+    if (slow) assert.deepEqual(completed, ["s1/pb", "s1/pa"], "A's execution finished after B's");
+    assert.deepEqual(resultAuthority(o.effect_records!, "approval", "s1/pa"), truthA, "A keeps its own result authority");
+    assert.deepEqual(resultAuthority(o.effect_records!, "approval", "s1/pb"), truthB, "B keeps its own result authority");
+    const integ = classifyIntegrity(o);
+    assert.equal(integ.categories.decision_effect_mismatch, false);
+    assert.equal(integ.categories.ambiguous_effect_observation, false);
+  }
+});
+
+test("LOW-1: DELIVER and WITHHOLD attributed to one call is ambiguous, never resolved to a single authority decision", { skip }, async () => {
+  const sut = loadSut(BUILD!);
+  const A = sut.AuditCollector as new (...a: unknown[]) => { record(id: unknown, type: unknown, meta?: Record<string, unknown>): unknown };
+  // The SUT's Result Guardian records allow; a second, contradicting deny is recorded for the same result request.
+  const contradicting = { ...sut, AuditCollector: class extends A {
+    override record(id: unknown, type: unknown, meta?: Record<string, unknown>) {
+      const out = super.record(id, type, meta);
+      if (type === "result_guardian_decision") super.record(id, type, { ...meta, decision: meta?.decision === "allow" ? "deny" : "allow" });
+      return out;
+    }
+  } } as typeof sut;
+  const r = await runRuntimeCase(caseOf("positive_ordinary_output_on_allow"), contradicting, makeKeys());
+  const rec = lastRec(r, "request");
+  assert.deepEqual([rec.result_control_state, rec.result_control_decisions, rec.authorized_deliveries, rec.observed_raw_deliveries], ["ambiguous", [], 0, 1]);
+  const integ = classifyIntegrity(r.observations);
+  assert.equal(integ.categories.ambiguous_effect_observation, true);
+  assert.equal(integ.categories.unauthorized_delivery, false, "no winner is picked, so no violation is claimed either");
+  assert.equal(scenarioEligible(integ, "unauthorized_delivery"), false, "and the scenario is not a clean zero");
+});

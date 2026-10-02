@@ -156,7 +156,7 @@ Sampling model: within a variant, cases are seeded pseudo-random draws of that v
 
 > Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production.
 
-## 12. Decision/effect integrity (report schema 0.4.0)
+## 12. Decision/effect integrity (report schema 0.5.0)
 
 > A control decision and an observed side effect are separate evidence. A reported denial does not by itself demonstrate that execution was prevented.
 
@@ -175,7 +175,18 @@ Sampling model: within a variant, cases are seeded pseudo-random draws of that v
 | `ambiguous` | something was or may have been seen, but cannot be attributed to the decision point | **no** |
 | `unavailable` | the boundary has no such channel | **no** |
 
-Sources: `harness_tool_trace` (tool doubles, per-attempt trace), `sut_counter` (SUT fallback-tool counter; attributable only when one call can have caused the delta), `return_value_scan` (exact raw output in the returned value), `none`.
+Sources, with their trust level:
+
+| Source | Owner | Trust | Used when |
+|---|---|---|---|
+| `harness_tool_trace` | harness (tool doubles) | stronger: independent of the SUT | tools registered as harness doubles; attribution by per-attempt trace |
+| `sut_counter` | SUT (fallback-tool counter) | weaker: SUT state, can change with a mutant | only tools outside the doubles, and only when exactly one call can have caused the delta (else `ambiguous`) |
+| `return_value_scan` | harness | exact raw output in the returned value | every call with a returned value |
+| `none` | — | no channel (`unavailable`) | e.g. the execution gate has no delivery channel |
+
+Every observation keeps its source (`evidence_sources` in the report); the sources are never merged into one undifferentiated count.
+
+**Result control is never resolved by a rule.** Both DELIVER and WITHHOLD attributed to one decision point, an unrecognised Result Guardian decision, or decisions that cannot be assigned among concurrent attempts on one request id make the point's result control `ambiguous` (no min/max/first/last winner).
 
 ### 12.2 Categories
 
@@ -198,12 +209,16 @@ A decision point is **assessable** for a channel when all its SUT decisions were
 Each category has its own eligible set, stated in the report as `eligible_definition`:
 
 - `unauthorized_execution`: scenarios with a definite finding of the category, or in which **every** decision point is assessable for execution.
-- `unauthorized_delivery`: scenarios with a definite finding, or with at least one decision point that has a delivery channel and in which every such point is assessable for delivery.
-- `missing_expected_effect` and the umbrella: scenarios with a definite finding, or assessable for execution and (where it exists) delivery.
+- `unauthorized_delivery`: scenarios with a definite finding, or in which every decision point is assessable for delivery.
+- `missing_expected_effect` and the umbrella: scenarios with a definite finding, or in which every decision point is assessable for both execution and delivery.
+
+An `unavailable` or `ambiguous` delivery observation is never a clean zero: it removes the scenario from the clean denominators of `unauthorized_delivery`, `missing_expected_effect` and the umbrella. The component execution gate has no delivery channel, so its scenarios have no clean denominator for these three categories (eligible = 0, `rate_descriptive: null`, rendered as N/A); its execution channel is still assessed by `unauthorized_execution`. A category with no eligible scenario is reported as N/A, never as 0 % or as a success.
 - `decision_not_observed` and `ambiguous_effect_observation`: scenarios with an effect channel; the finding is the measurement gap itself.
 - `unavailable_effect_observation`: all evaluated scenarios of the boundary.
 
 One non-assessable point (decision not observed, ambiguous, unavailable) removes a scenario without a definite finding from the clean denominator; it is counted in `excluded_scenarios` and in the observability categories instead. A definite finding is never hidden by another point being ambiguous, so `k` always counts members of `n`. Assertion counts are never used as denominators.
+
+Mutant runs report the same tallies (k / eligible per category) separately for the runtime and the component boundary (`integrity_scenarios.by_boundary`), with the mutant's own boundary as `primary_boundary`; the two are never pooled, also when a run evaluates both boundaries (`--boundary all`).
 
 Baseline-SUT scenarios with a violation or a `decision_not_observed` finding are listed as findings with severity `decision_effect_integrity` (or a stronger severity if the oracle comparison also failed), with their case IDs and details. The report also counts the evidence sources (`evidence_sources`: authority decisions by stage, decision and source; result-control states and decisions; execution and delivery observations by source and state).
 

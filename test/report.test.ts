@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { buildReport } from "../src/report/build";
-import { renderSummary } from "../src/report/summary";
+import { NO_ELIGIBLE, renderSummary } from "../src/report/summary";
+import { classifyIntegrity } from "../src/eval/integrity";
+import { integrityByBoundary } from "../src/mutation/runner";
 import { validateReport } from "../src/report/validate";
 import { buildCorpusManifest } from "../src/report/manifest";
 import { generateCorpus } from "../src/corpus/generate";
@@ -95,4 +97,44 @@ test("a report missing the disclaimer or mixing N/A into metrics fails schema va
   const r2 = JSON.parse(JSON.stringify(mk()));
   r2.na_controls[0].status = "pass";
   assert.equal(validateReport(r2, ROOT).ok, false);
+});
+
+test("0/0: a category without eligible scenarios is null in JSON and N/A in the summary, never 0 % or a success", () => {
+  const r = mk(); // synthetic observations without an effect channel: nothing is eligible anywhere
+  for (const b of [r.decision_effect_integrity.runtime, r.decision_effect_integrity.component]) {
+    for (const c of ["unauthorized_execution", "unauthorized_delivery", "missing_expected_effect", "decision_effect_mismatch"] as const) {
+      assert.equal(b[c].eligible_scenarios, 0, `${b.boundary} ${c}`);
+      assert.equal(b[c].rate_descriptive, null, `${b.boundary} ${c}`);
+    }
+  }
+  const s = renderSummary(r);
+  const section = s.slice(s.indexOf("## Decision/effect integrity"), s.indexOf("## Mutation sensitivity"));
+  assert.ok(section.includes(NO_ELIGIBLE));
+  assert.equal(/\b0 \/ 0\b/.test(section), false, "no 0 / 0 rendered as a ratio");
+});
+
+test("mutant integrity is reported per boundary in the schema and the summary shows only the mutant's own boundary", () => {
+  const base = mk();
+  const runtimeCi = classifyIntegrity({ assertions: [], executions: {}, unattributed_executions: 0, effect_records: [] });
+  const compCi = classifyIntegrity({ assertions: [], executions: {}, unattributed_executions: 0 });
+  const mi = integrityByBoundary(
+    [{ boundary: "runtime", integrity: runtimeCi }, { boundary: "component", integrity: compCi }, { boundary: "component", integrity: compCi }] as never,
+    "runtime",
+  );
+  assert.deepEqual([mi.by_boundary.runtime.scenarios, mi.by_boundary.component.scenarios], [1, 2]);
+  assert.equal(mi.by_boundary.runtime.categories.unavailable_effect_observation.count, 0, "component unavailability never leaks into the runtime tally");
+  assert.equal(mi.by_boundary.component.categories.unavailable_effect_observation.count, 2);
+  const r = JSON.parse(JSON.stringify(base));
+  r.mutation_sensitivity.executed = true;
+  r.mutation_sensitivity.by_mutant = [{
+    mutation_id: "MX", family: "fam", evaluation_boundary: "runtime", status: "killed", invalid_reason: null, witness_candidates: 1, baseline_valid_witness_candidates: 1,
+    witness_case_ids: ["case-1"], witness_count: 1, mutant_adapter_errors: 0, mutant_harness_errors: 0, outcome_mismatches_by_boundary: { runtime: 1, component: 0 }, boundary_violation: false,
+    integrity_scenarios: mi,
+  }];
+  assert.deepEqual(validateReport(r, ROOT).errors.filter((e: string) => e.includes("integrity_scenarios")), []);
+  const bad = JSON.parse(JSON.stringify(r));
+  bad.mutation_sensitivity.by_mutant[0].integrity_scenarios = { unavailable_effect_observation: 3 };
+  assert.ok(validateReport(bad, ROOT).errors.some((e: string) => e.includes("integrity_scenarios")), "a pooled tally does not validate");
+  const row = renderSummary(r).split("\n").find((l) => l.startsWith("| MX |"))!;
+  assert.ok(row.includes(NO_ELIGIBLE) && !row.includes("/ 2"), row);
 });

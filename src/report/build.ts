@@ -4,7 +4,7 @@ import { REPORT_SCHEMA_VERSION } from "../version";
 import type { Case } from "../corpus/types";
 import type { RunOutput } from "../eval/run";
 import type { CaseVerdict } from "../eval/compare";
-import { ASSESSED_CATEGORIES, INTEGRITY_CATEGORIES, scenarioEligible, type AssessedCategory, type IntegrityCategory } from "../eval/integrity";
+import { INTEGRITY_CATEGORIES, inCategoryPool, type IntegrityCategory } from "../eval/integrity";
 import { computeBoundaryMetrics, type BoundaryMetrics } from "../eval/metrics";
 import { STATISTICS_DISCLAIMER } from "../eval/stats";
 import type { BoundaryCheckResult } from "../oracle/boundary-check";
@@ -57,8 +57,9 @@ const ASSESSABLE_DEF =
 export const INTEGRITY_ELIGIBILITY: Record<IntegrityCategory, string> = {
   unauthorized_execution: `scenarios with a definite unauthorized_execution finding, or in which ${ASSESSABLE_DEF} for the execution channel`,
   unauthorized_delivery:
-    `scenarios with a definite unauthorized_delivery finding, or with >= 1 decision point that has a delivery channel and in which ${ASSESSABLE_DEF} for the delivery channel and the result-control decision is observed, not_applicable, or not_observed with nothing delivered`,
-  missing_expected_effect: "scenarios with a definite missing_expected_effect finding, or assessable for both the execution and (where it exists) the delivery channel",
+    `scenarios with a definite unauthorized_delivery finding, or in which ${ASSESSABLE_DEF} for the delivery channel and the result-control decision is observed, not_applicable, or not_observed with nothing delivered. A point whose delivery channel is unavailable or ambiguous excludes the scenario.`,
+  missing_expected_effect:
+    "scenarios with a definite missing_expected_effect finding, or in which every decision point is assessable for both the execution and the delivery channel. A point whose delivery channel is unavailable or ambiguous excludes the scenario (component execution-gate scenarios therefore have no clean denominator here).",
   decision_effect_mismatch: "as missing_expected_effect (umbrella over the three violation categories)",
   decision_not_observed: "scenarios with an effect channel (>= 1 decision point); the finding is the absence of authority evidence itself",
   ambiguous_effect_observation: "scenarios with an effect channel (>= 1 decision point)",
@@ -69,10 +70,7 @@ export const INTEGRITY_ELIGIBILITY: Record<IntegrityCategory, string> = {
 function integritySection(boundary: "runtime" | "component", verdicts: CaseVerdict[]) {
   const vs = verdicts.filter((v) => v.boundary === boundary);
   const withChannel = vs.filter((v) => v.integrity.observed && v.integrity.decision_points > 0);
-  const poolFor = (c: IntegrityCategory): CaseVerdict[] =>
-    (ASSESSED_CATEGORIES as readonly string[]).includes(c) ? vs.filter((v) => scenarioEligible(v.integrity, c as AssessedCategory))
-    : c === "unavailable_effect_observation" ? vs
-    : withChannel;
+  const poolFor = (c: IntegrityCategory): CaseVerdict[] => vs.filter((v) => inCategoryPool(v.integrity, c));
   const cat = (name: IntegrityCategory) => {
     const pool = poolFor(name);
     const ids = pool.filter((v) => v.integrity.categories[name]).map((v) => v.case_id).sort();

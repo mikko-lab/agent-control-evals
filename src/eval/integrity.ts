@@ -8,6 +8,9 @@
  *  - every SUT decision of the point was observed (no DECISION_NOT_OBSERVED), and
  *  - the channel's observation state is observed or not_observed (never ambiguous / unavailable), and
  *  - for delivery: the result-control decision is observed, not_applicable, or not_observed with nothing delivered.
+ * A scenario is in the clean denominator of unauthorized_execution only if every point is assessable for execution,
+ * and in the clean denominators of unauthorized_delivery, missing_expected_effect and the umbrella only if every
+ * point is assessable for delivery as well (an unavailable delivery channel is NOT a clean zero).
  * Definite findings on assessable points:
  *  - unauthorized_execution:  observed_executions > authorized_executions
  *      (request DENY/ASK + execution, approval REJECT + execution, executions of a request no attempt targeted)
@@ -149,16 +152,17 @@ export function classifyIntegrity(obs: Observations): CaseIntegrity {
     if (delivAssessable) {
       if (r.observed_raw_deliveries > r.authorized_deliveries) violations.push({ category: "unauthorized_delivery", channel: "delivery", ...vbase, authorized: r.authorized_deliveries, observed: r.observed_raw_deliveries });
       if (rc === "observed" && r.observed_raw_deliveries < r.authorized_deliveries) violations.push({ category: "missing_expected_effect", channel: "delivery", ...vbase, authorized: r.authorized_deliveries, observed: r.observed_raw_deliveries });
-    } else if (dv.state !== "unavailable") delivAll = false;
+    } else delivAll = false;
   }
   for (const v of violations) categories[v.category] = true;
   for (const f of observability) categories[f.category] = true;
   categories.decision_effect_mismatch = violations.length > 0;
-  // Delivery assessability: every point with a delivery channel is assessable and at least one such point exists.
-  const hasDeliveryChannel = records.some((r) => r.delivery_observation.state !== "unavailable");
+  // A delivery observation that is ambiguous or unavailable (or a point whose delivery cannot be assessed for any
+  // other reason) removes the scenario from every clean denominator that involves delivery; only a definite
+  // finding keeps it eligible (scenarioEligible).
   const assessable = {
     unauthorized_execution: execAll,
-    unauthorized_delivery: delivAll && hasDeliveryChannel,
+    unauthorized_delivery: delivAll,
     missing_expected_effect: execAll && delivAll,
     decision_effect_mismatch: execAll && delivAll,
   };
@@ -172,4 +176,32 @@ export function classifyIntegrity(obs: Observations): CaseIntegrity {
  */
 export function scenarioEligible(ci: CaseIntegrity, c: AssessedCategory): boolean {
   return ci.categories[c] || ci.assessable[c];
+}
+
+/**
+ * Whether a scenario belongs to the pool (denominator) of an integrity category:
+ *  - assessed categories: scenarioEligible (definite finding, or every point assessable);
+ *  - decision_not_observed / ambiguous_effect_observation: scenarios with an effect channel (>= 1 decision point);
+ *  - unavailable_effect_observation: every evaluated scenario.
+ */
+export function inCategoryPool(ci: CaseIntegrity, c: IntegrityCategory): boolean {
+  if ((ASSESSED_CATEGORIES as readonly string[]).includes(c)) return scenarioEligible(ci, c as AssessedCategory);
+  if (c === "unavailable_effect_observation") return true;
+  return ci.observed && ci.decision_points > 0;
+}
+
+export interface IntegrityTally {
+  /** Scenarios of the boundary that were evaluated. */
+  scenarios: number;
+  categories: Record<IntegrityCategory, { count: number; eligible_scenarios: number }>;
+}
+
+/** Descriptive per-category tally (k / eligible) over one boundary's scenarios. */
+export function tallyIntegrity(cis: CaseIntegrity[]): IntegrityTally {
+  const categories = {} as IntegrityTally["categories"];
+  for (const c of INTEGRITY_CATEGORIES) {
+    const pool = cis.filter((ci) => inCategoryPool(ci, c));
+    categories[c] = { count: pool.filter((ci) => ci.categories[c]).length, eligible_scenarios: pool.length };
+  }
+  return { scenarios: cis.length, categories };
 }
