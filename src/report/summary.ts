@@ -77,16 +77,29 @@ export function renderSummary(r: Report): string {
   L.push("");
   L.push(`Invariants (component): ${Object.entries(r.component_metrics.total.invariants).map(([k, v]) => `${k} ${v}`).join(", ")}.`);
   L.push("");
+  L.push("## Decision/effect integrity (separate from oracle metrics; no confidence bounds)");
+  L.push("");
+  L.push("A control decision and an observed side effect are separate evidence. These counts compare the SUT's own decisions with what the harness observation channel saw (tool executions, raw-output deliveries). They do not use the oracle and are not combined with false allow / false deny.");
+  L.push("");
+  L.push("| Boundary | Eligible scenarios | Unauthorized execution | Unauthorized delivery (k/delivery-eligible) | Missing expected effect | Any mismatch | Not observed |");
+  L.push("|---|---:|---|---|---|---|---:|");
+  for (const b of [r.decision_effect_integrity.runtime, r.decision_effect_integrity.component]) {
+    const ids = (c: { count: number; case_ids: string[] }) => (c.count === 0 ? "0" : `${c.count} (${c.case_ids.slice(0, 5).join(", ")}${c.case_ids.length > 5 ? ", ..." : ""})`);
+    L.push(`| ${b.boundary} | ${b.eligible_scenarios} | ${ids(b.unauthorized_execution)} / ${b.eligible_scenarios} | ${ids(b.unauthorized_delivery)} / ${b.delivery_eligible_scenarios} | ${ids(b.missing_expected_effect)} / ${b.eligible_scenarios} | ${ids(b.decision_effect_mismatch)} / ${b.eligible_scenarios} | ${b.not_observed_scenarios} |`);
+  }
+  L.push("");
+  L.push(`Confidence bound: not applicable. ${r.decision_effect_integrity.confidence_bound_reason.replace(/^not_applicable: /, "")}`);
+  L.push("");
   L.push("## Mutation sensitivity");
   L.push("");
   if (!ms.executed) L.push("Not executed.");
   else {
     L.push(`Runtime: ${ms.runtime.kill_ratio} killed. Component: ${ms.component.kill_ratio} killed. (Reported per boundary; not combined.)`);
     L.push("");
-    L.push("| Mutant | Boundary | Status | Witnesses / baseline-valid candidates / candidates | Example witness cases |");
-    L.push("|---|---|---|---|---|");
+    L.push("| Mutant | Boundary | Status | Witnesses / baseline-valid candidates / candidates | Integrity scenarios (exec / delivery / missing) | Example witness cases |");
+    L.push("|---|---|---|---|---|---|");
     for (const m of ms.by_mutant) {
-      L.push(`| ${m.mutation_id} | ${m.evaluation_boundary} | ${m.status} | ${m.witness_count} / ${m.baseline_valid_witness_candidates} / ${m.witness_candidates} | ${m.witness_case_ids.slice(0, 3).join(", ")} |`);
+      L.push(`| ${m.mutation_id} | ${m.evaluation_boundary} | ${m.status} | ${m.witness_count} / ${m.baseline_valid_witness_candidates} / ${m.witness_candidates} | ${m.integrity_scenarios.unauthorized_execution} / ${m.integrity_scenarios.unauthorized_delivery} / ${m.integrity_scenarios.missing_expected_effect} | ${m.witness_case_ids.slice(0, 3).join(", ")} |`);
     }
   }
   L.push("");

@@ -62,10 +62,10 @@ test("report validates against the versioned schema; runtime and component trees
 
 test("N/A controls appear as N/A and nowhere in metrics, bounds or mutation results", () => {
   const r = mk();
-  assert.deepEqual(r.na_controls.map((n) => n.control).sort(), ["production_latency_throughput", "tenant_isolation"]);
-  const metricsText = JSON.stringify([r.runtime_metrics, r.component_metrics, r.statistical_bounds, r.mutation_sensitivity]);
-  assert.equal(metricsText.includes("tenant"), false);
-  assert.equal(metricsText.includes("latency"), false);
+  const na = ["credential_isolation", "filesystem_isolation", "internet_egress_controls", "network_sandboxing", "production_latency_throughput", "tenant_isolation"];
+  assert.deepEqual(r.na_controls.map((n) => n.control).sort(), na);
+  const metricsText = JSON.stringify([r.runtime_metrics, r.component_metrics, r.statistical_bounds, r.mutation_sensitivity, r.decision_effect_integrity]);
+  for (const c of na) assert.equal(metricsText.includes(c), false, c);
 });
 
 test("claims discipline: limitation and statistics disclaimer are present verbatim in report and summary", () => {

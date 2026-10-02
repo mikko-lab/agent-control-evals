@@ -12,11 +12,11 @@
  */
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import type { ReasonClass } from "../../spec/reason-taxonomy";
-import type { DecisionEffectMismatch, ObservedAssertion, Observations } from "../protocol";
+import type { EffectRecord, ObservedAssertion, Observations, ResultControlDecision, SutDecision, SutReport } from "../protocol";
 import type { CapabilitySpec, CaseForAdapter, GrantSpec, RequestStep, RuntimeScenario } from "../../corpus/types";
 import { DECLARED_POLICY } from "../../spec/declared-policy";
 import type { SutModules } from "./sut";
-import { makeTrace, ToolDoubles, TRACE_ARG, traceKey } from "./tool-doubles";
+import { containsValue, makeTrace, ToolDoubles, TRACE_ARG, traceKey } from "./tool-doubles";
 
 export class AdapterError extends Error {
   constructor(message: string) {
@@ -69,7 +69,7 @@ interface Ctx {
   capQueue: Map<string, unknown[]>;
   obs: ObservedAssertion[];
   evidence: unknown[];
-  mismatches: DecisionEffectMismatch[];
+  records: EffectRecord[];
 }
 
 const now = (ctx: Ctx) => ctx.clock.base + ctx.clock.offset;
@@ -227,126 +227,189 @@ function classifyApprovalRejection(ctx: Ctx, e: unknown): { reason: ReasonClass;
   throw new AdapterError(`unclassified SUT exception on resolveApproval(): ${i.name}: ${i.message}`);
 }
 
-function resultObservation(_ctx: Ctx, step: number, attempt: number | undefined, result: { exit_status?: string; request_id_ref?: string }): ObservedAssertion {
-  const a = (outcome: string, reason: ReasonClass, code: string): ObservedAssertion => {
-    const o: ObservedAssertion = { step, stage: "result", outcome, reason_class: reason, sut_reason_code: code, enforcement_stage: "result_guardian" };
-    if (attempt !== undefined) o.attempt = attempt;
-    return o;
-  };
-  if (!result || typeof result !== "object") throw new AdapterError("SUT returned a non-object tool result");
-  if (result.exit_status === "blocked") {
-    // The pinned SUT's withheld representation: exit_status "blocked" and a single policy error output.
-    const outs = (result as { outputs?: { value?: { error?: unknown } }[] }).outputs;
-    if (!Array.isArray(outs) || outs.length !== 1 || outs[0]?.value?.error !== "Output withheld by policy.") {
-      throw new AdapterError("blocked result without the SUT's withheld representation");
-    }
-    return a("WITHHOLD", "RESULT_POLICY_WITHHOLD", "result_guardian:deny");
+/** Map an audit result-guardian decision to the result-control vocabulary. */
+function controlFromGuardian(decision: unknown): ResultControlDecision {
+  return decision === "deny" ? "WITHHOLD" : decision === "allow" ? "DELIVER" : "UNKNOWN";
+}
+
+function controlFromExitStatus(v: unknown): ResultControlDecision | null {
+  if (!v || typeof v !== "object") return null;
+  const es = (v as { exit_status?: unknown }).exit_status;
+  if (es === "blocked") return "WITHHOLD";
+  if (es === "success" || es === "failure" || es === "timeout") return "DELIVER";
+  return "UNKNOWN";
+}
+
+/** Audit events appended since `from` (exclusive window [from, to)). */
+function auditWindow(ctx: Ctx, from: number, to: number): { event_type: string; request_id: string; metadata?: Record<string, unknown> }[] {
+  return (ctx.audit.getEvents() as { event_type: string; request_id: string; metadata?: Record<string, unknown> }[]).slice(from, to);
+}
+
+/**
+ * The SUT's result-control decisions for one call. Exact calls (no other call in flight) use the Result
+ * Guardian's own audit decisions recorded during the call; concurrent calls fall back to the exit_status of
+ * the value the call returned.
+ */
+function resultControlFor(ctx: Ctx, exact: boolean, auditFrom: number, auditTo: number, returned: unknown): ResultControlDecision[] {
+  if (exact) {
+    const ev = auditWindow(ctx, auditFrom, auditTo).filter((e) => e.event_type === "result_guardian_decision");
+    if (ev.length > 0) return ev.map((e) => controlFromGuardian(e.metadata?.decision));
   }
-  if (result.exit_status === "success" || result.exit_status === "failure" || result.exit_status === "timeout") {
-    return a("DELIVER", "RESULT_POLICY_DELIVER", `result_guardian:allow:${result.exit_status}`);
+  const c = controlFromExitStatus(returned);
+  return c ? [c] : [];
+}
+
+function sutReport(o: PromiseSettledResult<unknown>, fulfilledStatus: (v: unknown) => string): SutReport {
+  if (o.status === "rejected") {
+    const i = errInfo(o.reason);
+    return { kind: "threw", exception: { name: i.name, code: i.code, message: i.message } };
   }
-  throw new AdapterError(`unknown exit_status ${String(result.exit_status)}`);
+  const v = o.value as { exit_status?: unknown; result?: { exit_status?: unknown } } | undefined;
+  const r: SutReport = { kind: "returned", status: fulfilledStatus(o.value) };
+  const es = v && typeof v === "object" ? (v.result?.exit_status ?? v.exit_status) : undefined;
+  if (typeof es === "string") r.exit_status = es;
+  return r;
 }
 
 function push(ctx: Ctx, o: ObservedAssertion) {
   ctx.obs.push(o);
 }
 
-/**
- * Request attempt. The OUTCOME is effect-based: ALLOW iff the harness tool double observed this
- * attempt's execution (or, for tools outside the harness registry, the SUT's fallback-tool counter
- * moved during the attempt). The SUT's own report is kept separately in `sut_decision` whenever it
- * disagrees with that effect, and the disagreement is recorded in `decision_effect_mismatches`.
- * An observed execution is never turned into an AdapterError.
- */
-async function runRequest(ctx: Ctx, step: number, attempt: number | undefined, r: Omit<RequestStep, "op">): Promise<void> {
-  const { envelope, trace } = materialiseRequest(ctx, r, step, attempt ?? 0);
-  const requestId = (envelope as { params: { request_id: string } }).params.request_id;
-  const key = `${r.session}/${r.request}`;
-  const base = (outcome: string, reason: ReasonClass, code: string, stage: string): ObservedAssertion => {
-    const o: ObservedAssertion = { step, stage: "request", outcome, reason_class: reason, sut_reason_code: code, enforcement_stage: stage };
-    if (attempt !== undefined) o.attempt = attempt;
-    return o;
-  };
-  const resultAssertion = (outcome: string, reason: ReasonClass, code: string, stage: string): ObservedAssertion => ({ ...base(outcome, reason, code, stage), stage: "result" });
-  const harnessTool = (HARNESS_TOOLS as readonly string[]).includes(r.tool);
-  const unknownBefore = ctx.sut.executionCounters.unknown_tool ?? 0;
-  const executedThisAttempt = () =>
-    ctx.doubles.log.some((x) => x.trace === trace) || (!harnessTool && (ctx.sut.executionCounters.unknown_tool ?? 0) > unknownBefore);
-  /** SUT decision restrictive (or absent), but the tool ran: report the execution, keep the decision. */
-  const unauthorisedExecution = (sutDecision: string, code: string) => {
-    push(ctx, { ...base("ALLOW", "DECISION_EFFECT_MISMATCH", code, "effect"), sut_decision: sutDecision, decision_effect_mismatch: true });
-    // The call did not return the tool output to the caller.
-    push(ctx, { ...resultAssertion("WITHHOLD", "DECISION_EFFECT_MISMATCH", code, "effect"), sut_decision: sutDecision, decision_effect_mismatch: true });
-    ctx.mismatches.push({ step, ...(attempt !== undefined ? { attempt } : {}), stage: "request", key, sut_decision: sutDecision, decided_executions: 0, observed_executions: 1 });
-  };
-  let res: { status: string; result?: { exit_status?: string } };
-  try {
-    res = await ctx.executor.process(envelope);
-  } catch (e) {
-    const i = errInfo(e);
-    ctx.evidence.push({ step, attempt, call: "process", thrown: { name: i.name, code: i.code, message: i.message } });
-    if (executedThisAttempt()) {
-      const post = postExecutionReason(ctx, e);
-      if (post) {
-        push(ctx, base("ALLOW", "POLICY_ALLOW", "guardian:allow", "guardian"));
-        push(ctx, resultAssertion("WITHHOLD", post.reason, post.code, "result_path"));
-        return;
-      }
-      let decision: string;
-      try {
-        const c = classifyRequestRejection(ctx, e, requestId);
-        decision = `DENY:${c.reason}`;
-      } catch (ce) {
-        if (!(ce instanceof AdapterError)) throw ce;
-        decision = `unclassified:${i.name}`;
-      }
-      unauthorisedExecution(decision, `${i.name}:${i.code || i.message}`);
-      return;
-    }
-    const c = classifyRequestRejection(ctx, e, requestId);
-    push(ctx, base("DENY", c.reason, c.code, c.stage));
-    return;
-  }
-  ctx.evidence.push({ step, attempt, call: "process", returned: { status: res?.status, exit_status: res?.result?.exit_status } });
-  if (res?.status === "pending") {
-    if (executedThisAttempt()) {
-      unauthorisedExecution("ASK", "pending_but_executed");
-      return;
-    }
-    push(ctx, base("ASK", "POLICY_ASK", "guardian:ask", "guardian"));
-    return;
-  }
-  if (res?.status === "executed") {
-    if (!executedThisAttempt()) {
-      // The SUT reports an execution and returns a result, but no execution was observed. The result
-      // reached the caller, so the outcome stays permissive (ALLOW/DELIVER); the disagreement is recorded.
-      push(ctx, { ...base("ALLOW", "DECISION_EFFECT_MISMATCH", "executed_without_observed_execution", "effect"), sut_decision: "ALLOW", decision_effect_mismatch: true });
-      push(ctx, resultObservation(ctx, step, attempt, res.result!));
-      ctx.mismatches.push({ step, ...(attempt !== undefined ? { attempt } : {}), stage: "request", key, sut_decision: "ALLOW", decided_executions: 1, observed_executions: 0 });
-      return;
-    }
-    push(ctx, base("ALLOW", "POLICY_ALLOW", "guardian:allow", "guardian"));
-    push(ctx, resultObservation(ctx, step, attempt, res.result!));
-    return;
-  }
-  throw new AdapterError(`unknown process() status ${JSON.stringify(res)}`);
+/** Raw outputs (stable serialisation) of the executions in `log` matching `pred`. */
+function rawOutputs(ctx: Ctx, from: number, pred: (trace: string | null) => boolean): string[] {
+  return ctx.doubles.log.slice(from).filter((x) => pred(x.trace)).map((x) => x.output);
 }
 
-/** The SUT's reported decision for one approval attempt, before reconciliation with observed effects. */
-interface ApprovalDecision {
-  attempt: number | undefined;
-  key: string;
-  decision: "EXECUTE" | "REJECT";
+function deliveredRaw(returned: unknown, outputs: string[]): boolean {
+  return returned !== undefined && outputs.some((o) => containsValue(returned, o));
+}
+
+interface RequestDecision {
+  decision: SutDecision;
   reason: ReasonClass;
   code: string;
   stage: string;
-  /** Result assertion implied by the SUT's report (only for EXECUTE). */
-  result: ObservedAssertion | null;
-  /** True when EXECUTE was inferred from a post-execution exception rather than from a returned result. */
-  inferredFromException: boolean;
-  /** Set during reconciliation when the observed effect overrides the SUT's report: the SUT's report. */
-  flagged?: string;
+  /** Set when a rejection came from the SUT's internal result path (the request itself was authorised). */
+  postExecution?: { reason: ReasonClass; code: string };
+}
+
+/** SUT decision for process(), from its report and its own audit trail only (never from observed effects). */
+function requestDecision(ctx: Ctx, o: PromiseSettledResult<unknown>, requestId: string): RequestDecision {
+  if (o.status === "fulfilled") {
+    const st = (o.value as { status?: unknown } | undefined)?.status;
+    if (st === "pending") return { decision: "ASK", reason: "POLICY_ASK", code: "guardian:ask", stage: "guardian" };
+    if (st === "executed") return { decision: "ALLOW", reason: "POLICY_ALLOW", code: "guardian:allow", stage: "guardian" };
+    return { decision: "UNCLASSIFIED", reason: "DECISION_EFFECT_MISMATCH", code: `unknown_status:${JSON.stringify(st)}`, stage: "unclassified" };
+  }
+  const e = o.reason;
+  const i = errInfo(e);
+  if (e instanceof ctx.sut.CorrelationError) {
+    return { decision: "ALLOW", reason: "POLICY_ALLOW", code: "guardian:allow", stage: "guardian", postExecution: { reason: "CORRELATION_FAILURE", code: i.name } };
+  }
+  if (e instanceof ctx.sut.ReplayGuardError) {
+    // Request-level iff the SUT's replay/timestamp audit event names THIS request id; otherwise the SUT
+    // rejected its internally generated result request, i.e. after authorising the request.
+    const own = lastAudit(ctx, "replay_rejected", requestId) ?? lastAudit(ctx, "timestamp_rejected", requestId);
+    if (!own) return { decision: "ALLOW", reason: "POLICY_ALLOW", code: "guardian:allow", stage: "guardian", postExecution: { reason: "RESULT_PATH_REJECTED", code: `${i.name}:${i.code}` } };
+  }
+  try {
+    const c = classifyRequestRejection(ctx, e, requestId);
+    return { decision: "DENY", ...c };
+  } catch (ce) {
+    if (!(ce instanceof AdapterError)) throw ce;
+    return { decision: "UNCLASSIFIED", reason: "DECISION_EFFECT_MISMATCH", code: `unclassified:${i.name}:${i.message}`, stage: "unclassified" };
+  }
+}
+
+/**
+ * Request attempt. Records the SUT's decision and the observed effects separately (EffectRecord), and emits
+ * effect-based normalised assertions for the oracle comparison. An observed execution or delivery is never
+ * turned into an AdapterError; an unclassifiable SUT report WITHOUT any observed effect is (the decision
+ * channel could not produce a reliable observation).
+ */
+async function runRequest(ctx: Ctx, step: number, attempt: number | undefined, r: Omit<RequestStep, "op">, exact: boolean): Promise<void> {
+  const { envelope, trace } = materialiseRequest(ctx, r, step, attempt ?? 0);
+  const requestId = (envelope as { params: { request_id: string } }).params.request_id;
+  const key = `${r.session}/${r.request}`;
+  const harnessTool = (HARNESS_TOOLS as readonly string[]).includes(r.tool);
+  const unknownBefore = ctx.sut.executionCounters.unknown_tool ?? 0;
+  const logFrom = ctx.doubles.log.length;
+  const auditFrom = ctx.audit.getEvents().length;
+  let settled: PromiseSettledResult<unknown>;
+  try {
+    settled = { status: "fulfilled", value: await ctx.executor.process(envelope) };
+  } catch (e) {
+    settled = { status: "rejected", reason: e };
+  }
+  const auditTo = ctx.audit.getEvents().length;
+  const report = sutReport(settled, (v) => String((v as { status?: unknown } | undefined)?.status));
+  ctx.evidence.push({ step, attempt, call: "process", report });
+
+  const observedExec =
+    ctx.doubles.log.slice(logFrom).filter((x) => x.trace === trace).length +
+    (!harnessTool ? Math.max(0, (ctx.sut.executionCounters.unknown_tool ?? 0) - unknownBefore) : 0);
+  const d = requestDecision(ctx, settled, requestId);
+  const returned = settled.status === "fulfilled" ? (settled.value as { result?: unknown } | undefined)?.result : undefined;
+  const controls = d.decision === "ALLOW" && !d.postExecution ? resultControlFor(ctx, exact, auditFrom, auditTo, returned) : [];
+  const rawDelivered = deliveredRaw(returned, rawOutputs(ctx, logFrom, (t) => t === trace));
+  const authorizedExec = d.decision === "ALLOW" ? 1 : 0;
+  const authorizedDelivery = d.decision === "ALLOW" && controls.includes("DELIVER") ? 1 : 0;
+  ctx.records.push({
+    step, ...(attempt !== undefined ? { attempt } : {}), stage: "request", key, attribution: "attempt",
+    sut_reports: [report], sut_decisions: [d.decision], result_control_decisions: controls,
+    authorized_executions: authorizedExec, observed_executions: observedExec,
+    authorized_deliveries: authorizedDelivery, observed_raw_deliveries: rawDelivered ? 1 : 0, delivery_observed: true,
+  });
+
+  if (d.decision === "UNCLASSIFIED" && observedExec === 0 && !rawDelivered) {
+    throw new AdapterError(`unclassified SUT report on process() without an observed effect: ${d.code}`);
+  }
+  const a = (stage: "request" | "result", outcome: string, reason: ReasonClass, code: string, enf: string, sutDecision?: string): ObservedAssertion => {
+    const o: ObservedAssertion = { step, stage, outcome, reason_class: reason, sut_reason_code: code, enforcement_stage: enf };
+    if (attempt !== undefined) o.attempt = attempt;
+    if (sutDecision !== undefined) {
+      o.sut_decision = sutDecision;
+      o.decision_effect_mismatch = true;
+    }
+    return o;
+  };
+  // Normalised request outcome: an observed execution is ALLOW whatever the SUT reported.
+  if (observedExec > 0) {
+    push(ctx, d.decision === "ALLOW" ? a("request", "ALLOW", d.reason, d.code, d.stage) : a("request", "ALLOW", "DECISION_EFFECT_MISMATCH", d.code, "effect", d.decision));
+  } else if (d.decision === "ALLOW") {
+    // Authorised and (claimed) executed, but no execution observed: keep the decision, flag the missing effect.
+    push(ctx, a("request", "ALLOW", "DECISION_EFFECT_MISMATCH", "executed_without_observed_execution", "effect", "ALLOW"));
+  } else {
+    push(ctx, a("request", d.decision === "ASK" ? "ASK" : "DENY", d.reason, d.code, d.stage));
+    if (!rawDelivered) return;
+  }
+  // Normalised result outcome: DELIVER iff a raw tool output was found in what the call returned.
+  const resultOutcome = rawDelivered ? "DELIVER" : "WITHHOLD";
+  if (d.postExecution && !rawDelivered) {
+    push(ctx, a("result", "WITHHOLD", d.postExecution.reason, d.postExecution.code, "result_path"));
+    return;
+  }
+  const control = controls.length === 1 ? controls[0] : controls.length === 0 ? null : controls.join(",");
+  const consistent = d.decision === "ALLOW" && observedExec > 0 && control !== null && control === resultOutcome;
+  if (consistent) {
+    push(ctx, a("result", resultOutcome, resultOutcome === "DELIVER" ? "RESULT_POLICY_DELIVER" : "RESULT_POLICY_WITHHOLD", `result_guardian:${control === "DELIVER" ? "allow" : "deny"}`, "result_guardian"));
+  } else {
+    push(ctx, a("result", resultOutcome, "DECISION_EFFECT_MISMATCH", `exit_status:${report.exit_status ?? "none"}`, "effect", control === null ? "NONE" : control));
+  }
+}
+
+interface ApprovalAttempt {
+  attempt: number | undefined;
+  key: string;
+  report: SutReport;
+  decision: SutDecision;
+  reason: ReasonClass;
+  code: string;
+  stage: string;
+  returned: unknown;
+  postExecution?: { reason: ReasonClass; code: string };
+  /** Normalised outcome after reconciliation with observed effects. */
+  outcome?: "EXECUTE" | "REJECT";
 }
 
 function effectiveGrantKey(g: GrantSpec): string {
@@ -357,116 +420,44 @@ function effectiveGrantKey(g: GrantSpec): string {
   return `${session}/${request}`;
 }
 
-function decideApproval(ctx: Ctx, step: number, attempt: number | undefined, g: GrantSpec, outcome: PromiseSettledResult<unknown>): ApprovalDecision {
-  const key = effectiveGrantKey(g);
-  const d = (decision: "EXECUTE" | "REJECT", reason: ReasonClass, code: string, stage: string, result: ObservedAssertion | null, inferred = false): ApprovalDecision => ({
-    attempt, key, decision, reason, code, stage, result, inferredFromException: inferred,
-  });
-  if (outcome.status === "rejected") {
-    const e = outcome.reason;
+/** SUT decision for resolveApproval(), from its report and audit only. */
+function approvalDecision(ctx: Ctx, g: GrantSpec, o: PromiseSettledResult<unknown>): Omit<ApprovalAttempt, "attempt" | "key" | "report" | "returned"> {
+  if (o.status === "rejected") {
+    const e = o.reason;
     const i = errInfo(e);
-    ctx.evidence.push({ step, attempt, call: "resolveApproval", thrown: { name: i.name, code: i.code, message: i.message } });
+    // resolveApproval() runs the replay guard and correlation only on its internal result request,
+    // i.e. after it authorised and started the execution.
     const post = postExecutionReason(ctx, e);
-    if (post) {
-      const r: ObservedAssertion = { step, stage: "result", outcome: "WITHHOLD", reason_class: post.reason, sut_reason_code: post.code, enforcement_stage: "result_path" };
-      if (attempt !== undefined) r.attempt = attempt;
-      return d("EXECUTE", "APPROVAL_GRANTED", "human_approval", "human", r, true);
-    }
+    if (post) return { decision: "EXECUTE", reason: "APPROVAL_GRANTED", code: "human_approval", stage: "human", postExecution: post };
     try {
       const c = classifyApprovalRejection(ctx, e);
-      return d("REJECT", c.reason, c.code, c.stage, null);
+      return { decision: "REJECT", ...c };
     } catch (ce) {
       if (!(ce instanceof AdapterError)) throw ce;
-      // Unclassifiable: only acceptable if reconciliation shows no execution happened (see reconcileApprovals).
-      return d("REJECT", "DECISION_EFFECT_MISMATCH", `unclassified:${i.name}:${i.message}`, "unclassified", null);
+      return { decision: "UNCLASSIFIED", reason: "DECISION_EFFECT_MISMATCH", code: `unclassified:${i.name}:${i.message}`, stage: "unclassified" };
     }
   }
-  const value = outcome.value as { exit_status?: string } | undefined;
-  ctx.evidence.push({ step, attempt, call: "resolveApproval", returned: value === undefined ? null : { exit_status: value.exit_status } });
+  const value = o.value;
   if (value === undefined) {
     const ev = lastAudit(ctx, "human_rejection", rid(ctx, g.request));
-    if (!ev) return d("REJECT", "DECISION_EFFECT_MISMATCH", "returned_without_result_or_rejection_evidence", "unclassified", null);
-    return d("REJECT", "HUMAN_REJECTED", "human_rejection", "human", null);
+    if (ev) return { decision: "REJECT", reason: "HUMAN_REJECTED", code: "human_rejection", stage: "human" };
+    return { decision: "UNCLASSIFIED", reason: "DECISION_EFFECT_MISMATCH", code: "returned_without_result_or_rejection_evidence", stage: "unclassified" };
   }
-  return d("EXECUTE", "APPROVAL_GRANTED", "human_approval", "human", resultObservation(ctx, step, attempt, value));
+  return { decision: "EXECUTE", reason: "APPROVAL_GRANTED", code: "human_approval", stage: "human" };
 }
 
 /**
- * Reconcile the SUT-reported approval decisions of one step with the executions the tool doubles
- * observed during that step, per target request key:
- *  - observed == decided: decisions stand;
- *  - observed > decided: the surplus executions are unauthorised effects. REJECT-decided attempts on
- *    that key become EXECUTE (sut_decision kept, flagged); any surplus beyond that is recorded as an
- *    unattributed decision/effect mismatch (the executions invariant then fails);
- *  - observed < decided: EXECUTE claims without an execution become REJECT (flagged), preferring claims
- *    inferred from exceptions. This keeps a random post-execution-looking exception from being scored
- *    as an execution (and therefore as a mutation kill).
- * Executions of keys no attempt targeted are recorded as mismatches with decided_executions 0.
- * Unclassifiable rejections are AdapterErrors only when their key shows no unexplained execution.
+ * One approval step (single or concurrent). Effects are attributed per target request key: exactly for a
+ * single approval, aggregated over the step's attempts on that key for a concurrent step. Normalised
+ * approval outcomes follow the observed executions (surplus executions turn REJECT/UNCLASSIFIED decisions
+ * into EXECUTE; claimed executions without an effect become REJECT, preferring claims that were inferred from
+ * exceptions). Executions of keys no attempt targeted, and fallback-tool executions, become records without
+ * any authorising decision.
  */
-function reconcileApprovals(ctx: Ctx, step: number, decisions: ApprovalDecision[], logFrom: number): void {
-  const observed = new Map<string, number>();
-  for (const rec of ctx.doubles.log.slice(logFrom)) {
-    const k = rec.trace === null ? "<unattributed>" : traceKey(rec.trace);
-    observed.set(k, (observed.get(k) ?? 0) + 1);
-  }
-  const keys = new Set([...decisions.map((d) => d.key), ...observed.keys()]);
-  for (const key of keys) {
-    const ds = decisions.filter((d) => d.key === key);
-    const obsN = observed.get(key) ?? 0;
-    const decidedN = ds.filter((d) => d.decision === "EXECUTE").length;
-    if (ds.length === 0) {
-      ctx.mismatches.push({ step, stage: "approval", key: key === "<unattributed>" ? null : key, sut_decision: "none", decided_executions: 0, observed_executions: obsN });
-      continue;
-    }
-    if (obsN > decidedN) {
-      let surplus = obsN - decidedN;
-      for (const d of ds) {
-        if (surplus === 0) break;
-        if (d.decision !== "REJECT") continue;
-        const sutDecision = `REJECT:${d.reason}`;
-        d.decision = "EXECUTE";
-        d.flagged = sutDecision;
-        const r: ObservedAssertion = { step, stage: "result", outcome: "WITHHOLD", reason_class: "DECISION_EFFECT_MISMATCH", sut_reason_code: d.code, enforcement_stage: "effect", sut_decision: sutDecision, decision_effect_mismatch: true };
-        if (d.attempt !== undefined) r.attempt = d.attempt;
-        d.result = r;
-        surplus--;
-      }
-      ctx.mismatches.push({ step, stage: "approval", key, sut_decision: ds.map((d) => d.flagged ?? d.decision).join(","), decided_executions: decidedN, observed_executions: obsN });
-    } else if (obsN < decidedN) {
-      let missing = decidedN - obsN;
-      const order = [...ds.filter((d) => d.decision === "EXECUTE" && d.inferredFromException), ...ds.filter((d) => d.decision === "EXECUTE" && !d.inferredFromException)];
-      for (const d of order) {
-        if (missing === 0) break;
-        d.flagged = `EXECUTE:${d.code}`;
-        d.decision = "REJECT";
-        d.reason = "DECISION_EFFECT_MISMATCH";
-        d.result = null;
-        missing--;
-      }
-      ctx.mismatches.push({ step, stage: "approval", key, sut_decision: "EXECUTE", decided_executions: decidedN, observed_executions: obsN });
-    }
-    for (const d of ds) {
-      if (d.stage === "unclassified" && !d.flagged) {
-        throw new AdapterError(`unclassified SUT behaviour on resolveApproval() without an observed execution: ${d.code}`);
-      }
-    }
-  }
-  for (const d of decisions) {
-    const flagged = d.flagged;
-    const o: ObservedAssertion = { step, stage: "approval", outcome: d.decision, reason_class: flagged ? "DECISION_EFFECT_MISMATCH" : d.reason, sut_reason_code: d.code, enforcement_stage: flagged ? "effect" : d.stage };
-    if (d.attempt !== undefined) o.attempt = d.attempt;
-    if (flagged) {
-      o.sut_decision = flagged;
-      o.decision_effect_mismatch = true;
-    }
-    push(ctx, o);
-    if (d.decision === "EXECUTE" && d.result) push(ctx, d.result);
-  }
-}
-
 async function runApprovalStep(ctx: Ctx, step: number, grants: GrantSpec[], concurrent: boolean): Promise<void> {
   const logFrom = ctx.doubles.log.length;
+  const auditFrom = ctx.audit.getEvents().length;
+  const unknownBefore = ctx.sut.executionCounters.unknown_tool ?? 0;
   const materialised = grants.map((g) => materialiseGrant(ctx, g));
   let settled: PromiseSettledResult<unknown>[];
   if (concurrent) {
@@ -479,8 +470,96 @@ async function runApprovalStep(ctx: Ctx, step: number, grants: GrantSpec[], conc
       settled = [{ status: "rejected", reason: e }];
     }
   }
-  const decisions = settled.map((o, j) => decideApproval(ctx, step, concurrent ? j : undefined, grants[j], o));
-  reconcileApprovals(ctx, step, decisions, logFrom);
+  const auditTo = ctx.audit.getEvents().length;
+  const attempts: ApprovalAttempt[] = settled.map((o, j) => {
+    const report = sutReport(o, (v) => (v === undefined ? "undefined" : "result"));
+    ctx.evidence.push({ step, attempt: concurrent ? j : undefined, call: "resolveApproval", report });
+    return { attempt: concurrent ? j : undefined, key: effectiveGrantKey(grants[j]), report, returned: o.status === "fulfilled" ? o.value : undefined, ...approvalDecision(ctx, grants[j], o) };
+  });
+
+  const observedByKey = new Map<string | null, number>();
+  for (const rec of ctx.doubles.log.slice(logFrom)) {
+    const k = rec.trace === null ? null : traceKey(rec.trace);
+    observedByKey.set(k, (observedByKey.get(k) ?? 0) + 1);
+  }
+  const unknownDelta = Math.max(0, (ctx.sut.executionCounters.unknown_tool ?? 0) - unknownBefore);
+  if (unknownDelta > 0) observedByKey.set(null, (observedByKey.get(null) ?? 0) + unknownDelta);
+
+  const keys = new Set<string | null>([...attempts.map((x) => x.key), ...observedByKey.keys()]);
+  for (const key of keys) {
+    const as = attempts.filter((x) => x.key === key);
+    const observed = observedByKey.get(key) ?? 0;
+    const outputs = rawOutputs(ctx, logFrom, (t) => t !== null && traceKey(t) === key);
+    const authorized = as.filter((x) => x.decision === "EXECUTE").length;
+    const controls: ResultControlDecision[] = [];
+    let authorizedDeliveries = 0;
+    let rawDeliveries = 0;
+    for (const x of as) {
+      const c = x.decision === "EXECUTE" && !x.postExecution ? resultControlFor(ctx, !concurrent, auditFrom, auditTo, x.returned) : [];
+      controls.push(...c);
+      if (x.decision === "EXECUTE" && c.includes("DELIVER")) authorizedDeliveries++;
+      if (deliveredRaw(x.returned, outputs)) rawDeliveries++;
+    }
+    ctx.records.push({
+      step, ...(!concurrent && as.length === 1 && as[0].attempt !== undefined ? { attempt: as[0].attempt } : {}),
+      stage: "approval", key, attribution: concurrent ? "step_key" : "attempt",
+      sut_reports: as.map((x) => x.report), sut_decisions: as.map((x) => x.decision), result_control_decisions: controls,
+      authorized_executions: authorized, observed_executions: observed,
+      authorized_deliveries: authorizedDeliveries, observed_raw_deliveries: rawDeliveries, delivery_observed: true,
+    });
+    // Reconcile normalised outcomes with the observed effect for this key.
+    for (const x of as) x.outcome = x.decision === "EXECUTE" ? "EXECUTE" : "REJECT";
+    let surplus = observed - authorized;
+    for (const x of as) {
+      if (surplus <= 0) break;
+      if (x.outcome === "REJECT") {
+        x.outcome = "EXECUTE";
+        surplus--;
+      }
+    }
+    let missing = authorized - observed;
+    const claims = [...as.filter((x) => x.outcome === "EXECUTE" && x.decision === "EXECUTE" && x.postExecution), ...as.filter((x) => x.outcome === "EXECUTE" && x.decision === "EXECUTE" && !x.postExecution)];
+    for (const x of claims) {
+      if (missing <= 0) break;
+      x.outcome = "REJECT";
+      missing--;
+    }
+    for (const x of as) {
+      if (x.decision === "UNCLASSIFIED" && x.outcome === "REJECT" && !deliveredRaw(x.returned, outputs)) {
+        throw new AdapterError(`unclassified SUT report on resolveApproval() without an observed effect: ${x.code}`);
+      }
+    }
+  }
+
+  for (const x of attempts) {
+    const a = (stage: "approval" | "result", outcome: string, reason: ReasonClass, code: string, enf: string, sutDecision?: string): ObservedAssertion => {
+      const o: ObservedAssertion = { step, stage, outcome, reason_class: reason, sut_reason_code: code, enforcement_stage: enf };
+      if (x.attempt !== undefined) o.attempt = x.attempt;
+      if (sutDecision !== undefined) {
+        o.sut_decision = sutDecision;
+        o.decision_effect_mismatch = true;
+      }
+      return o;
+    };
+    const outcome = x.outcome!;
+    const decidedOutcome = x.decision === "EXECUTE" ? "EXECUTE" : "REJECT";
+    push(ctx, outcome === decidedOutcome && x.decision !== "UNCLASSIFIED" ? a("approval", outcome, x.reason, x.code, x.stage) : a("approval", outcome, "DECISION_EFFECT_MISMATCH", x.code, "effect", x.decision));
+    if (outcome !== "EXECUTE") continue;
+    const outputs = rawOutputs(ctx, logFrom, (t) => t !== null && traceKey(t) === x.key);
+    const rawDelivered = deliveredRaw(x.returned, outputs);
+    const resultOutcome = rawDelivered ? "DELIVER" : "WITHHOLD";
+    if (x.postExecution && !rawDelivered) {
+      push(ctx, a("result", "WITHHOLD", x.postExecution.reason, x.postExecution.code, "result_path"));
+      continue;
+    }
+    const c = x.decision === "EXECUTE" ? resultControlFor(ctx, !concurrent, auditFrom, auditTo, x.returned) : [];
+    const control = c.length === 1 ? c[0] : c.length === 0 ? null : c.join(",");
+    if (x.decision === "EXECUTE" && control === resultOutcome) {
+      push(ctx, a("result", resultOutcome, resultOutcome === "DELIVER" ? "RESULT_POLICY_DELIVER" : "RESULT_POLICY_WITHHOLD", `result_guardian:${control === "DELIVER" ? "allow" : "deny"}`, "result_guardian"));
+    } else {
+      push(ctx, a("result", resultOutcome, "DECISION_EFFECT_MISMATCH", `exit_status:${x.report.exit_status ?? "none"}`, "effect", control === null ? "NONE" : control));
+    }
+  }
 }
 
 function countExecutions(log: readonly { trace: string | null }[]): Record<string, number> {
@@ -522,20 +601,19 @@ export async function runRuntimeCase(c: CaseForAdapter, sut: SutModules, keys: A
   );
   const outputs = new Map<string, unknown>();
   const doubles = new ToolDoubles(sut.tools, outputs, HARNESS_TOOLS);
-  const ctx: Ctx = { c, sut, keys, clock, executor, audit, signer, doubles, outputs, capQueue, obs: [], evidence: [], mismatches: [] };
+  const ctx: Ctx = { c, sut, keys, clock, executor, audit, signer, doubles, outputs, capQueue, obs: [], evidence: [], records: [] };
   const unknownBefore = sut.executionCounters.unknown_tool ?? 0;
   doubles.install();
   try {
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i];
-      const unknownStepBefore = sut.executionCounters.unknown_tool ?? 0;
       switch (step.op) {
         case "request":
-          await runRequest(ctx, i, undefined, step);
+          await runRequest(ctx, i, undefined, step, true);
           break;
         case "concurrent_request":
           // Start all calls in array order without awaiting in between.
-          await Promise.all(step.requests.map((r, j) => runRequest(ctx, i, j, r)));
+          await Promise.all(step.requests.map((r, j) => runRequest(ctx, i, j, r, false)));
           break;
         case "approve":
           await runApprovalStep(ctx, i, [step.grant], false);
@@ -548,16 +626,10 @@ export async function runRuntimeCase(c: CaseForAdapter, sut: SutModules, keys: A
           break;
         case "clear_session":
           executor.clearSession(sid(ctx, step.session));
-          ctx.evidence.push({ step, call: "clearSession" });
+          ctx.evidence.push({ step: i, call: "clearSession" });
           break;
         default:
           throw new AdapterError(`unknown op ${(step as { op: string }).op}`);
-      }
-      // Executions through the SUT's fallback tool cannot be attributed to a request by the doubles.
-      // They are reported (unattributed_executions + a mismatch record), never turned into an error.
-      const unknownDelta = (sut.executionCounters.unknown_tool ?? 0) - unknownStepBefore;
-      if (unknownDelta > 0 && step.op !== "request" && step.op !== "concurrent_request") {
-        ctx.mismatches.push({ step: i, stage: "approval", key: null, sut_decision: "unattributed", decided_executions: 0, observed_executions: unknownDelta });
       }
     }
   } catch (e) {
@@ -567,7 +639,7 @@ export async function runRuntimeCase(c: CaseForAdapter, sut: SutModules, keys: A
         assertions: ctx.obs,
         executions: countExecutions(doubles.log),
         unattributed_executions: doubles.log.filter((x) => x.trace === null).length + ((sut.executionCounters.unknown_tool ?? 0) - unknownBefore),
-        decision_effect_mismatches: ctx.mismatches,
+        effect_records: ctx.records,
         calls: ctx.evidence,
       };
     }
@@ -581,7 +653,7 @@ export async function runRuntimeCase(c: CaseForAdapter, sut: SutModules, keys: A
     typeof e.metadata?.reason === "string" ? `${e.event_type}:${e.metadata.reason}` : e.event_type,
   );
   return {
-    observations: { assertions: ctx.obs, executions, unattributed_executions: unattributed, decision_effect_mismatches: ctx.mismatches },
+    observations: { assertions: ctx.obs, executions, unattributed_executions: unattributed, effect_records: ctx.records },
     evidence: { calls: ctx.evidence, audit_event_types: auditTypes, audit_integrity: audit.verifyIntegrity().valid ?? null },
   };
 }

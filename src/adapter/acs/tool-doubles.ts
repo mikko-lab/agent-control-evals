@@ -18,6 +18,25 @@ export const TRACE_ARG = "ace_trace";
 export interface ExecutionRecord {
   tool: string;
   trace: string | null;
+  /** Stable serialisation of the raw output this execution returned (used to observe deliveries). */
+  output: string;
+}
+
+/** Key-sorted JSON serialisation (deterministic), used to recognise a raw tool output inside a returned value. */
+export function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "undefined";
+  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+  const o = v as Record<string, unknown>;
+  return "{" + Object.keys(o).sort().map((k) => JSON.stringify(k) + ":" + stableStringify(o[k])).join(",") + "}";
+}
+
+/** True if `needle` (a stableStringify result) equals `haystack` or any value nested inside it. */
+export function containsValue(haystack: unknown, needle: string, depth = 0): boolean {
+  if (depth > 32) return false;
+  if (stableStringify(haystack) === needle) return true;
+  if (haystack === null || typeof haystack !== "object") return false;
+  const children = Array.isArray(haystack) ? haystack : Object.values(haystack as Record<string, unknown>);
+  return children.some((c) => containsValue(c, needle, depth + 1));
 }
 
 type ToolFn = (args: Record<string, unknown>) => Promise<unknown>;
@@ -46,9 +65,10 @@ export class ToolDoubles {
     for (const name of this.toolNames) {
       this.registry[name] = async (args: Record<string, unknown>) => {
         const trace = typeof args[TRACE_ARG] === "string" ? (args[TRACE_ARG] as string) : null;
-        this.log.push({ tool: name, trace });
         const out = trace !== null && this.outputs.has(trace) ? this.outputs.get(trace) : { status: "ok" };
-        return JSON.parse(JSON.stringify(out));
+        const copy = JSON.parse(JSON.stringify(out));
+        this.log.push({ tool: name, trace, output: stableStringify(copy) });
+        return copy;
       };
     }
   }

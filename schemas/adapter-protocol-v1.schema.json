@@ -5,81 +5,423 @@
   "$defs": {
     "harnessToAdapter": {
       "oneOf": [
-        { "type": "object", "required": ["type", "protocol_version"], "additionalProperties": false, "properties": { "type": { "const": "hello" }, "protocol_version": { "const": 1 } } },
-        { "type": "object", "required": ["type", "protocol_version", "case"], "additionalProperties": false, "properties": { "type": { "const": "case" }, "protocol_version": { "const": 1 }, "case": { "allOf": [{ "$ref": "case.schema.json" }, { "not": { "required": ["expected"] } }], "description": "The oracle expectation is never sent to an adapter." } } },
-        { "type": "object", "required": ["type", "protocol_version"], "additionalProperties": false, "properties": { "type": { "const": "shutdown" }, "protocol_version": { "const": 1 } } }
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "protocol_version"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "hello"
+            },
+            "protocol_version": {
+              "const": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "protocol_version",
+            "case"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "case"
+            },
+            "protocol_version": {
+              "const": 1
+            },
+            "case": {
+              "allOf": [
+                {
+                  "$ref": "case.schema.json"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "expected"
+                    ]
+                  }
+                }
+              ],
+              "description": "The oracle expectation is never sent to an adapter."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "protocol_version"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "shutdown"
+            },
+            "protocol_version": {
+              "const": 1
+            }
+          }
+        }
       ]
     },
     "helloResponse": {
       "type": "object",
-      "required": ["type", "protocol_version", "adapter", "adapter_version", "sut"],
+      "required": [
+        "type",
+        "protocol_version",
+        "adapter",
+        "adapter_version",
+        "sut"
+      ],
       "properties": {
-        "type": { "const": "hello" },
-        "protocol_version": { "const": 1 },
-        "adapter": { "type": "string" },
-        "adapter_version": { "type": "string" },
-        "sut": { "type": "object", "required": ["name", "commit", "version", "worktree_clean"], "properties": { "commit": { "type": "string" }, "worktree_clean": { "type": "boolean" } } }
+        "type": {
+          "const": "hello"
+        },
+        "protocol_version": {
+          "const": 1
+        },
+        "adapter": {
+          "type": "string"
+        },
+        "adapter_version": {
+          "type": "string"
+        },
+        "sut": {
+          "type": "object",
+          "required": [
+            "name",
+            "commit",
+            "version",
+            "worktree_clean"
+          ],
+          "properties": {
+            "commit": {
+              "type": "string"
+            },
+            "worktree_clean": {
+              "type": "boolean"
+            }
+          }
+        }
       }
     },
     "observedAssertion": {
       "type": "object",
-      "required": ["step", "stage", "outcome", "reason_class", "sut_reason_code", "enforcement_stage"],
+      "required": [
+        "step",
+        "stage",
+        "outcome",
+        "reason_class",
+        "sut_reason_code",
+        "enforcement_stage"
+      ],
       "properties": {
-        "step": { "type": "integer", "minimum": 0 },
-        "attempt": { "type": "integer", "minimum": 0 },
-        "stage": { "enum": ["request", "approval", "result", "verifier", "permit"] },
-        "outcome": { "enum": ["ALLOW", "ASK", "DENY", "EXECUTE", "REJECT", "DELIVER", "WITHHOLD", "ACCEPT", "EXECUTE_ONCE", "REUSE_BLOCKED", "REUSE_ACCEPTED"] },
-        "reason_class": { "type": "string", "pattern": "^[A-Z_]+$" },
-        "sut_reason_code": { "type": "string" },
-        "enforcement_stage": { "type": "string" },
-        "sut_decision": { "type": "string", "description": "The SUT's own report, present only when it disagrees with the observed effect (adapter >= 0.2.0)." },
-        "decision_effect_mismatch": { "type": "boolean" }
-      }
-    },
-    "decisionEffectMismatch": {
-      "type": "object",
-      "required": ["step", "stage", "key", "sut_decision", "decided_executions", "observed_executions"],
-      "properties": {
-        "step": { "type": "integer", "minimum": 0 },
-        "attempt": { "type": "integer", "minimum": 0 },
-        "stage": { "enum": ["request", "approval"] },
-        "key": { "type": ["string", "null"] },
-        "sut_decision": { "type": "string" },
-        "decided_executions": { "type": "integer", "minimum": 0 },
-        "observed_executions": { "type": "integer", "minimum": 0 }
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stage": {
+          "enum": [
+            "request",
+            "approval",
+            "result",
+            "verifier",
+            "permit"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "ALLOW",
+            "ASK",
+            "DENY",
+            "EXECUTE",
+            "REJECT",
+            "DELIVER",
+            "WITHHOLD",
+            "ACCEPT",
+            "EXECUTE_ONCE",
+            "REUSE_BLOCKED",
+            "REUSE_ACCEPTED"
+          ]
+        },
+        "reason_class": {
+          "type": "string",
+          "pattern": "^[A-Z_]+$"
+        },
+        "sut_reason_code": {
+          "type": "string"
+        },
+        "enforcement_stage": {
+          "type": "string"
+        },
+        "sut_decision": {
+          "type": "string",
+          "description": "The SUT's own report, present only when it disagrees with the observed effect (adapter >= 0.2.0)."
+        },
+        "decision_effect_mismatch": {
+          "type": "boolean"
+        }
       }
     },
     "caseResult": {
       "type": "object",
-      "required": ["type", "case_id", "protocol_version", "evaluation_boundary", "status", "observations", "raw_sut_evidence"],
+      "required": [
+        "type",
+        "case_id",
+        "protocol_version",
+        "evaluation_boundary",
+        "status",
+        "observations",
+        "raw_sut_evidence"
+      ],
       "properties": {
-        "type": { "const": "case_result" },
-        "case_id": { "type": "string" },
-        "protocol_version": { "const": 1 },
-        "evaluation_boundary": { "enum": ["runtime", "component"] },
-        "status": { "enum": ["ok", "adapter_error"] },
+        "type": {
+          "const": "case_result"
+        },
+        "case_id": {
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 1
+        },
+        "evaluation_boundary": {
+          "enum": [
+            "runtime",
+            "component"
+          ]
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "adapter_error"
+          ]
+        },
         "observations": {
           "oneOf": [
-            { "type": "null" },
+            {
+              "type": "null"
+            },
             {
               "type": "object",
-              "required": ["assertions", "executions", "unattributed_executions"],
+              "required": [
+                "assertions",
+                "executions",
+                "unattributed_executions"
+              ],
               "properties": {
-                "assertions": { "type": "array", "items": { "$ref": "#/$defs/observedAssertion" } },
-                "executions": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
-                "unattributed_executions": { "type": "integer", "minimum": 0 },
-                "permit_reuses_accepted": { "type": "integer", "minimum": 0 },
-                "decision_effect_mismatches": { "type": "array", "items": { "$ref": "#/$defs/decisionEffectMismatch" } }
+                "assertions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/observedAssertion"
+                  }
+                },
+                "executions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "unattributed_executions": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "permit_reuses_accepted": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "effect_records": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/effectRecord"
+                  }
+                }
               }
             }
           ]
         },
         "raw_sut_evidence": {},
-        "error": { "type": "object", "required": ["message"], "properties": { "message": { "type": "string" } } }
+        "error": {
+          "type": "object",
+          "required": [
+            "message"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            }
+          }
+        }
       },
-      "if": { "properties": { "status": { "const": "adapter_error" } } },
-      "then": { "required": ["error"], "properties": { "observations": { "type": "null" } } },
-      "else": { "properties": { "observations": { "type": "object" } } }
+      "if": {
+        "properties": {
+          "status": {
+            "const": "adapter_error"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "observations": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "observations": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "sutReport": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "returned",
+            "threw"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "exit_status": {
+          "type": "string"
+        },
+        "exception": {
+          "type": "object",
+          "required": [
+            "name",
+            "code",
+            "message"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "effectRecord": {
+      "type": "object",
+      "description": "Decision/effect evidence for one decision point (adapter >= 0.3.0). Decisions come only from the SUT's report; effects only from the harness observation channel.",
+      "required": [
+        "step",
+        "stage",
+        "key",
+        "attribution",
+        "sut_reports",
+        "sut_decisions",
+        "result_control_decisions",
+        "authorized_executions",
+        "observed_executions",
+        "authorized_deliveries",
+        "observed_raw_deliveries",
+        "delivery_observed"
+      ],
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stage": {
+          "enum": [
+            "request",
+            "approval",
+            "permit"
+          ]
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attribution": {
+          "enum": [
+            "attempt",
+            "step_key"
+          ]
+        },
+        "sut_reports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sutReport"
+          }
+        },
+        "sut_decisions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ALLOW",
+              "ASK",
+              "DENY",
+              "EXECUTE",
+              "REJECT",
+              "UNCLASSIFIED"
+            ]
+          }
+        },
+        "result_control_decisions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "DELIVER",
+              "WITHHOLD",
+              "UNKNOWN"
+            ]
+          }
+        },
+        "authorized_executions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_executions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "authorized_deliveries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_raw_deliveries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delivery_observed": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

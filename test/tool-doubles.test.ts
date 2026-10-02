@@ -20,7 +20,7 @@ test("install replaces, restore puts back the exact original functions and keys"
   assert.equal(reg.read_record, read);
   assert.equal(reg.update_record, upd);
   assert.deepEqual(Object.keys(reg).sort(), ["read_record", "update_record"]);
-  assert.deepEqual(d.log, [{ tool: "read_record", trace: t }]);
+  assert.deepEqual(d.log, [{ tool: "read_record", trace: t, output: '{"classification":"restricted"}' }]);
 });
 
 test("outputs and execution logs never leak into the next case", async () => {

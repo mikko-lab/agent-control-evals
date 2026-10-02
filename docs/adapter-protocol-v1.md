@@ -37,7 +37,7 @@ Adapter to harness, with exactly one line per `hello` and per `case`:
 | Situation | Classification | Effect |
 |---|---|---|
 | Adapter returns `status: "adapter_error"` | adapter error | The case is not evaluated and enters no metric. The run is invalid (exit 2). Everything observed before the error, including tool-double executions, stays in `raw_sut_evidence.partial` and is counted in the error record (`observed_executions`). |
-| The SUT's reported decision and the observed execution effect disagree | **observation**, not an error (adapter ≥ 0.2.0) | The outcome follows the effect. The SUT's report is kept in `sut_decision`, and the disagreement is listed in `observations.decision_effect_mismatches`. |
+| The SUT's reported decision and the observed effect disagree | **SUT finding**, not an error (adapter ≥ 0.3.0) | The normalised outcome follows the effect, and the SUT's report is kept in `sut_decision`. The decision point's `effect_record` carries both, and the harness classifies it as `unauthorized_execution`, `unauthorized_delivery` or `missing_expected_effect` (see `docs/evaluation-spec.md` §12). |
 | Invalid JSON, wrong `case_id`, unknown stage, outcome or reason class, missing field | protocol error | The run stops and is invalid. |
 | Adapter exits, hangs past the per-case timeout, or answers unsolicited | protocol or harness error | The run stops and is invalid. |
 | `hello` with the wrong protocol version, SUT commit or worktree state | harness error | No case is sent. |
@@ -52,12 +52,22 @@ Adapter and harness errors **never** become `DENY`, `REJECT` or `WITHHOLD`, and 
 - **Runtime cases** call only `GuardedExecutor.process`, `GuardedExecutor.resolveApproval` and `GuardedExecutor.clearSession`. Each case gets fresh stateful SUT components (replay guard, correlation store, audit collector, executor). The schema validator is stateless and is shared.
 - **Component cases** call `ApprovalGrantVerifier.verifyV2` directly with a trusted context, or `ExecutionGate.mintPermit` and `execute` with a harness-held authority symbol.
 - **Materialisation:** labels become deterministic version-4-shaped UUIDs derived from SHA-256 of the case id, namespace and label. Request envelopes are signed with the SUT's `SignatureService` (HMAC-SHA256). Capabilities and approval grants are Ed25519-signed with harness keys generated per adapter process. A "tampered" value is rewritten after signing.
-- **Normalisation (adapter 0.2.0): decision and effect are kept apart.** The SUT's report (return value or thrown error) is the *decision*. Executions observed through the harness tool doubles, or through the SUT's fallback-tool counter for tools outside the harness registry, are the *effect*. Outcomes about execution follow the effect:
-  - Request ALLOW means this attempt's execution was observed.
-  - For approval steps, each target request's observed executions are reconciled with the attempts' decisions (`reconcileApprovals` in `src/adapter/acs/runtime.ts`). Surplus executions turn REJECT-decided attempts into EXECUTE. Claimed executions with no observed effect turn into REJECT, preferring claims that were inferred from exceptions.
-  - Whenever the effect overrides the decision, the observation carries `sut_decision` and `decision_effect_mismatch: true`, and an entry is added to `decision_effect_mismatches`. Executions of requests no attempt targeted, and fallback-tool executions, are recorded there too.
-  - A rejection that follows an observed execution (correlation failure or result-path replay) is ALLOW or EXECUTE plus a result WITHHOLD.
-  - **An observed execution is never turned into an `AdapterError`.** `AdapterError` remains only for SUT behaviour that cannot be classified *and* shows no unexplained execution.
+- **Decision and effect are separate evidence (adapter 0.3.0).** Every decision point (request attempt, approval step per target request, permit attempt) yields an `effect_record`. The record holds:
+  - `sut_reports`: what the SUT returned or threw, including the exception.
+  - `sut_decisions`: the SUT's decision, derived only from that report and the SUT's own audit trail. A `ReplayGuardError` counts as request-level only if the SUT's replay/timestamp audit event names this request; otherwise it is a rejection of the SUT's internal result request, i.e. after authorisation.
+  - `result_control_decisions`: the Result Guardian's audit decision for exact calls, else the returned `exit_status`.
+  - `authorized_executions` and `authorized_deliveries`: what those decisions allowed.
+  - `observed_executions`: from the harness tool doubles, or from the SUT's fallback-tool counter for tools outside the harness registry.
+  - `observed_raw_deliveries`: whether a raw tool output recorded by the doubles appears anywhere in the returned value, by key-order-independent structural search.
+
+  Effects are never derived from decisions, and decisions are never derived from effects.
+- **Normalised outcomes follow the effect.** Request ALLOW means this attempt's execution was observed. A result is DELIVER iff a raw output was observed in what the call returned. Approval outcomes are reconciled per target request against observed executions: surplus executions turn REJECT or UNCLASSIFIED decisions into EXECUTE, and claimed executions without an effect become REJECT, preferring claims inferred from exceptions, so a random post-execution-looking exception cannot earn a mutation kill. Whenever the effect overrides the decision, the assertion carries `sut_decision` and `decision_effect_mismatch: true`.
+- **An observed execution or delivery is never turned into an `AdapterError`.** This holds whether the SUT threw, reported DENY, ASK or REJECT, or the two simply disagree. `AdapterError` remains only where the adapter cannot produce a reliable observation:
+  - an unclassifiable SUT report with no observed effect;
+  - an adapter bug or invalid scenario operation;
+  - a protocol failure.
+
+  In the first two cases everything observed so far (`effect_records` included) is kept in `raw_sut_evidence.partial`.
 
 ### Clock model
 

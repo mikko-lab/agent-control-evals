@@ -40,16 +40,46 @@ export interface ObservedAssertion {
   decision_effect_mismatch?: boolean;
 }
 
-/** A disagreement between the SUT's reported decision and the observed tool-execution effect. */
-export interface DecisionEffectMismatch {
+/** What the SUT itself reported for one call. */
+export interface SutReport {
+  kind: "returned" | "threw";
+  /** process(): "pending" | "executed" | other; resolveApproval(): "result" | "undefined"; gate: "result". */
+  status?: string;
+  exit_status?: string;
+  exception?: { name: string; code: string; message: string };
+}
+
+/** The SUT's own control decision for an attempt (derived from its report, never from observed effects). */
+export type SutDecision = "ALLOW" | "ASK" | "DENY" | "EXECUTE" | "REJECT" | "UNCLASSIFIED";
+/** The SUT's result-control decision (Result Guardian audit decision, else the returned exit_status). */
+export type ResultControlDecision = "DELIVER" | "WITHHOLD" | "UNKNOWN";
+
+/**
+ * Decision/effect evidence for one decision point (adapter >= 0.3.0). Decisions come only from what the SUT
+ * reported; effects come only from the harness observation channel (tool doubles / fallback-tool counter for
+ * executions, a search for the raw tool output in the returned value for deliveries).
+ */
+export interface EffectRecord {
   step: number;
+  /** Present when the record describes exactly one attempt. */
   attempt?: number;
-  stage: "request" | "approval";
-  /** Session-qualified request label whose execution count disagrees, or null for unattributable executions. */
+  stage: "request" | "approval" | "permit";
+  /** Session-qualified request label the effects belong to; null = execution not attributable to a request. */
   key: string | null;
-  sut_decision: string;
-  decided_executions: number;
+  /** "attempt": effects attributed to this attempt exactly; "step_key": aggregated over a concurrent step's attempts on `key`. */
+  attribution: "attempt" | "step_key";
+  sut_reports: SutReport[];
+  sut_decisions: SutDecision[];
+  result_control_decisions: ResultControlDecision[];
+  /** Attempts whose SUT decision granted execution authority (request ALLOW, approval EXECUTE, permit EXECUTE). */
+  authorized_executions: number;
   observed_executions: number;
+  /** Attempts with execution authority whose SUT result control allowed delivery. */
+  authorized_deliveries: number;
+  /** Returned values in which a raw tool output of this record's executions was found. */
+  observed_raw_deliveries: number;
+  /** false for decision points with no delivery channel (component execution gate). */
+  delivery_observed: boolean;
 }
 
 export interface Observations {
@@ -60,8 +90,11 @@ export interface Observations {
   unattributed_executions: number;
   /** Component permit cases: observed number of accepted permit reuses. */
   permit_reuses_accepted?: number;
-  /** Decision/effect disagreements (adapter >= 0.2.0). The effect, not the decision, determines `outcome`. */
-  decision_effect_mismatches?: DecisionEffectMismatch[];
+  /**
+   * Decision/effect evidence per decision point (adapter >= 0.3.0). Absent = the adapter has no effect
+   * channel for this case (reported as "not observed", never as zero violations).
+   */
+  effect_records?: EffectRecord[];
 }
 
 export interface CaseResult {
@@ -128,13 +161,21 @@ export function validateCaseResult(x: unknown, expectedCaseId: string, expectedB
     if (a.sut_decision !== undefined && typeof a.sut_decision !== "string") throw new ProtocolError("observed assertion: sut_decision must be a string");
     if (a.decision_effect_mismatch !== undefined && typeof a.decision_effect_mismatch !== "boolean") throw new ProtocolError("observed assertion: decision_effect_mismatch must be boolean");
   }
-  if (o.decision_effect_mismatches !== undefined) {
-    if (!Array.isArray(o.decision_effect_mismatches)) throw new ProtocolError("decision_effect_mismatches must be an array");
-    for (const m of o.decision_effect_mismatches) {
-      if (!isObj(m) || !Number.isSafeInteger(m.step) || (m.stage !== "request" && m.stage !== "approval") || typeof m.sut_decision !== "string" ||
-        !Number.isSafeInteger(m.decided_executions) || !Number.isSafeInteger(m.observed_executions) || (m.key !== null && typeof m.key !== "string")) {
-        throw new ProtocolError("malformed decision_effect_mismatches entry");
+  if (o.effect_records !== undefined) {
+    if (!Array.isArray(o.effect_records)) throw new ProtocolError("effect_records must be an array");
+    const int = (x: unknown) => Number.isSafeInteger(x) && (x as number) >= 0;
+    for (const r of o.effect_records) {
+      if (
+        !isObj(r) || !Number.isSafeInteger(r.step) || !["request", "approval", "permit"].includes(r.stage as string) ||
+        (r.key !== null && typeof r.key !== "string") || (r.attribution !== "attempt" && r.attribution !== "step_key") ||
+        !Array.isArray(r.sut_reports) || !Array.isArray(r.sut_decisions) || !Array.isArray(r.result_control_decisions) ||
+        !int(r.authorized_executions) || !int(r.observed_executions) || !int(r.authorized_deliveries) || !int(r.observed_raw_deliveries) ||
+        typeof r.delivery_observed !== "boolean"
+      ) {
+        throw new ProtocolError("malformed effect_records entry");
       }
+      for (const d of r.sut_decisions as unknown[]) if (!["ALLOW", "ASK", "DENY", "EXECUTE", "REJECT", "UNCLASSIFIED"].includes(d as string)) throw new ProtocolError(`unknown sut_decision ${String(d)}`);
+      for (const d of r.result_control_decisions as unknown[]) if (!["DELIVER", "WITHHOLD", "UNKNOWN"].includes(d as string)) throw new ProtocolError(`unknown result_control_decision ${String(d)}`);
     }
   }
   if (!isObj(o.executions)) throw new ProtocolError("observations.executions must be an object");

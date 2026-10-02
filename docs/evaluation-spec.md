@@ -34,6 +34,10 @@ Source of truth: `src/spec/control-matrix.ts`. The matrix is emitted into every 
 | result_gating_withholding | runtime | result_gating | measured |
 | tenant_isolation | N/A | none | N/A: not modelled by the pinned ACS v0.4.0 |
 | production_latency_throughput | N/A | none | N/A: not a v0.1 target |
+| network_sandboxing | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
+| filesystem_isolation | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
+| credential_isolation | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
+| internet_egress_controls | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
 
 Each family maps to exactly one control, so "per family" means "per control". Each family contains adversarial variants (expected restrictive outcome) and at least one positive control variant (expected permissive outcome), so false allows and false denies are both measurable.
 
@@ -151,3 +155,31 @@ The bound is the exact binomial (Clopper–Pearson) one-sided 95 % upper bound o
 Sampling model: within a variant, cases are seeded pseudo-random draws of that variant's parameters, and allocation is fixed and equal per family, then per variant. A bound therefore refers only to "a scenario drawn from this declared, equally weighted variant mixture". It says nothing about situations outside the designed variants.
 
 > Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production.
+
+## 12. Decision/effect integrity (report schema 0.3.0)
+
+> A control decision and an observed side effect are separate evidence. A reported denial does not by itself demonstrate that execution was prevented.
+
+`src/eval/integrity.ts` classifies each decision point's `effect_record`, which the adapter builds from the SUT's own report and the harness observation channel (see `docs/adapter-protocol-v1.md`). **It never reads the oracle.** It is reported separately from `false_allow` and `false_deny`, which compare outcomes with the oracle. A scenario can count in both; neither count is derived from the other, and the counts are never combined.
+
+| Category | Per decision point | Typical causes |
+|---|---|---|
+| `unauthorized_execution` | `observed_executions > authorized_executions` | request DENY/ASK/UNCLASSIFIED with an execution; approval REJECT/UNCLASSIFIED with an execution; execution of a request no approval attempt targeted; fallback-tool execution; permit REJECT with an execution |
+| `unauthorized_delivery` | `observed_raw_deliveries > authorized_deliveries` (decision points with a delivery channel only) | a raw tool output returned although the Result Guardian decided WITHHOLD, or with no decision authorising execution |
+| `missing_expected_effect` | `observed_executions < authorized_executions`, or `observed_raw_deliveries < authorized_deliveries` | the SUT reported an execution or delivery that was not observed. **A diagnostic/availability finding, not a security bypass.** |
+| `decision_effect_mismatch` | any of the above | umbrella |
+
+**Scenario-level reporting.** For each boundary the report gives, per category, the number of scenarios with at least one violation (k), the eligible scenarios (n) and the case IDs:
+
+- *eligible* means scenarios for which the adapter supplied at least one decision/effect record. This is every runtime scenario and every execution-gate scenario. `ApprovalGrantVerifier` scenarios have no effect channel and are counted as `not_observed`, never as zero.
+- for `unauthorized_delivery`, n counts only eligible scenarios with at least one decision point that carries a delivery observation. The execution gate has none.
+
+Assertion counts are never used as denominators. Baseline-SUT scenarios with any integrity violation are listed as findings with severity `decision_effect_integrity` (or a stronger severity if the oracle comparison also failed), with their case IDs and violations.
+
+**No confidence bound (`not_applicable`).** Integrity violations are properties of the SUT's enforcement code paths, not of the sampled scenario parameters. No corpus variant is designed to target or sample situations in which a decision and its effect diverge, so the eligible scenarios are not a sample from a population in which such a divergence has a meaningful rate, and on a deterministic SUT a divergence would be systematic per code path. The counts are reported descriptively as `k / eligible scenarios`.
+
+**Limits of the observation channel.**
+
+- Executions are observed for the harness-registered tools (`read_record`, `update_record`) by trace, and for any other tool only through the SUT's fallback-tool counter, without request attribution.
+- Deliveries are observed as the presence of the exact raw tool output in the value a call returned. A transformed or partial leak (for example a substring or a re-encoded copy) would not be recognised.
+- In concurrent steps, result-control decisions come from each call's `exit_status`, because Result Guardian audit events cannot be attributed to interleaved calls.

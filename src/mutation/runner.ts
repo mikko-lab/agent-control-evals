@@ -38,6 +38,8 @@ export interface MutantResult {
   outcome_mismatches_by_boundary: { runtime: number; component: number };
   /** Component mutants only: true if any runtime case changed outcome (would contradict the runtime-unreachability claim). */
   boundary_violation: boolean;
+  /** Descriptive: scenarios of the mutant run per decision/effect integrity category (not a kill criterion). */
+  integrity_scenarios: { unauthorized_execution: number; unauthorized_delivery: number; missing_expected_effect: number; decision_effect_mismatch: number };
 }
 
 const verdictMap = (r: RunOutput) => new Map<string, CaseVerdict>(r.verdicts.map((v) => [v.case_id, v]));
@@ -57,6 +59,12 @@ function primaryOk(v: CaseVerdict): boolean {
 
 function safetyViolation(v: CaseVerdict): boolean {
   return !primaryOk(v) || v.mismatches.some((m) => m.kind === "invariant_violation");
+}
+
+function integrityCounts(r: RunOutput) {
+  const c = { unauthorized_execution: 0, unauthorized_delivery: 0, missing_expected_effect: 0, decision_effect_mismatch: 0 };
+  for (const v of r.verdicts) for (const k of Object.keys(c) as (keyof typeof c)[]) if (v.integrity.categories[k]) c[k]++;
+  return c;
 }
 
 export function judgeMutant(m: MutantSpec, cases: Case[], baseline: RunOutput, mutant: RunOutput): Omit<MutantResult, "status" | "invalid_reason"> & { killed: boolean } {
@@ -89,6 +97,7 @@ export function judgeMutant(m: MutantSpec, cases: Case[], baseline: RunOutput, m
     mutant_harness_errors: mutant.harness_errors.length,
     outcome_mismatches_by_boundary: mismatchesBy,
     boundary_violation: m.evaluation_boundary === "component" && mismatchesBy.runtime > 0,
+    integrity_scenarios: integrityCounts(mutant),
     killed: witnesses.length > 0,
   };
 }
@@ -112,6 +121,7 @@ export async function runMutant(
     mutant_harness_errors: 0,
     outcome_mismatches_by_boundary: { runtime: 0, component: 0 },
     boundary_violation: false,
+    integrity_scenarios: { unauthorized_execution: 0, unauthorized_delivery: 0, missing_expected_effect: 0, decision_effect_mismatch: 0 },
   };
   let env;
   try {

@@ -52,6 +52,10 @@ See [`docs/evaluation-spec.md`](docs/evaluation-spec.md) for the control matrix,
 
 **Confidence bounds.** Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production. Since report schema 0.2.0, bounds are computed only on scenario proportions. Assertion counts are descriptive, and breadth is the number of designed variants, not the number of cases (`docs/evaluation-spec.md` §10–11).
 
+**Decisions and effects.** A control decision and an observed side effect are separate evidence. A reported denial does not by itself demonstrate that execution was prevented. The harness therefore records the SUT's decision and the observed tool executions and output deliveries separately, and reports decision/effect integrity (unauthorized execution, unauthorized delivery, missing expected effect) apart from the oracle-based false allow and false deny metrics, without confidence bounds (`docs/evaluation-spec.md` §12).
+
+**Out of scope.** Network sandboxing, filesystem isolation, credential isolation, internet egress controls and tenant isolation are not part of the pinned ACS v0.4.0 control model. They are listed as N/A and never measured.
+
 **Oracle.** The oracle is a human-written specification, not an independent source of security truth. Its policy parameters were written down from the pinned SUT's documented demo configuration, so a misunderstanding shared by both authors would not be detected.
 
 **Evaluation boundary.** Runtime and component results are different levels of evidence and are never presented as one security score.

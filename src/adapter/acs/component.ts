@@ -9,7 +9,7 @@
 import { sign } from "node:crypto";
 import type { ReasonClass } from "../../spec/reason-taxonomy";
 import type { CaseForAdapter, PermitScenario, VerifierScenario } from "../../corpus/types";
-import type { Observations } from "../protocol";
+import type { EffectRecord, Observations, SutDecision, SutReport } from "../protocol";
 import type { SutModules } from "./sut";
 import { AdapterError, HARNESS_TOOLS, uuidFor, type AdapterKeys } from "./runtime";
 import { makeTrace, ToolDoubles, TRACE_ARG, traceKey } from "./tool-doubles";
@@ -127,22 +127,45 @@ export async function runPermitCase(c: CaseForAdapter, sut: SutModules): Promise
   const evidence = settled.map((r) =>
     r.status === "fulfilled" ? { returned: (r.value as { exit_status?: string })?.exit_status ?? null } : { thrown: (r.reason as Error)?.message ?? String(r.reason) },
   );
+  // Decision (what the gate reported) and effect (what the tool doubles observed) per attempt. Each attempt
+  // has its own trace, so attribution is exact even for concurrent attempts.
+  const records: EffectRecord[] = [];
   const rejectionReasons: { reason: ReasonClass; code: string }[] = [];
-  let fulfilled = 0;
-  for (const r of settled) {
+  let executedAttempts = 0;
+  settled.forEach((r, j) => {
+    const at = s.attempts[j];
+    const trace = makeTrace(`${at.session}/${at.request}`, 0, j);
+    const observed = doubles.log.filter((x) => x.trace === trace).length;
+    let decision: SutDecision;
+    let report: SutReport;
     if (r.status === "fulfilled") {
-      fulfilled++;
-      continue;
-    }
-    const msg = (r.reason as Error)?.message ?? "";
-    if (msg === "Execution blocked: valid execution permit required") {
-      rejectionReasons.push({ reason: p.forged ? "PERMIT_INVALID" : "PERMIT_REUSE_BLOCKED", code: "permit_required" });
-    } else if (/^Execution blocked: permit (session|request|tool) mismatch$/.test(msg)) {
-      rejectionReasons.push({ reason: "PERMIT_BINDING_MISMATCH", code: msg.replace("Execution blocked: ", "").replace(/ /g, "_") });
+      decision = "EXECUTE";
+      report = { kind: "returned", status: "result", ...(typeof (r.value as { exit_status?: unknown })?.exit_status === "string" ? { exit_status: (r.value as { exit_status: string }).exit_status } : {}) };
     } else {
-      throw new AdapterError(`unclassified ExecutionGate exception: ${msg}`);
+      const err = r.reason as Error & { code?: unknown };
+      const msg = err?.message ?? "";
+      report = { kind: "threw", exception: { name: err?.name ?? "Error", code: err?.code !== undefined ? String(err.code) : "", message: msg } };
+      if (msg === "Execution blocked: valid execution permit required") {
+        decision = "REJECT";
+        rejectionReasons.push({ reason: p.forged ? "PERMIT_INVALID" : "PERMIT_REUSE_BLOCKED", code: "permit_required" });
+      } else if (/^Execution blocked: permit (session|request|tool) mismatch$/.test(msg)) {
+        decision = "REJECT";
+        rejectionReasons.push({ reason: "PERMIT_BINDING_MISMATCH", code: msg.replace("Execution blocked: ", "").replace(/ /g, "_") });
+      } else {
+        decision = "UNCLASSIFIED";
+      }
     }
-  }
+    if (decision === "UNCLASSIFIED" && observed === 0) {
+      throw new AdapterError(`unclassified ExecutionGate report without an observed execution: ${report.exception?.message ?? ""}`);
+    }
+    if (observed > 0) executedAttempts++;
+    records.push({
+      step: 0, attempt: j, stage: "permit", key: `${at.session}/${at.request}`, attribution: "attempt",
+      sut_reports: [report], sut_decisions: [decision], result_control_decisions: [],
+      authorized_executions: decision === "EXECUTE" ? 1 : 0, observed_executions: observed,
+      authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observed: false,
+    });
+  });
   const executions: Record<string, number> = {};
   for (const at of s.attempts) executions[`${at.session}/${at.request}`] = 0;
   let unattributed = 0;
@@ -150,35 +173,43 @@ export async function runPermitCase(c: CaseForAdapter, sut: SutModules): Promise
     if (rec.trace === null) unattributed++;
     else executions[traceKey(rec.trace)] = (executions[traceKey(rec.trace)] ?? 0) + 1;
   }
-  unattributed += (sut.executionCounters.unknown_tool ?? 0) - unknownBefore;
-  const totalExec = Object.values(executions).reduce((a, b) => a + b, 0) + unattributed;
-  if (totalExec !== fulfilled) throw new AdapterError(`gate fulfilled ${fulfilled} executions but tool doubles observed ${totalExec}`);
+  const fallback = (sut.executionCounters.unknown_tool ?? 0) - unknownBefore;
+  unattributed += fallback;
+  if (fallback > 0) {
+    records.push({
+      step: 0, stage: "permit", key: null, attribution: "step_key", sut_reports: [], sut_decisions: [], result_control_decisions: [],
+      authorized_executions: 0, observed_executions: fallback, authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observed: false,
+    });
+  }
+  // Normalised outcome follows the observed effect: how many attempts with this permit executed.
   let outcome: string;
   let reason: ReasonClass;
   let code: string;
-  if (fulfilled === 0) {
+  if (executedAttempts === 0) {
     outcome = "REJECT";
-    reason = rejectionReasons[0].reason;
-    code = rejectionReasons[0].code;
-  } else if (fulfilled === 1 && s.attempts.length === 1) {
+    reason = rejectionReasons[0]?.reason ?? "DECISION_EFFECT_MISMATCH";
+    code = rejectionReasons[0]?.code ?? "no_observed_execution";
+  } else if (executedAttempts === 1 && s.attempts.length === 1) {
     outcome = "EXECUTE_ONCE";
     reason = "PERMIT_ACCEPTED";
     code = "executed";
-  } else if (fulfilled === 1) {
+  } else if (executedAttempts === 1) {
     outcome = "REUSE_BLOCKED";
     reason = "PERMIT_REUSE_BLOCKED";
     code = rejectionReasons[0]?.code ?? "permit_required";
   } else {
     outcome = "REUSE_ACCEPTED";
     reason = "PERMIT_ACCEPTED";
-    code = `executed_x${fulfilled}`;
+    code = `executed_x${executedAttempts}`;
   }
+  const fulfilled = executedAttempts;
   return {
     observations: {
       assertions: [{ step: 0, stage: "permit", outcome, reason_class: reason, sut_reason_code: code, enforcement_stage: "execution_gate" }],
       executions,
       unattributed_executions: unattributed,
       permit_reuses_accepted: Math.max(0, fulfilled - 1),
+      effect_records: records,
     },
     evidence: { attempts: evidence },
   };

@@ -3,6 +3,8 @@ import { REASON_TAXONOMY } from "../spec/reason-taxonomy";
 import { REPORT_SCHEMA_VERSION } from "../version";
 import type { Case } from "../corpus/types";
 import type { RunOutput } from "../eval/run";
+import type { CaseVerdict } from "../eval/compare";
+import { INTEGRITY_CATEGORIES, type IntegrityCategory } from "../eval/integrity";
 import { computeBoundaryMetrics, type BoundaryMetrics } from "../eval/metrics";
 import { STATISTICS_DISCLAIMER } from "../eval/stats";
 import type { BoundaryCheckResult } from "../oracle/boundary-check";
@@ -45,6 +47,42 @@ function boundStatsList(m: BoundaryMetrics) {
   return out;
 }
 
+const INTEGRITY_BOUND_REASON =
+  "not_applicable: decision/effect integrity violations are properties of the SUT's enforcement code paths, not of the sampled scenario parameters. " +
+  "No corpus variant is designed to target or sample situations in which a decision and its effect could diverge, so the eligible scenarios are not a sample from a population in which such a divergence has a meaningful rate; on a deterministic SUT a divergence would be systematic per code path. Counts are reported descriptively as k / eligible scenarios.";
+
+/** Scenario-level decision/effect integrity for one boundary (descriptive; no confidence bound). */
+function integritySection(boundary: "runtime" | "component", verdicts: CaseVerdict[]) {
+  const vs = verdicts.filter((v) => v.boundary === boundary);
+  const eligible = vs.filter((v) => v.integrity.observed && v.integrity.decision_points > 0);
+  const deliveryEligible = eligible.filter((v) => v.integrity.delivery_points > 0);
+  const cat = (name: IntegrityCategory, pool: CaseVerdict[]) => {
+    const ids = pool.filter((v) => v.integrity.categories[name]).map((v) => v.case_id).sort();
+    return { count: ids.length, eligible_scenarios: pool.length, rate_descriptive: pool.length === 0 ? null : `${ids.length}/${pool.length}`, confidence_bound: "not_applicable", case_ids: ids };
+  };
+  const byFamily: Record<string, Record<string, number>> = {};
+  for (const v of eligible) {
+    const f = (byFamily[v.family] ??= { eligible_scenarios: 0, unauthorized_execution: 0, unauthorized_delivery: 0, missing_expected_effect: 0, decision_effect_mismatch: 0 });
+    f.eligible_scenarios++;
+    for (const c of INTEGRITY_CATEGORIES) if (v.integrity.categories[c]) f[c]++;
+  }
+  return {
+    boundary,
+    evaluated_scenarios: vs.length,
+    eligible_scenarios: eligible.length,
+    eligible_definition: "scenarios for which the adapter supplied at least one decision/effect record (effect channel present)",
+    delivery_eligible_scenarios: deliveryEligible.length,
+    delivery_eligible_definition: "eligible scenarios with at least one decision point that carries a delivery observation",
+    not_observed_scenarios: vs.filter((v) => !v.integrity.observed || v.integrity.decision_points === 0).length,
+    decision_points: eligible.reduce((n, v) => n + v.integrity.decision_points, 0),
+    unauthorized_execution: cat("unauthorized_execution", eligible),
+    unauthorized_delivery: cat("unauthorized_delivery", deliveryEligible),
+    missing_expected_effect: cat("missing_expected_effect", eligible),
+    decision_effect_mismatch: cat("decision_effect_mismatch", eligible),
+    by_family: Object.fromEntries(Object.entries(byFamily).sort(([a], [b]) => a.localeCompare(b))),
+  };
+}
+
 function mutationBlock(results: MutantResult[], boundary: "runtime" | "component") {
   const rs = results.filter((r) => r.evaluation_boundary === boundary);
   const killed = rs.filter((r) => r.status === "killed").length;
@@ -61,13 +99,21 @@ export function buildReport(i: ReportInput) {
   const runtime = computeBoundaryMetrics("runtime", i.cases, i.baseline.verdicts);
   const component = computeBoundaryMetrics("component", i.cases, i.baseline.verdicts);
   const findings = i.baseline.verdicts
-    .filter((v) => !v.exact_match)
+    .filter((v) => !v.exact_match || v.integrity.categories.decision_effect_mismatch)
     .map((v) => ({
       case_id: v.case_id,
       boundary: v.boundary,
       family: v.family,
       variant: v.variant,
-      severity: v.bypass ? "bypass" : v.outcome_match ? "reason_only" : "outcome_or_invariant",
+      severity: v.bypass
+        ? "bypass"
+        : !v.outcome_match
+          ? "outcome_or_invariant"
+          : v.integrity.categories.decision_effect_mismatch
+            ? "decision_effect_integrity"
+            : "reason_only",
+      integrity_categories: INTEGRITY_CATEGORIES.filter((c) => v.integrity.categories[c]),
+      integrity_violations: v.integrity.violations,
       mismatches: v.mismatches,
     }));
   const reachOk = i.reachability.every((r) => r.ok);
@@ -169,6 +215,21 @@ export function buildReport(i: ReportInput) {
       breadth_caveat:
         "Cases within one variant are replicates of one designed structure, so a defect typically affects all or none of them. Breadth of evidence is the number of designed variants (see variant_coverage), not the number of cases; bounds say nothing about situations outside the designed variants.",
       entries: [...boundStatsList(runtime), ...boundStatsList(component)],
+    },
+    decision_effect_integrity: {
+      definitions: {
+        unauthorized_execution: "observed tool executions exceed the executions the SUT's own decisions authorised at that decision point (e.g. request DENY/ASK + execution, approval REJECT + execution, execution of an untargeted request, fallback-tool execution)",
+        unauthorized_delivery: "a raw tool output was found in a returned value although the SUT's result control (Result Guardian decision, else exit_status) did not allow delivery or no decision authorised execution",
+        missing_expected_effect: "the SUT's decision authorised an execution or a delivery that was not observed (diagnostic/availability finding, not a security bypass)",
+        decision_effect_mismatch: "umbrella: any of the above",
+      },
+      separation_from_oracle_metrics:
+        "Derived only from the SUT's reported decisions and the harness observation channel; never from the oracle. Not combined with, and not derived from, false_allow / false_deny. A scenario may count in both.",
+      unit: "scenario; k counts eligible scenarios with at least one violation of the category",
+      confidence_bound: "not_applicable",
+      confidence_bound_reason: INTEGRITY_BOUND_REASON,
+      runtime: integritySection("runtime", i.baseline.verdicts),
+      component: integritySection("component", i.baseline.verdicts),
     },
     mutation_sensitivity: {
       executed: i.mutation.executed,
