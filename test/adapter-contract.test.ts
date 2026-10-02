@@ -34,8 +34,8 @@ test("adapter_error is recorded as an error, never as a verdict or a DENY", asyn
   assert.equal(r.verdicts.length, 0);
   assert.equal(r.adapter_errors.length, cases.length);
   const m = computeBoundaryMetrics("runtime", cases, r.verdicts);
-  assert.equal(m.total.counts.cases, 0, "errored cases must not enter any denominator");
-  assert.equal(m.total.counts.false_allow + m.total.counts.false_deny, 0);
+  assert.equal(m.total.scenario_counts.cases, 0, "errored cases must not enter any denominator");
+  assert.equal(m.total.scenario_counts.false_allow_cases + m.total.scenario_counts.false_deny_cases, 0);
 });
 
 for (const mode of ["garbage", "wrong-id", "bad-outcome", "unknown-reason"]) {

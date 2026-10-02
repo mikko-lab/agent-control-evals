@@ -2,169 +2,689 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/report.schema.json",
   "title": "agent-control-evals report",
-  "description": "Versioned evaluation report. Runtime and component results are separate; there is no combined security score.",
+  "description": "Versioned evaluation report (schema 0.2.0). Runtime and component results are separate; there is no combined security score. Confidence bounds are scenario-level only; assertion counts are descriptive; breadth is variant coverage.",
   "type": "object",
   "required": [
-    "report_schema_version", "profile", "full_benchmark_executed", "headline", "gates", "manifest", "control_matrix", "na_controls",
-    "reason_taxonomy", "harness_validity", "oracle_independence_check", "adapter_validation", "mutation_reachability",
-    "runtime_metrics", "component_metrics", "statistical_bounds", "mutation_sensitivity", "findings",
-    "adapter_errors", "harness_errors", "oracle_limitation", "limitations"
+    "report_schema_version",
+    "profile",
+    "full_benchmark_executed",
+    "headline",
+    "gates",
+    "manifest",
+    "control_matrix",
+    "na_controls",
+    "reason_taxonomy",
+    "harness_validity",
+    "oracle_independence_check",
+    "adapter_validation",
+    "mutation_reachability",
+    "runtime_metrics",
+    "component_metrics",
+    "statistical_bounds",
+    "mutation_sensitivity",
+    "findings",
+    "adapter_errors",
+    "harness_errors",
+    "oracle_limitation",
+    "limitations"
   ],
   "additionalProperties": false,
   "$defs": {
-    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-    "commit": { "type": "string", "pattern": "^([0-9a-f]{40}|unknown)$" },
-    "boundary": { "enum": ["runtime", "component"] },
-    "rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{40}|unknown)$"
+    },
+    "boundary": {
+      "enum": [
+        "runtime",
+        "component"
+      ]
+    },
+    "rate": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
     "bound": {
       "type": "object",
-      "required": ["k", "n", "observed_rate", "one_sided_95_upper_bound", "rule_of_three", "method"],
+      "required": [
+        "unit",
+        "k",
+        "n",
+        "observed_rate",
+        "one_sided_95_upper_bound",
+        "rule_of_three",
+        "method"
+      ],
       "additionalProperties": false,
       "properties": {
-        "k": { "type": "integer", "minimum": 0 },
-        "n": { "type": "integer", "minimum": 0 },
-        "observed_rate": { "$ref": "#/$defs/rate" },
-        "one_sided_95_upper_bound": { "$ref": "#/$defs/rate" },
-        "rule_of_three": { "$ref": "#/$defs/rate" },
-        "method": { "const": "clopper-pearson-exact-one-sided" }
-      }
-    },
-    "counts": {
-      "type": "object",
-      "required": ["cases", "adversarial_cases", "assertions_evaluated", "assertions_matched", "assertions_outcome_matched", "false_allow", "false_deny", "expected_ask", "ask_to_ask", "ask_to_allow", "ask_to_deny", "allow_to_ask", "deny_to_ask", "bypasses", "invariants"],
-      "properties": {
-        "invariants": {
-          "type": "object",
-          "required": ["duplicate_executions", "unexpected_executions", "cross_request_executions", "cross_session_executions", "unexpected_deliveries", "permit_reuses_accepted"]
+        "unit": {
+          "const": "scenario"
+        },
+        "k": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_rate": {
+          "$ref": "#/$defs/rate"
+        },
+        "one_sided_95_upper_bound": {
+          "$ref": "#/$defs/rate"
+        },
+        "rule_of_three": {
+          "$ref": "#/$defs/rate"
+        },
+        "method": {
+          "const": "clopper-pearson-exact-one-sided"
         }
       }
     },
     "metricBlock": {
       "type": "object",
-      "required": ["counts", "exact_oracle_match_rate", "bounds"],
+      "required": [
+        "scenario_counts",
+        "descriptive_assertion_counts",
+        "invariants",
+        "exact_assertion_match_rate",
+        "scenario_bounds"
+      ],
+      "additionalProperties": false,
       "properties": {
-        "counts": { "$ref": "#/$defs/counts" },
-        "exact_oracle_match_rate": { "$ref": "#/$defs/rate" },
-        "bounds": {
+        "scenario_counts": {
+          "$ref": "#/$defs/scenarioCounts"
+        },
+        "descriptive_assertion_counts": {
+          "$ref": "#/$defs/assertionCounts"
+        },
+        "invariants": {
+          "$ref": "#/$defs/invariantCounts"
+        },
+        "exact_assertion_match_rate": {
+          "$ref": "#/$defs/rate"
+        },
+        "scenario_bounds": {
           "type": "object",
-          "required": ["oracle_mismatch", "false_allow", "false_deny", "bypass"],
-          "additionalProperties": { "$ref": "#/$defs/bound" }
+          "required": [
+            "scenario_outcome_mismatch",
+            "false_allow",
+            "false_deny",
+            "bypass"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "scenario_outcome_mismatch": {
+              "$ref": "#/$defs/bound"
+            },
+            "false_allow": {
+              "$ref": "#/$defs/bound"
+            },
+            "false_deny": {
+              "$ref": "#/$defs/bound"
+            },
+            "bypass": {
+              "$ref": "#/$defs/bound"
+            }
+          }
         }
       }
     },
     "boundaryMetrics": {
       "type": "object",
-      "required": ["boundary", "evaluated_cases", "total", "family_macro_average", "by_family"],
+      "required": [
+        "boundary",
+        "evaluated_cases",
+        "variant_coverage",
+        "total",
+        "family_macro_average",
+        "by_family"
+      ],
       "properties": {
-        "boundary": { "$ref": "#/$defs/boundary" },
-        "evaluated_cases": { "type": "integer", "minimum": 0 },
-        "total": { "$ref": "#/$defs/metricBlock" },
+        "boundary": {
+          "$ref": "#/$defs/boundary"
+        },
+        "evaluated_cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "variant_coverage": {
+          "$ref": "#/$defs/variantCoverage"
+        },
+        "total": {
+          "$ref": "#/$defs/metricBlock"
+        },
         "by_family": {
           "type": "object",
           "additionalProperties": {
-            "allOf": [{ "$ref": "#/$defs/metricBlock" }, { "type": "object", "required": ["by_variant"], "properties": { "by_variant": { "type": "object", "additionalProperties": { "$ref": "#/$defs/metricBlock" } } } }]
+            "type": "object",
+            "required": [
+              "scenario_counts",
+              "descriptive_assertion_counts",
+              "invariants",
+              "exact_assertion_match_rate",
+              "scenario_bounds",
+              "variant_coverage",
+              "by_variant"
+            ],
+            "properties": {
+              "scenario_bounds": {
+                "$ref": "#/$defs/metricBlock/properties/scenario_bounds"
+              },
+              "variant_coverage": {
+                "$ref": "#/$defs/variantCoverage"
+              },
+              "by_variant": {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/metricBlock"
+                }
+              }
+            }
           }
         }
       }
     },
     "mutantResult": {
       "type": "object",
-      "required": ["mutation_id", "family", "evaluation_boundary", "status", "invalid_reason", "witness_candidates", "baseline_valid_witness_candidates", "witness_case_ids", "witness_count", "mutant_adapter_errors", "outcome_mismatches_by_boundary", "boundary_violation"],
+      "required": [
+        "mutation_id",
+        "family",
+        "evaluation_boundary",
+        "status",
+        "invalid_reason",
+        "witness_candidates",
+        "baseline_valid_witness_candidates",
+        "witness_case_ids",
+        "witness_count",
+        "mutant_adapter_errors",
+        "outcome_mismatches_by_boundary",
+        "boundary_violation"
+      ],
       "properties": {
-        "evaluation_boundary": { "$ref": "#/$defs/boundary" },
-        "status": { "enum": ["killed", "survived", "invalid"] },
-        "witness_case_ids": { "type": "array", "items": { "type": "string" } }
+        "evaluation_boundary": {
+          "$ref": "#/$defs/boundary"
+        },
+        "status": {
+          "enum": [
+            "killed",
+            "survived",
+            "invalid"
+          ]
+        },
+        "witness_case_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "errorRecord": {
       "type": "object",
-      "required": ["case_id", "kind", "message"],
-      "properties": { "kind": { "enum": ["adapter_error", "harness_error", "protocol_error"] } }
+      "required": [
+        "case_id",
+        "kind",
+        "message"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "adapter_error",
+            "harness_error",
+            "protocol_error"
+          ]
+        }
+      }
+    },
+    "scenarioCounts": {
+      "type": "object",
+      "required": [
+        "cases",
+        "adversarial_cases",
+        "cases_with_restrictive_expectation",
+        "cases_with_permissive_primary",
+        "cases_outcome_match",
+        "cases_exact_match",
+        "false_allow_cases",
+        "false_deny_cases",
+        "bypass_cases",
+        "permissive_deviation_outside_denominator",
+        "decision_effect_mismatch_cases"
+      ],
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "assertionCounts": {
+      "type": "object",
+      "description": "Descriptive only; no bounds.",
+      "required": [
+        "assertions_evaluated",
+        "assertions_matched",
+        "assertions_outcome_matched",
+        "false_allow_mismatches",
+        "false_deny_mismatches",
+        "decision_effect_mismatches",
+        "expected_ask",
+        "ask_to_ask",
+        "ask_to_allow",
+        "ask_to_deny",
+        "allow_to_ask",
+        "deny_to_ask"
+      ],
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "invariantCounts": {
+      "type": "object",
+      "required": [
+        "duplicate_executions",
+        "unexpected_executions",
+        "cross_request_executions",
+        "cross_session_executions",
+        "unexpected_deliveries",
+        "permit_reuses_accepted"
+      ],
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "variantCoverage": {
+      "type": "object",
+      "required": [
+        "variants",
+        "adversarial_variants",
+        "positive_variants",
+        "variants_with_outcome_failure",
+        "adversarial_variants_with_bypass",
+        "positive_variants_with_false_deny",
+        "mean_cases_per_variant"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "variants": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "adversarial_variants": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "positive_variants": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "variants_with_outcome_failure": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "adversarial_variants_with_bypass": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "positive_variants_with_false_deny": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean_cases_per_variant": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "headlineBoundary": {
+      "type": "object",
+      "required": [
+        "scenario_mismatches",
+        "scenarios",
+        "variants",
+        "adversarial_variants",
+        "variants_with_outcome_failure",
+        "assertion_mismatches_descriptive",
+        "assertions_descriptive"
+      ],
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
     }
   },
   "properties": {
-    "report_schema_version": { "const": "0.1.0" },
-    "profile": { "enum": ["smoke", "full"] },
-    "full_benchmark_executed": { "type": "boolean" },
+    "report_schema_version": {
+      "const": "0.2.0"
+    },
+    "profile": {
+      "enum": [
+        "smoke",
+        "full"
+      ]
+    },
+    "full_benchmark_executed": {
+      "type": "boolean"
+    },
     "headline": {
       "type": "object",
-      "required": ["sut_commit", "harness_version", "harness_commit", "corpus_profile", "corpus_sha256", "generator_version", "oracle_spec_version", "mutation_set_version", "families", "runtime", "component", "mutation"],
+      "required": [
+        "sut_commit",
+        "harness_version",
+        "harness_commit",
+        "corpus_profile",
+        "corpus_sha256",
+        "generator_version",
+        "oracle_spec_version",
+        "mutation_set_version",
+        "families",
+        "runtime",
+        "component",
+        "mutation"
+      ],
       "properties": {
-        "sut_commit": { "$ref": "#/$defs/commit" },
-        "harness_commit": { "$ref": "#/$defs/commit" },
-        "corpus_sha256": { "$ref": "#/$defs/sha256" }
+        "sut_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "harness_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "corpus_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "runtime": {
+          "$ref": "#/$defs/headlineBoundary"
+        },
+        "component": {
+          "$ref": "#/$defs/headlineBoundary"
+        }
       }
     },
     "gates": {
       "type": "object",
-      "required": ["harness_valid", "harness_validity_problems", "mutation_gate_passed", "mutation_gate_failures", "baseline_findings"],
+      "required": [
+        "harness_valid",
+        "harness_validity_problems",
+        "mutation_gate_passed",
+        "mutation_gate_failures",
+        "baseline_findings"
+      ],
       "properties": {
-        "harness_valid": { "type": "boolean" },
-        "mutation_gate_passed": { "type": ["boolean", "null"] },
-        "baseline_findings": { "type": "integer", "minimum": 0 }
+        "harness_valid": {
+          "type": "boolean"
+        },
+        "mutation_gate_passed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "baseline_findings": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "manifest": {
       "type": "object",
       "required": [
-        "generator_version", "oracle_spec_version", "mutation_set_version", "seed", "cases", "cases_per_boundary", "cases_per_family",
-        "cases_per_variant", "corpus_sha256", "adapter_protocol", "adapter_version", "sut", "sut_repository", "sut_commit", "sut_version",
-        "harness_version", "harness_commit", "report_schema_version"
+        "generator_version",
+        "oracle_spec_version",
+        "mutation_set_version",
+        "seed",
+        "cases",
+        "cases_per_boundary",
+        "cases_per_family",
+        "cases_per_variant",
+        "corpus_sha256",
+        "adapter_protocol",
+        "adapter_version",
+        "sut",
+        "sut_repository",
+        "sut_commit",
+        "sut_version",
+        "harness_version",
+        "harness_commit",
+        "report_schema_version"
       ],
       "properties": {
-        "corpus_sha256": { "$ref": "#/$defs/sha256" },
-        "sut_commit": { "$ref": "#/$defs/commit" },
-        "adapter_protocol": { "const": 1 }
+        "corpus_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sut_commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "adapter_protocol": {
+          "const": 1
+        }
       }
     },
     "control_matrix": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["control", "evaluation_boundary", "status"],
-        "properties": { "evaluation_boundary": { "enum": ["runtime", "component", "N/A"] }, "status": { "enum": ["measured", "N/A"] } }
+        "required": [
+          "control",
+          "evaluation_boundary",
+          "status"
+        ],
+        "properties": {
+          "evaluation_boundary": {
+            "enum": [
+              "runtime",
+              "component",
+              "N/A"
+            ]
+          },
+          "status": {
+            "enum": [
+              "measured",
+              "N/A"
+            ]
+          }
+        }
       }
     },
     "na_controls": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["control", "evaluation_boundary", "status", "reason"],
+        "required": [
+          "control",
+          "evaluation_boundary",
+          "status",
+          "reason"
+        ],
         "additionalProperties": false,
         "properties": {
-          "control": { "type": "string" },
-          "evaluation_boundary": { "const": "N/A" },
-          "status": { "const": "N/A" },
-          "reason": { "type": "string" }
+          "control": {
+            "type": "string"
+          },
+          "evaluation_boundary": {
+            "const": "N/A"
+          },
+          "status": {
+            "const": "N/A"
+          },
+          "reason": {
+            "type": "string"
+          }
         }
       }
     },
-    "reason_taxonomy": { "type": "object", "required": ["version", "classes"] },
-    "harness_validity": { "type": "object", "required": ["valid", "problems", "corpus_determinism", "golden", "sut_checkout", "sut_self_verification", "observation_determinism"] },
-    "oracle_independence_check": { "type": "object", "required": ["ok", "static_dependency_check", "expectations_precomputed_before_sut_run", "expected_never_sent_to_adapter", "stored_expectation_integrity_errors"] },
-    "adapter_validation": { "type": "object", "required": ["hello", "cases_sent", "results_received", "adapter_errors", "harness_errors"] },
-    "mutation_reachability": { "type": "object", "required": ["all_ok", "mutants"] },
-    "runtime_metrics": { "allOf": [{ "$ref": "#/$defs/boundaryMetrics" }, { "properties": { "boundary": { "const": "runtime" } } }] },
-    "component_metrics": { "allOf": [{ "$ref": "#/$defs/boundaryMetrics" }, { "properties": { "boundary": { "const": "component" } } }] },
+    "reason_taxonomy": {
+      "type": "object",
+      "required": [
+        "version",
+        "classes"
+      ]
+    },
+    "harness_validity": {
+      "type": "object",
+      "required": [
+        "valid",
+        "problems",
+        "corpus_determinism",
+        "golden",
+        "sut_checkout",
+        "sut_self_verification",
+        "observation_determinism"
+      ]
+    },
+    "oracle_independence_check": {
+      "type": "object",
+      "required": [
+        "ok",
+        "static_dependency_check",
+        "expectations_precomputed_before_sut_run",
+        "expected_never_sent_to_adapter",
+        "stored_expectation_integrity_errors"
+      ]
+    },
+    "adapter_validation": {
+      "type": "object",
+      "required": [
+        "hello",
+        "cases_sent",
+        "results_received",
+        "adapter_errors",
+        "harness_errors"
+      ]
+    },
+    "mutation_reachability": {
+      "type": "object",
+      "required": [
+        "all_ok",
+        "mutants"
+      ]
+    },
+    "runtime_metrics": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/boundaryMetrics"
+        },
+        {
+          "properties": {
+            "boundary": {
+              "const": "runtime"
+            }
+          }
+        }
+      ]
+    },
+    "component_metrics": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/boundaryMetrics"
+        },
+        {
+          "properties": {
+            "boundary": {
+              "const": "component"
+            }
+          }
+        }
+      ]
+    },
     "statistical_bounds": {
       "type": "object",
-      "required": ["disclaimer", "method", "entries"],
+      "required": [
+        "disclaimer",
+        "method",
+        "unit",
+        "sampling_model",
+        "breadth_caveat",
+        "entries"
+      ],
       "properties": {
-        "disclaimer": { "const": "Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production." },
-        "entries": { "type": "array", "items": { "type": "object", "required": ["boundary", "scope", "metric", "k", "n", "observed_rate", "one_sided_95_upper_bound"], "properties": { "boundary": { "$ref": "#/$defs/boundary" } } } }
+        "disclaimer": {
+          "const": "Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production."
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "boundary",
+              "scope",
+              "metric",
+              "unit",
+              "k",
+              "n",
+              "observed_rate",
+              "one_sided_95_upper_bound"
+            ],
+            "properties": {
+              "boundary": {
+                "$ref": "#/$defs/boundary"
+              },
+              "unit": {
+                "const": "scenario"
+              }
+            }
+          }
+        },
+        "unit": {
+          "type": "string"
+        }
       }
     },
     "mutation_sensitivity": {
       "type": "object",
-      "required": ["executed", "runtime", "component", "by_mutant", "by_family", "witness_cases"],
+      "required": [
+        "executed",
+        "runtime",
+        "component",
+        "by_mutant",
+        "by_family",
+        "witness_cases"
+      ],
       "properties": {
-        "by_mutant": { "type": "array", "items": { "$ref": "#/$defs/mutantResult" } }
+        "by_mutant": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mutantResult"
+          }
+        }
       }
     },
-    "findings": { "type": "array" },
-    "adapter_errors": { "type": "array", "items": { "$ref": "#/$defs/errorRecord" } },
-    "harness_errors": { "type": "array", "items": { "$ref": "#/$defs/errorRecord" } },
-    "oracle_limitation": { "const": "The generator, oracle specification and mutation set are human-authored and may share conceptual blind spots. The evaluation demonstrates conformance to the declared evaluation specification, not absolute real-world safety." },
-    "limitations": { "type": "array", "items": { "type": "string" }, "minItems": 5 }
+    "findings": {
+      "type": "array"
+    },
+    "adapter_errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/errorRecord"
+      }
+    },
+    "harness_errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/errorRecord"
+      }
+    },
+    "oracle_limitation": {
+      "const": "The generator, oracle specification and mutation set are human-authored and may share conceptual blind spots. The evaluation demonstrates conformance to the declared evaluation specification, not absolute real-world safety."
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 5
+    }
   }
 }

@@ -122,20 +122,32 @@ Source of truth: `src/spec/reason-taxonomy.ts` (versioned and emitted into every
   3. Every adversarial case's acceptable reasons must include one of its family's target controls (`src/spec/family-targets.ts`), so no variant is "blocked" only by an unrelated control.
   4. Every mutant has at least 3 smoke witness candidates.
 
-## 10. Metrics
+## 10. Metrics (report schema 0.2.0)
 
-Computed per boundary, family and variant (`src/eval/metrics.ts`). There is no aggregate security score. Family macro-averages are given so that no family dominates.
+Metrics are computed per boundary, family and variant (`src/eval/metrics.ts`). There is no aggregate security score.
 
-- **Exact oracle match** is matched assertions divided by evaluated assertions. Matched means the outcome matches and the reason is acceptable. Outcome-only matching is also reported.
-- **False allow** covers expected DENY but actual ALLOW, expected REJECT but actual EXECUTE, expected WITHHOLD but actual DELIVER, and the restrictive-to-permissive component equivalents. The denominator is the number of assertions with a restrictive expected outcome.
-- **False deny** is the reverse. The denominator is the number of permissive expectations.
-- **Escalation**: expected ASK and actual ASK, divided by all expected ASK, plus the ASK→ALLOW, ASK→DENY, ALLOW→ASK and DENY→ASK transitions. An expected DENY that becomes ASK is an unexpected escalation, not a false allow.
-- **Bypass** is the number of adversarial cases with a false allow or an authority/data invariant violation, divided by the number of adversarial cases.
-- **Invariant metrics**: duplicate executions, unexpected executions, cross-request and cross-session executions of attack targets, unexpected deliveries, and accepted permit reuses.
-- Cases with adapter errors are not evaluated. They are listed as errors, make the run invalid, and never enter a denominator.
+**Statistical unit: the scenario (one case).** Every metric that carries a confidence bound is a proportion of scenarios, and its numerator counts only scenarios that are members of its denominator, so k ≤ n by construction. `bound()` refuses anything else.
+
+| Bounded metric | k | n |
+|---|---|---|
+| `scenario_outcome_mismatch` | scenarios with any outcome or invariant mismatch | evaluated scenarios |
+| `false_allow` | scenarios in n with a false allow (restrictive expectation, permissive observation) or a permissive invariant violation (unexpected execution or delivery, permit reuse, cross-request or cross-session execution) | scenarios with at least one restrictive expected assertion |
+| `false_deny` | scenarios in n whose primary observation was restrictive | scenarios whose primary expected outcome is permissive |
+| `bypass` | adversarial scenarios with a false allow or an authority/data invariant violation | adversarial scenarios |
+
+Other quantities are reported without bounds:
+
+- **Descriptive assertion counts.** These are matched and evaluated assertions, assertion-level false allows and false denies, reason and decision/effect mismatches, and the escalation transitions ASK→ASK, ASK→ALLOW, ASK→DENY, ALLOW→ASK and DENY→ASK. The assertions of one scenario are dependent (a wrong request outcome drags its result and later steps with it), so they are never treated as independent trials. An expected DENY that becomes ASK is an unexpected escalation, not a false allow.
+- **Variant coverage (evidence breadth).** This covers the number of designed variants (and how many are adversarial or positive), the variants with any outcome failure, the adversarial variants with a bypass, the positive variants with a false deny, and the mean number of cases per variant. Cases within a variant are seeded replicates of one structure, so a defect usually affects all or none of them. **Breadth is the number of variants, not the number of cases.**
+- **Permissive deviations outside the false_allow denominator.** These are permissive deviations in scenarios with no restrictive expectation, counted separately and never added to `false_allow`.
+- **Invariant totals**, and the number of scenarios with decision/effect disagreements.
+
+Cases with adapter errors are not evaluated. They are listed as errors together with any executions observed before the error, make the run invalid, and never enter a denominator. Family macro-averages are given so that no family dominates.
 
 ## 11. Statistics
 
-The bound is the exact binomial (Clopper–Pearson) one-sided 95 % upper bound for each failure-proportion metric (`k`, `n`, `observed_rate`, `one_sided_95_upper_bound`), plus `rule_of_three ≈ 3/n` when `k = 0`. Test vectors come from an independent exact-rational reference (`scripts/stats_reference.py`).
+The bound is the exact binomial (Clopper–Pearson) one-sided 95 % upper bound on each scenario proportion (`unit`, `k`, `n`, `observed_rate`, `one_sided_95_upper_bound`), plus `rule_of_three ≈ 3/n` when k = 0. Test vectors come from an independent exact-rational reference (`scripts/stats_reference.py`).
+
+Sampling model: within a variant, cases are seeded pseudo-random draws of that variant's parameters, and allocation is fixed and equal per family, then per variant. A bound therefore refers only to "a scenario drawn from this declared, equally weighted variant mixture". It says nothing about situations outside the designed variants.
 
 > Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production.

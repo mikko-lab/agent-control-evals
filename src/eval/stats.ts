@@ -50,6 +50,8 @@ export function clopperPearsonUpper(k: number, n: number, confidence = 0.95): nu
 }
 
 export interface Bound {
+  /** Unit of k and n. Bounds are only ever computed on scenario (case) proportions. */
+  unit: "scenario";
   k: number;
   n: number;
   observed_rate: number | null;
@@ -59,8 +61,13 @@ export interface Bound {
 }
 
 export function bound(k: number, n: number): Bound {
-  if (n === 0) return { k, n, observed_rate: null, one_sided_95_upper_bound: null, rule_of_three: null, method: "clopper-pearson-exact-one-sided" };
+  if (!Number.isSafeInteger(k) || !Number.isSafeInteger(n) || k < 0 || k > n) {
+    // A numerator outside its denominator is a harness bug, never a statistic.
+    throw new Error(`bound: invalid proportion k=${k} n=${n} (k must count members of n)`);
+  }
+  if (n === 0) return { unit: "scenario", k, n, observed_rate: null, one_sided_95_upper_bound: null, rule_of_three: null, method: "clopper-pearson-exact-one-sided" };
   return {
+    unit: "scenario",
     k,
     n,
     observed_rate: round(k / n),

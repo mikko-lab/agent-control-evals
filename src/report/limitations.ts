@@ -8,6 +8,8 @@ export const LIMITATIONS: string[] = [
   ORACLE_LIMITATION,
   "Zero failures means zero observed failures in this evaluated corpus, not zero failure probability.",
   STATISTICS_DISCLAIMER,
+  "Statistical unit: confidence bounds are computed only on scenario (case) proportions, with numerators that count members of their denominators. Assertion-level counts are descriptive; assertions within one scenario are dependent and are never treated as independent trials.",
+  "Breadth of evidence is the number of designed variants. Cases within one variant are seeded replicates of the same structure, so the case count mostly measures replication; bounds say nothing about situations outside the designed variants.",
   "Mutation sensitivity means the harness detected the defined, deliberately planted faults in the declared mutation set. It does not show that all realistic faults would be detected.",
   "Runtime-boundary and component-boundary results are different levels of evidence. They are reported separately and are never combined into a single security score.",
   "The declared policy parameters (request policy table, ASK approver, timeouts, skew windows, result-withholding rule) were written down by a human from the pinned SUT's documented demo configuration. The oracle does not import SUT code, but a misunderstanding shared by the specification author and the SUT author would not be detected.",

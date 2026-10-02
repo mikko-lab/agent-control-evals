@@ -35,7 +35,7 @@ export interface ReportInput {
 function boundStatsList(m: BoundaryMetrics) {
   const out: unknown[] = [];
   const push = (scope: string, family: string | null, variant: string | null, b: BoundaryMetrics["total"]) => {
-    for (const [metric, v] of Object.entries(b.bounds)) out.push({ boundary: m.boundary, scope, family, variant, metric, ...v });
+    for (const [metric, v] of Object.entries(b.scenario_bounds)) out.push({ boundary: m.boundary, scope, family, variant, metric, ...v });
   };
   push("boundary", null, null, m.total);
   for (const [f, fb] of Object.entries(m.by_family)) {
@@ -96,8 +96,18 @@ export function buildReport(i: ReportInput) {
   // null = mutation analysis not executed in this run (not a pass).
   const mutationGatePassed: boolean | null = i.mutation.executed ? mutationGateFailures.length === 0 : reachOk ? null : false;
   const famList = [...new Set(i.cases.map((c) => c.family))].sort();
-  const mismatchRuntime = runtime.total.counts.assertions_evaluated - runtime.total.counts.assertions_matched;
-  const mismatchComponent = component.total.counts.assertions_evaluated - component.total.counts.assertions_matched;
+  const headlineFor = (m: BoundaryMetrics) => ({
+    // Primary unit: scenarios (cases) with an outcome or invariant mismatch.
+    scenario_mismatches: m.total.scenario_counts.cases - m.total.scenario_counts.cases_outcome_match,
+    scenarios: m.evaluated_cases,
+    // Breadth: designed variants, and how many showed any outcome failure (no bound).
+    variants: m.variant_coverage.variants,
+    adversarial_variants: m.variant_coverage.adversarial_variants,
+    variants_with_outcome_failure: m.variant_coverage.variants_with_outcome_failure,
+    // Descriptive only (dependent within a scenario).
+    assertion_mismatches_descriptive: m.total.descriptive_assertion_counts.assertions_evaluated - m.total.descriptive_assertion_counts.assertions_matched,
+    assertions_descriptive: m.total.descriptive_assertion_counts.assertions_evaluated,
+  });
   const mRuntime = mutationBlock(i.mutation.results, "runtime");
   const mComponent = mutationBlock(i.mutation.results, "component");
 
@@ -115,8 +125,8 @@ export function buildReport(i: ReportInput) {
       oracle_spec_version: i.manifest.oracle_spec_version,
       mutation_set_version: i.manifest.mutation_set_version,
       families: famList,
-      runtime: { oracle_mismatches: mismatchRuntime, assertions: runtime.total.counts.assertions_evaluated, cases: runtime.evaluated_cases },
-      component: { oracle_mismatches: mismatchComponent, assertions: component.total.counts.assertions_evaluated, cases: component.evaluated_cases },
+      runtime: headlineFor(runtime),
+      component: headlineFor(component),
       mutation: i.mutation.executed ? { runtime: mRuntime.kill_ratio, component: mComponent.kill_ratio, corpus_profile: i.mutation.corpus_profile } : null,
     },
     gates: {
@@ -153,6 +163,11 @@ export function buildReport(i: ReportInput) {
     statistical_bounds: {
       disclaimer: STATISTICS_DISCLAIMER,
       method: "exact binomial (Clopper-Pearson), one-sided 95% upper bound; rule of three (3/n) also reported when k = 0",
+      unit: "scenario (one case). k always counts members of n. Assertion-level counts are descriptive only and carry no bound.",
+      sampling_model:
+        "Within a variant, cases are seeded pseudo-random draws of that variant's parameters; allocation is fixed and equal per family, then per variant. A bound therefore refers to a scenario drawn from this declared, equally weighted variant mixture only.",
+      breadth_caveat:
+        "Cases within one variant are replicates of one designed structure, so a defect typically affects all or none of them. Breadth of evidence is the number of designed variants (see variant_coverage), not the number of cases; bounds say nothing about situations outside the designed variants.",
       entries: [...boundStatsList(runtime), ...boundStatsList(component)],
     },
     mutation_sensitivity: {

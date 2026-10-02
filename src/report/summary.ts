@@ -3,26 +3,22 @@
  * is typed by hand.
  */
 import type { Report } from "./build";
-import type { BoundaryMetrics } from "../eval/metrics";
+import type { BoundaryMetrics, MetricBlock, VariantCoverage } from "../eval/metrics";
 
 const pct = (x: number | null) => (x === null ? "n/a" : `${(x * 100).toFixed(4).replace(/\.?0+$/, "")} %`);
 
 function boundaryTable(m: BoundaryMetrics): string[] {
   const out = [
-    `| Family | Cases | Exact match | False allow (k/n, 95% UB) | False deny (k/n) | Bypass (k/n, 95% UB) | Inv. violations |`,
-    `|---|---:|---:|---|---|---|---:|`,
+    `| Family | Variants (adv.) | Variants failing | Scenarios | Scenario mismatches | False allow (scenarios k/n, 95% UB) | False deny (k/n) | Bypass (k/n, 95% UB) | Inv. violations |`,
+    `|---|---:|---:|---:|---:|---|---|---|---:|`,
   ];
-  for (const [f, b] of Object.entries(m.by_family)) {
-    const c = b.counts;
-    const inv = Object.values(c.invariants).reduce((a, x) => a + x, 0);
-    out.push(
-      `| ${f} | ${c.cases} | ${c.assertions_matched}/${c.assertions_evaluated} | ${c.false_allow}/${c.restrictive_expectations} (${pct(b.bounds.false_allow.one_sided_95_upper_bound)}) | ${c.false_deny}/${c.permissive_expectations} | ${c.bypasses}/${c.adversarial_cases} (${pct(b.bounds.bypass.one_sided_95_upper_bound)}) | ${inv} |`,
-    );
-  }
-  const t = m.total.counts;
-  out.push(
-    `| **total** | ${t.cases} | ${t.assertions_matched}/${t.assertions_evaluated} | ${t.false_allow}/${t.restrictive_expectations} (${pct(m.total.bounds.false_allow.one_sided_95_upper_bound)}) | ${t.false_deny}/${t.permissive_expectations} | ${t.bypasses}/${t.adversarial_cases} (${pct(m.total.bounds.bypass.one_sided_95_upper_bound)}) | ${Object.values(t.invariants).reduce((a, x) => a + x, 0)} |`,
-  );
+  const row = (name: string, b: MetricBlock, cov: VariantCoverage) => {
+    const s = b.scenario_counts;
+    const inv = Object.values(b.invariants).reduce((a, x) => a + x, 0);
+    return `| ${name} | ${cov.variants} (${cov.adversarial_variants}) | ${cov.variants_with_outcome_failure} | ${s.cases} | ${s.cases - s.cases_outcome_match}/${s.cases} | ${s.false_allow_cases}/${s.cases_with_restrictive_expectation} (${pct(b.scenario_bounds.false_allow.one_sided_95_upper_bound)}) | ${s.false_deny_cases}/${s.cases_with_permissive_primary} | ${s.bypass_cases}/${s.adversarial_cases} (${pct(b.scenario_bounds.bypass.one_sided_95_upper_bound)}) | ${inv} |`;
+  };
+  for (const [f, b] of Object.entries(m.by_family)) out.push(row(f, b, b.variant_coverage));
+  out.push(row("**total**", m.total, m.variant_coverage));
   return out;
 }
 
@@ -38,16 +34,22 @@ export function renderSummary(r: Report): string {
   L.push("");
   const fams = `${h.families.length} control families`;
   const mut = h.mutation;
+  const hl = (x: typeof h.runtime) =>
+    `${x.scenario_mismatches}/${x.scenarios} scenarios with an outcome or invariant mismatch, across ${x.variants} designed variants (${x.adversarial_variants} adversarial; ${x.variants_with_outcome_failure} with any failure)`;
   L.push(
-    `At SUT commit \`${h.sut_commit}\`, harness version ${h.harness_version} (commit \`${h.harness_commit}\`), corpus \`${h.corpus_profile}\` (generator ${h.generator_version}, oracle spec ${h.oracle_spec_version}, SHA-256 \`${h.corpus_sha256}\`) and ${fams}, the harness observed **${h.runtime.oracle_mismatches}/${h.runtime.assertions} runtime** and **${h.component.oracle_mismatches}/${h.component.assertions} component** oracle mismatches.` +
+    `At SUT commit \`${h.sut_commit}\`, harness version ${h.harness_version} (commit \`${h.harness_commit}\`), corpus \`${h.corpus_profile}\` (generator ${h.generator_version}, oracle spec ${h.oracle_spec_version}, SHA-256 \`${h.corpus_sha256}\`) and ${fams}, the harness observed: **runtime** ${hl(h.runtime)}; **component** ${hl(h.component)}.` +
       (mut
         ? ` The harness detected **${mut.runtime} runtime** and **${mut.component} component** deliberately planted faults (mutation set ${h.mutation_set_version}, run on the \`${mut.corpus_profile}\` corpus).`
         : " Mutation analysis was not executed in this run."),
   );
   L.push("");
   L.push(
-    `Suomeksi: SUT-commitilla \`${h.sut_commit.slice(0, 12)}\`, harness-versiolla ${h.harness_version}, corpusversiolla ${h.generator_version}/${h.corpus_profile} ja ${h.families.length} kontrolliperheellä havaittiin ${h.runtime.oracle_mismatches}/${h.runtime.assertions} runtime- ja ${h.component.oracle_mismatches}/${h.component.assertions} component-oracle-mismatchia.` +
+    `Suomeksi: SUT-commitilla \`${h.sut_commit.slice(0, 12)}\`, harness-versiolla ${h.harness_version}, corpusversiolla ${h.generator_version}/${h.corpus_profile} ja ${h.families.length} kontrolliperheellä havaittiin runtime-tasolla ${h.runtime.scenario_mismatches}/${h.runtime.scenarios} ja component-tasolla ${h.component.scenario_mismatches}/${h.component.scenarios} skenaariota, joissa outcome tai invariantti poikkesi oraclesta. Varianttikattavuus: runtime ${h.runtime.variants} ja component ${h.component.variants} suunniteltua varianttia.` +
       (mut ? ` Harness havaitsi ${mut.runtime} runtime- ja ${mut.component} component-tason tarkoituksella istutetuista vioista.` : ""),
+  );
+  L.push("");
+  L.push(
+    `Statistical unit: **scenario** (one case). Confidence bounds are computed only on scenario proportions where k counts members of n. Assertion counts (runtime ${h.runtime.assertion_mismatches_descriptive}/${h.runtime.assertions_descriptive}, component ${h.component.assertion_mismatches_descriptive}/${h.component.assertions_descriptive} mismatching assertions) are descriptive only. Breadth of evidence is the number of designed variants, not the number of cases.`,
   );
   L.push("");
   L.push(`Full 10k benchmark executed in this run: **${r.full_benchmark_executed ? "yes" : "no"}**.`);
@@ -64,16 +66,16 @@ export function renderSummary(r: Report): string {
   L.push("");
   L.push(...boundaryTable(r.runtime_metrics));
   L.push("");
-  const t = r.runtime_metrics.total.counts;
-  L.push(`Escalation: expected ASK ${t.expected_ask}, ASK→ASK ${t.ask_to_ask}, ASK→ALLOW ${t.ask_to_allow}, ASK→DENY ${t.ask_to_deny}, ALLOW→ASK ${t.allow_to_ask}, DENY→ASK ${t.deny_to_ask}.`);
-  L.push(`Invariants (runtime): ${Object.entries(t.invariants).map(([k, v]) => `${k} ${v}`).join(", ")}.`);
-  L.push(`Family macro-average exact match: ${pct(r.runtime_metrics.family_macro_average.exact_oracle_match_rate)}.`);
+  const t = r.runtime_metrics.total.descriptive_assertion_counts;
+  L.push(`Escalation (assertion counts, descriptive): expected ASK ${t.expected_ask}, ASK→ASK ${t.ask_to_ask}, ASK→ALLOW ${t.ask_to_allow}, ASK→DENY ${t.ask_to_deny}, ALLOW→ASK ${t.allow_to_ask}, DENY→ASK ${t.deny_to_ask}.`);
+  L.push(`Invariants (runtime): ${Object.entries(r.runtime_metrics.total.invariants).map(([k, v]) => `${k} ${v}`).join(", ")}. Decision/effect disagreements: ${r.runtime_metrics.total.scenario_counts.decision_effect_mismatch_cases} scenarios.`);
+  L.push(`Family macro-average scenario outcome match: ${pct(r.runtime_metrics.family_macro_average.scenario_outcome_match_rate)}.`);
   L.push("");
   L.push("## Component boundary (direct component calls; different evidence level)");
   L.push("");
   L.push(...boundaryTable(r.component_metrics));
   L.push("");
-  L.push(`Invariants (component): ${Object.entries(r.component_metrics.total.counts.invariants).map(([k, v]) => `${k} ${v}`).join(", ")}.`);
+  L.push(`Invariants (component): ${Object.entries(r.component_metrics.total.invariants).map(([k, v]) => `${k} ${v}`).join(", ")}.`);
   L.push("");
   L.push("## Mutation sensitivity");
   L.push("");

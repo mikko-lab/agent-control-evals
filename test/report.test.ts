@@ -83,9 +83,9 @@ test("summary numbers are rendered from report data, not typed by hand", () => {
   const r = mk();
   const s1 = renderSummary(r);
   const tweaked = JSON.parse(JSON.stringify(r));
-  tweaked.headline.runtime.oracle_mismatches = 4242;
+  tweaked.headline.runtime.scenario_mismatches = 4242;
   const s2 = renderSummary(tweaked);
-  assert.ok(!s1.includes("4242/") && s2.includes("**4242/"));
+  assert.ok(!s1.includes("4242/") && s2.includes("4242/"));
 });
 
 test("a report missing the disclaimer or mixing N/A into metrics fails schema validation", () => {
