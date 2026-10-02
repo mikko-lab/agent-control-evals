@@ -39,4 +39,8 @@ export const CONTROL_MATRIX: readonly ControlEntry[] = [
   { control: "result_gating_withholding", evaluation_boundary: "runtime", status: "measured", family: "result_gating", entry_points: ["GuardedExecutor.process", "GuardedExecutor.resolveApproval"] },
   { control: "tenant_isolation", evaluation_boundary: "N/A", status: "N/A", family: null, entry_points: [], reason: "not modelled by pinned ACS v0.4.0 (tenant_id is a reserved wire field with no isolation rules)" },
   { control: "production_latency_throughput", evaluation_boundary: "N/A", status: "N/A", family: null, entry_points: [], reason: "not a v0.1 evaluation target" },
+  { control: "network_sandboxing", evaluation_boundary: "N/A", status: "N/A", family: null, entry_points: [], reason: "out of scope: not part of the pinned ACS v0.4.0 control model" },
+  { control: "filesystem_isolation", evaluation_boundary: "N/A", status: "N/A", family: null, entry_points: [], reason: "out of scope: not part of the pinned ACS v0.4.0 control model" },
+  { control: "credential_isolation", evaluation_boundary: "N/A", status: "N/A", family: null, entry_points: [], reason: "out of scope: not part of the pinned ACS v0.4.0 control model" },
+  { control: "internet_egress_controls", evaluation_boundary: "N/A", status: "N/A", family: null, entry_points: [], reason: "out of scope: not part of the pinned ACS v0.4.0 control model" },
 ];

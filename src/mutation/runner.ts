@@ -13,6 +13,7 @@
  * Patch/build/startup/protocol failures make the mutant INVALID, never killed.
  */
 import type { Case } from "../corpus/types";
+import { tallyIntegrity, type IntegrityTally } from "../eval/integrity";
 import type { RunOutput } from "../eval/run";
 import { runCases } from "../eval/run";
 import type { CaseVerdict } from "../eval/compare";
@@ -38,6 +39,12 @@ export interface MutantResult {
   outcome_mismatches_by_boundary: { runtime: number; component: number };
   /** Component mutants only: true if any runtime case changed outcome (would contradict the runtime-unreachability claim). */
   boundary_violation: boolean;
+  /**
+   * Descriptive (not a kill criterion): decision/effect integrity of the mutant run, k / eligible scenarios per
+   * category, kept separately per evaluation boundary. `primary_boundary` is the mutant's own boundary; the other
+   * boundary's tally is collateral evidence only and is never pooled with it.
+   */
+  integrity_scenarios: MutantIntegrity;
 }
 
 const verdictMap = (r: RunOutput) => new Map<string, CaseVerdict>(r.verdicts.map((v) => [v.case_id, v]));
@@ -57,6 +64,21 @@ function primaryOk(v: CaseVerdict): boolean {
 
 function safetyViolation(v: CaseVerdict): boolean {
   return !primaryOk(v) || v.mismatches.some((m) => m.kind === "invariant_violation");
+}
+
+export interface MutantIntegrity {
+  primary_boundary: "runtime" | "component";
+  by_boundary: { runtime: IntegrityTally; component: IntegrityTally };
+}
+
+/** Integrity tallies of a run, one per boundary (never pooled). */
+export function integrityByBoundary(verdicts: readonly CaseVerdict[], primary: "runtime" | "component"): MutantIntegrity {
+  const of = (b: "runtime" | "component") => tallyIntegrity(verdicts.filter((v) => v.boundary === b).map((v) => v.integrity));
+  return { primary_boundary: primary, by_boundary: { runtime: of("runtime"), component: of("component") } };
+}
+
+export function zeroIntegrity(primary: "runtime" | "component"): MutantIntegrity {
+  return integrityByBoundary([], primary);
 }
 
 export function judgeMutant(m: MutantSpec, cases: Case[], baseline: RunOutput, mutant: RunOutput): Omit<MutantResult, "status" | "invalid_reason"> & { killed: boolean } {
@@ -89,6 +111,7 @@ export function judgeMutant(m: MutantSpec, cases: Case[], baseline: RunOutput, m
     mutant_harness_errors: mutant.harness_errors.length,
     outcome_mismatches_by_boundary: mismatchesBy,
     boundary_violation: m.evaluation_boundary === "component" && mismatchesBy.runtime > 0,
+    integrity_scenarios: integrityByBoundary(mutant.verdicts, m.evaluation_boundary),
     killed: witnesses.length > 0,
   };
 }
@@ -112,6 +135,7 @@ export async function runMutant(
     mutant_harness_errors: 0,
     outcome_mismatches_by_boundary: { runtime: 0, component: 0 },
     boundary_violation: false,
+    integrity_scenarios: zeroIntegrity(m.evaluation_boundary),
   };
   let env;
   try {

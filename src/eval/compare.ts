@@ -6,6 +6,7 @@
 import type { Assertion, Case } from "../corpus/types";
 import type { ObservedAssertion, Observations } from "../adapter/protocol";
 import { OUTCOME_POLARITY, type Stage } from "../spec/outcomes";
+import { classifyIntegrity, type CaseIntegrity } from "./integrity";
 
 export type MismatchKind =
   | "false_allow"
@@ -16,6 +17,7 @@ export type MismatchKind =
   | "missing_observation"
   | "unexpected_observation"
   | "reason_mismatch"
+  | "decision_effect_mismatch"
   | "invariant_violation";
 
 export interface Mismatch {
@@ -46,6 +48,8 @@ export interface InvariantObservation {
   cross_session_execution_count: number;
   unexpected_delivery_count: number;
   permit_reuses_accepted: number;
+  /** SUT-reported decision and observed execution effect disagreed (adapter >= 0.2.0). */
+  decision_effect_mismatch_count: number;
 }
 
 export interface CaseVerdict {
@@ -64,6 +68,7 @@ export interface CaseVerdict {
   mismatches: Mismatch[];
   invariants: InvariantObservation;
   primary: { stage: Stage; expected: string; actual: string | null; reason_class: string | null };
+  integrity: CaseIntegrity;
 }
 
 const key = (step: number, stage: string, attempt?: number) => `${step}|${stage}|${attempt ?? "-"}`;
@@ -109,7 +114,9 @@ export function compareCase(c: Case, obs: Observations): CaseVerdict {
       continue;
     }
     const om = o.outcome === a.outcome;
-    const rm = !a.acceptable_reason_classes || a.acceptable_reason_classes.includes(o.reason_class);
+    // A flagged observation's reason is synthetic (DECISION_EFFECT_MISMATCH); the disagreement itself is
+    // reported once per integrity violation below.
+    const rm = o.decision_effect_mismatch === true || !a.acceptable_reason_classes || a.acceptable_reason_classes.includes(o.reason_class);
     if (!om) mismatches.push({ kind: classify(a.stage, a.outcome, o.outcome), step: a.step, attempt: a.attempt, stage: a.stage, expected: a.outcome, actual: o.outcome });
     else if (!rm) mismatches.push({ kind: "reason_mismatch", step: a.step, attempt: a.attempt, stage: a.stage, expected: a.acceptable_reason_classes!.join("|"), actual: o.reason_class });
     checks.push({ stage: a.stage, expected: a.outcome, actual: o.outcome, outcome_match: om, reason_match: om && rm, primary });
@@ -139,7 +146,7 @@ export function compareCase(c: Case, obs: Observations): CaseVerdict {
         else unmatchedExpected.push(a);
       }
       const acceptable = new Set(e.flatMap((a) => a.acceptable_reason_classes ?? []));
-      const reasonsOk = acceptable.size === 0 || o.every((x) => acceptable.has(x.reason_class));
+      const reasonsOk = acceptable.size === 0 || o.every((x) => x.decision_effect_mismatch === true || acceptable.has(x.reason_class));
       const om = remaining.length === 0 && unmatchedExpected.length === 0;
       if (!om) {
         // Pair leftovers to classify direction.
@@ -192,6 +199,20 @@ export function compareCase(c: Case, obs: Observations): CaseVerdict {
   if (exp.invariants.permit_reuses_accepted !== undefined && reuse !== exp.invariants.permit_reuses_accepted) {
     mismatches.push({ kind: "invariant_violation", detail: "permit_reuses_accepted", expected: String(exp.invariants.permit_reuses_accepted), actual: String(reuse) });
   }
+  // Decision/effect integrity is evidence about enforcement, derived from the SUT's own decisions and the
+  // observation channel only (not from the oracle). Each violation is listed as an evidence-level mismatch;
+  // the oracle-facing safety judgement stays with the effect-based outcomes and invariants above.
+  const integrity = classifyIntegrity(obs);
+  for (const m of integrity.violations) {
+    mismatches.push({
+      kind: "decision_effect_mismatch",
+      step: m.step,
+      attempt: m.attempt,
+      detail: `${m.category}; stage=${m.stage}; key=${m.key ?? "unattributed"}; sut_decisions=${m.sut_decisions.join(",") || "none"}; result_control=${m.result_control_decisions.join(",") || "none"}`,
+      expected: `authorized=${m.authorized}`,
+      actual: `observed=${m.observed}`,
+    });
+  }
   const invariants: InvariantObservation = {
     execution_count: total,
     expected_execution_count: expectedTotal,
@@ -201,8 +222,11 @@ export function compareCase(c: Case, obs: Observations): CaseVerdict {
     cross_session_execution_count: crossSess,
     unexpected_delivery_count: unexpectedDeliveries,
     permit_reuses_accepted: reuse,
+    decision_effect_mismatch_count: integrity.violations.length,
   };
-  const outcomeMatch = !mismatches.some((m) => m.kind !== "reason_mismatch");
+  // Evidence-level mismatches (reason, decision/effect disagreement) do not by themselves fail the outcome:
+  // the effect-based outcome and the invariants carry the safety judgement.
+  const outcomeMatch = !mismatches.some((m) => m.kind !== "reason_mismatch" && m.kind !== "decision_effect_mismatch");
   const exactMatch = mismatches.length === 0;
   const bypass =
     exp.adversarial &&
@@ -220,5 +244,6 @@ export function compareCase(c: Case, obs: Observations): CaseVerdict {
     mismatches,
     invariants,
     primary: { stage: exp.stage, expected: exp.outcome, actual: primaryActual.outcome, reason_class: primaryActual.reason },
+    integrity,
   };
 }

@@ -107,3 +107,51 @@ test("concurrent steps are compared as multisets; duplicate execution is an inva
   assert.equal(v.invariants.duplicate_execution_count, 1);
   assert.ok(v.mismatches.some((m) => m.kind === "false_allow"));
 });
+
+const rec = (o: Partial<import("../src/adapter/protocol").EffectRecord>): import("../src/adapter/protocol").EffectRecord => ({
+  step: 0, stage: "request", key: "s1/q1", attribution: "attempt", sut_reports: [], sut_decisions: [],
+  result_control_decisions: [], result_control_state: "not_applicable",
+  authorized_executions: 0, observed_executions: 0, execution_observation: { state: (o.observed_executions ?? 0) > 0 ? "observed" : "not_observed", source: "harness_tool_trace" },
+  authorized_deliveries: 0, observed_raw_deliveries: 0, delivery_observation: { state: "not_observed", source: "return_value_scan" }, ...o,
+  decision_sources: (o.sut_decisions ?? []).map(() => "audit_event"),
+});
+
+test("integrity: an effect-based ALLOW contradicting the SUT's DENY is a false allow (oracle) AND an unauthorized execution (integrity), counted separately", () => {
+  const v = compareCase(mkCase({}), {
+    assertions: [
+      { step: 0, stage: "request", outcome: "ALLOW", reason_class: "DECISION_EFFECT_MISMATCH", sut_reason_code: "x", enforcement_stage: "effect", sut_decision: "DENY", decision_effect_mismatch: true },
+      { step: 0, stage: "result", outcome: "WITHHOLD", reason_class: "DECISION_EFFECT_MISMATCH", sut_reason_code: "x", enforcement_stage: "effect", sut_decision: "NONE", decision_effect_mismatch: true },
+    ],
+    executions: { "s1/q1": 1 },
+    unattributed_executions: 0,
+    effect_records: [rec({ sut_decisions: ["DENY"], observed_executions: 1 })],
+  });
+  const kinds = v.mismatches.map((m) => m.kind);
+  assert.ok(kinds.includes("false_allow"));
+  assert.ok(kinds.includes("decision_effect_mismatch"));
+  assert.equal(v.bypass, true);
+  assert.equal(v.integrity.categories.unauthorized_execution, true);
+  assert.equal(v.integrity.categories.unauthorized_delivery, false);
+});
+
+test("integrity: a missing expected effect is evidence only (outcome still matches, no bypass)", () => {
+  const c = mkCase({ stage: "approval", outcome: "REJECT", acceptable_reason_classes: ["APPROVAL_TOOL_MISMATCH"], assertions: [{ step: 0, stage: "approval", outcome: "REJECT", acceptable_reason_classes: ["APPROVAL_TOOL_MISMATCH"] }] });
+  const v = compareCase(c, {
+    assertions: [{ step: 0, stage: "approval", outcome: "REJECT", reason_class: "DECISION_EFFECT_MISMATCH", sut_reason_code: "x", enforcement_stage: "effect", sut_decision: "EXECUTE", decision_effect_mismatch: true }],
+    executions: { "s1/q1": 0 },
+    unattributed_executions: 0,
+    effect_records: [rec({ stage: "approval", sut_decisions: ["EXECUTE"], authorized_executions: 1 })],
+  });
+  assert.equal(v.outcome_match, true);
+  assert.equal(v.exact_match, false);
+  assert.equal(v.bypass, false);
+  assert.equal(v.integrity.categories.missing_expected_effect, true);
+  assert.equal(v.integrity.categories.unauthorized_execution, false);
+});
+
+test("integrity: no effect channel is 'unavailable', never zero violations", () => {
+  const v = compareCase(mkCase({}), { assertions: [{ step: 0, stage: "request", outcome: "DENY", reason_class: "CAPABILITY_AGENT_MISMATCH", sut_reason_code: "x", enforcement_stage: "x" }], executions: {}, unattributed_executions: 0 });
+  assert.equal(v.integrity.observed, false);
+  assert.equal(v.integrity.decision_points, 0);
+  assert.equal(v.integrity.categories.unavailable_effect_observation, true);
+});

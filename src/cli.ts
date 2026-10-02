@@ -22,7 +22,8 @@ import { canonicalJsonLines } from "./util/canonical-json";
 import { sha256Hex } from "./util/hash";
 import { loadMutationManifest } from "./mutation/manifest";
 import { validateReachability } from "./mutation/reachability";
-import { runMutant, type MutantResult } from "./mutation/runner";
+import { selectCases, type BoundarySelection } from "./eval/select";
+import { runMutant, zeroIntegrity, type MutantResult } from "./mutation/runner";
 import { buildCorpusManifest, harnessGit } from "./report/manifest";
 import { buildReport } from "./report/build";
 import { validateReport } from "./report/validate";
@@ -160,7 +161,7 @@ async function cmdEvaluate(a: Args): Promise<number> {
   const manifest = buildCorpusManifest(profile, seed, g1, lock, git);
   writeFileSync(join(out, "corpus-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 
-  const selected: Case[] = g1.cases.filter((c) => boundary === "all" || c.evaluation_boundary === boundary);
+  const selected: Case[] = selectCases(g1.cases, boundary as BoundarySelection);
   const integrityErrors = checkOracleIntegrity(selected).length;
 
   log(`preparing pinned SUT ${lock.sut_commit}`);
@@ -196,6 +197,7 @@ async function cmdEvaluate(a: Args): Promise<number> {
             mutation_id: x.mutation_id, family: x.family, evaluation_boundary: x.evaluation_boundary, status: "invalid", invalid_reason: "static reachability validation failed",
             witness_candidates: 0, baseline_valid_witness_candidates: 0, witness_case_ids: [], witness_count: 0, mutant_adapter_errors: 0, mutant_harness_errors: 0,
             outcome_mismatches_by_boundary: { runtime: 0, component: 0 }, boundary_violation: false,
+            integrity_scenarios: zeroIntegrity(x.evaluation_boundary),
           });
           continue;
         }

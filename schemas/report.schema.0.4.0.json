@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/report.schema.json",
   "title": "agent-control-evals report",
-  "description": "Versioned evaluation report (schema 0.5.0). Runtime and component results are separate; there is no combined security score. Confidence bounds are scenario-level only; assertion counts are descriptive; breadth is variant coverage; decision/effect integrity is reported separately from oracle-based metrics, without confidence bounds. Since 0.4.0, integrity authority decisions come only from SUT authority evidence, every category has its own eligible set, and decisions not observed / ambiguous / unavailable observations are reported separately and excluded from clean denominators. Since 0.5.0, an unavailable or ambiguous delivery observation excludes a scenario from every delivery-related clean denominator, and mutant integrity tallies are kept per boundary.",
+  "description": "Versioned evaluation report (schema 0.4.0). Runtime and component results are separate; there is no combined security score. Confidence bounds are scenario-level only; assertion counts are descriptive; breadth is variant coverage; decision/effect integrity is reported separately from oracle-based metrics, without confidence bounds. Since 0.4.0, integrity authority decisions come only from SUT authority evidence, every category has its own eligible set, and decisions not observed / ambiguous / unavailable observations are reported separately and excluded from clean denominators.",
   "type": "object",
   "required": [
     "report_schema_version",
@@ -227,36 +227,6 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
-        },
-        "integrity_scenarios": {
-          "type": "object",
-          "description": "Descriptive, not a kill criterion. Tallies per boundary, never pooled.",
-          "required": [
-            "primary_boundary",
-            "by_boundary"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "primary_boundary": {
-              "$ref": "#/$defs/boundary"
-            },
-            "by_boundary": {
-              "type": "object",
-              "required": [
-                "runtime",
-                "component"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "runtime": {
-                  "$ref": "#/$defs/integrityTally"
-                },
-                "component": {
-                  "$ref": "#/$defs/integrityTally"
-                }
-              }
-            }
           }
         }
       }
@@ -687,166 +657,11 @@
           }
         }
       }
-    },
-    "integrityTally": {
-      "type": "object",
-      "required": [
-        "scenarios",
-        "categories"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "scenarios": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "categories": {
-          "type": "object",
-          "required": [
-            "unauthorized_execution",
-            "unauthorized_delivery",
-            "missing_expected_effect",
-            "decision_effect_mismatch",
-            "decision_not_observed",
-            "ambiguous_effect_observation",
-            "unavailable_effect_observation"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "unauthorized_execution": {
-              "type": "object",
-              "required": [
-                "count",
-                "eligible_scenarios"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "eligible_scenarios": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            },
-            "unauthorized_delivery": {
-              "type": "object",
-              "required": [
-                "count",
-                "eligible_scenarios"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "eligible_scenarios": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            },
-            "missing_expected_effect": {
-              "type": "object",
-              "required": [
-                "count",
-                "eligible_scenarios"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "eligible_scenarios": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            },
-            "decision_effect_mismatch": {
-              "type": "object",
-              "required": [
-                "count",
-                "eligible_scenarios"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "eligible_scenarios": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            },
-            "decision_not_observed": {
-              "type": "object",
-              "required": [
-                "count",
-                "eligible_scenarios"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "eligible_scenarios": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            },
-            "ambiguous_effect_observation": {
-              "type": "object",
-              "required": [
-                "count",
-                "eligible_scenarios"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "eligible_scenarios": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            },
-            "unavailable_effect_observation": {
-              "type": "object",
-              "required": [
-                "count",
-                "eligible_scenarios"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "eligible_scenarios": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "properties": {
     "report_schema_version": {
-      "const": "0.5.0"
+      "const": "0.4.0"
     },
     "profile": {
       "enum": [

@@ -50,7 +50,15 @@ See [`docs/evaluation-spec.md`](docs/evaluation-spec.md) for the control matrix,
 
 **Zero failures.** This means *zero observed failures in this evaluated corpus*. It does not mean zero failure probability.
 
-**Confidence bounds.** Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production.
+**Confidence bounds.** Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production. Since report schema 0.2.0, bounds are computed only on scenario proportions. Assertion counts are descriptive, and breadth is the number of designed variants, not the number of cases (`docs/evaluation-spec.md` §10–11).
+
+**Decisions and effects.** A control decision and an observed side effect are separate evidence. A reported denial does not by itself demonstrate that execution was prevented. The harness therefore records the SUT's authority decision and the observed tool executions and output deliveries separately, and reports decision/effect integrity (unauthorized execution, unauthorized delivery, missing expected effect) apart from the oracle-based false allow and false deny metrics, without confidence bounds (`docs/evaluation-spec.md` §12). Permissive authority decisions (ALLOW, EXECUTE, DELIVER) come only from SUT audit events attributed to the call; they are never inferred from execution effects, a successful return, an exception class or an `exit_status`. Some fail-closed rejections (DENY, REJECT) are classified from the SUT's exception where the pinned SUT emits no audit event for them. Where no authority evidence can be attributed, or an observation is ambiguous or unavailable, the harness reports that separately and leaves the scenario out of the clean denominators instead of counting it as clean.
+
+**Observation sources.** Every observed effect carries its source. `harness_tool_trace` (harness-owned tool doubles, attributed by a per-attempt trace) is the stronger, SUT-independent channel. `sut_counter` (the SUT's own fallback-tool execution counter, used only for tools outside the harness doubles) is weaker: it is owned by the SUT, can change with a mutant, and is used only when exactly one call can have caused the change; otherwise the observation is `ambiguous`.
+
+**Delivery detection.** v0.1 detects delivery of the **exact** raw tool output in the value a call returns, also inside wrappers. It does not detect partial disclosure, transformed or re-encoded leakage, semantic leakage, or DLP-type leakage, nor leakage through exceptions or side channels.
+
+**Out of scope.** Network sandboxing, filesystem isolation, credential isolation, internet egress controls and tenant isolation are not part of the pinned ACS v0.4.0 control model. They are listed as N/A and never measured.
 
 **Oracle.** The oracle is a human-written specification, not an independent source of security truth. Its policy parameters were written down from the pinned SUT's documented demo configuration, so a misunderstanding shared by both authors would not be detected.
 
@@ -89,6 +97,10 @@ Every `evaluate` run writes `corpus.jsonl`, `corpus-manifest.json`, `report.json
 | 1 | Valid run, but the real SUT showed oracle mismatches (findings, reported as such and never relabelled as harness errors) |
 | 2 | Harness invalid: corpus, oracle, adapter, protocol, SUT SHA or report problem. Adapter and harness errors never become DENY/REJECT/WITHHOLD |
 | 3 | Mutation gate failed: a surviving or invalid mutant, or a reachability problem |
+
+## Reports
+
+Generated reports for the v0.1 review candidate are committed under [`reports/v0.1/`](reports/v0.1/): `smoke/` (the 500-case CI profile) and `full/` (the ~10 000-case benchmark, run locally). Each directory has `report.json`, the `summary.md` rendered from it, and `corpus-manifest.json`. Each report records the `sut_commit`, `harness_commit` and `corpus_sha256` it was produced with. See [`docs/review-v0.1.md`](docs/review-v0.1.md) for the self-review, the deviations from the work order and the open risks.
 
 ## SUT handling
 

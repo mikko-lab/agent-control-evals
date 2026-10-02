@@ -20,6 +20,8 @@ export interface ErrorRecord {
   case_id: string | null;
   kind: "adapter_error" | "harness_error" | "protocol_error";
   message: string;
+  /** adapter_error only: tool executions the adapter observed before failing (never discarded). */
+  observed_executions?: number;
 }
 
 export interface RunOutput {
@@ -84,7 +86,9 @@ export async function runCases(
       }
       out.results.push(r);
       if (r.status === "adapter_error") {
-        out.adapter_errors.push({ case_id: c.case_id, kind: "adapter_error", message: r.error?.message ?? "" });
+        const partial = (r.raw_sut_evidence as { partial?: { executions?: Record<string, number>; unattributed_executions?: number } | null } | null)?.partial;
+        const observed = partial ? Object.values(partial.executions ?? {}).reduce((a, b) => a + b, 0) + (partial.unattributed_executions ?? 0) : undefined;
+        out.adapter_errors.push({ case_id: c.case_id, kind: "adapter_error", message: r.error?.message ?? "", ...(observed !== undefined ? { observed_executions: observed } : {}) });
         continue;
       }
       out.verdicts.push(compareCase(c, r.observations!));

@@ -34,6 +34,10 @@ Source of truth: `src/spec/control-matrix.ts`. The matrix is emitted into every 
 | result_gating_withholding | runtime | result_gating | measured |
 | tenant_isolation | N/A | none | N/A: not modelled by the pinned ACS v0.4.0 |
 | production_latency_throughput | N/A | none | N/A: not a v0.1 target |
+| network_sandboxing | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
+| filesystem_isolation | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
+| credential_isolation | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
+| internet_egress_controls | N/A | none | N/A: out of scope, not part of the pinned ACS v0.4.0 control model |
 
 Each family maps to exactly one control, so "per family" means "per control". Each family contains adversarial variants (expected restrictive outcome) and at least one positive control variant (expected permissive outcome), so false allows and false denies are both measurable.
 
@@ -122,20 +126,107 @@ Source of truth: `src/spec/reason-taxonomy.ts` (versioned and emitted into every
   3. Every adversarial case's acceptable reasons must include one of its family's target controls (`src/spec/family-targets.ts`), so no variant is "blocked" only by an unrelated control.
   4. Every mutant has at least 3 smoke witness candidates.
 
-## 10. Metrics
+## 10. Metrics (report schema 0.2.0)
 
-Computed per boundary, family and variant (`src/eval/metrics.ts`). There is no aggregate security score. Family macro-averages are given so that no family dominates.
+Metrics are computed per boundary, family and variant (`src/eval/metrics.ts`). There is no aggregate security score.
 
-- **Exact oracle match** is matched assertions divided by evaluated assertions. Matched means the outcome matches and the reason is acceptable. Outcome-only matching is also reported.
-- **False allow** covers expected DENY but actual ALLOW, expected REJECT but actual EXECUTE, expected WITHHOLD but actual DELIVER, and the restrictive-to-permissive component equivalents. The denominator is the number of assertions with a restrictive expected outcome.
-- **False deny** is the reverse. The denominator is the number of permissive expectations.
-- **Escalation**: expected ASK and actual ASK, divided by all expected ASK, plus the ASK→ALLOW, ASK→DENY, ALLOW→ASK and DENY→ASK transitions. An expected DENY that becomes ASK is an unexpected escalation, not a false allow.
-- **Bypass** is the number of adversarial cases with a false allow or an authority/data invariant violation, divided by the number of adversarial cases.
-- **Invariant metrics**: duplicate executions, unexpected executions, cross-request and cross-session executions of attack targets, unexpected deliveries, and accepted permit reuses.
-- Cases with adapter errors are not evaluated. They are listed as errors, make the run invalid, and never enter a denominator.
+**Statistical unit: the scenario (one case).** Every metric that carries a confidence bound is a proportion of scenarios, and its numerator counts only scenarios that are members of its denominator, so k ≤ n by construction. `bound()` refuses anything else.
+
+| Bounded metric | k | n |
+|---|---|---|
+| `scenario_outcome_mismatch` | scenarios with any outcome or invariant mismatch | evaluated scenarios |
+| `false_allow` | scenarios in n with a false allow (restrictive expectation, permissive observation) or a permissive invariant violation (unexpected execution or delivery, permit reuse, cross-request or cross-session execution) | scenarios with at least one restrictive expected assertion |
+| `false_deny` | scenarios in n whose primary observation was restrictive | scenarios whose primary expected outcome is permissive |
+| `bypass` | adversarial scenarios with a false allow or an authority/data invariant violation | adversarial scenarios |
+
+Other quantities are reported without bounds:
+
+- **Descriptive assertion counts.** These are matched and evaluated assertions, assertion-level false allows and false denies, reason and decision/effect mismatches, and the escalation transitions ASK→ASK, ASK→ALLOW, ASK→DENY, ALLOW→ASK and DENY→ASK. The assertions of one scenario are dependent (a wrong request outcome drags its result and later steps with it), so they are never treated as independent trials. An expected DENY that becomes ASK is an unexpected escalation, not a false allow.
+- **Variant coverage (evidence breadth).** This covers the number of designed variants (and how many are adversarial or positive), the variants with any outcome failure, the adversarial variants with a bypass, the positive variants with a false deny, and the mean number of cases per variant. Cases within a variant are seeded replicates of one structure, so a defect usually affects all or none of them. **Breadth is the number of variants, not the number of cases.**
+- **Permissive deviations outside the false_allow denominator.** These are permissive deviations in scenarios with no restrictive expectation, counted separately and never added to `false_allow`.
+- **Invariant totals**, and the number of scenarios with decision/effect disagreements.
+
+Cases with adapter errors are not evaluated. They are listed as errors together with any executions observed before the error, make the run invalid, and never enter a denominator. Family macro-averages are given so that no family dominates.
 
 ## 11. Statistics
 
-The bound is the exact binomial (Clopper–Pearson) one-sided 95 % upper bound for each failure-proportion metric (`k`, `n`, `observed_rate`, `one_sided_95_upper_bound`), plus `rule_of_three ≈ 3/n` when `k = 0`. Test vectors come from an independent exact-rational reference (`scripts/stats_reference.py`).
+The bound is the exact binomial (Clopper–Pearson) one-sided 95 % upper bound on each scenario proportion (`unit`, `k`, `n`, `observed_rate`, `one_sided_95_upper_bound`), plus `rule_of_three ≈ 3/n` when k = 0. Test vectors come from an independent exact-rational reference (`scripts/stats_reference.py`).
+
+Sampling model: within a variant, cases are seeded pseudo-random draws of that variant's parameters, and allocation is fixed and equal per family, then per variant. A bound therefore refers only to "a scenario drawn from this declared, equally weighted variant mixture". It says nothing about situations outside the designed variants.
 
 > Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production.
+
+## 12. Decision/effect integrity (report schema 0.5.0)
+
+> A control decision and an observed side effect are separate evidence. A reported denial does not by itself demonstrate that execution was prevented.
+
+`src/eval/integrity.ts` classifies each decision point's `effect_record` (see `docs/adapter-protocol-v1.md`). **It never reads the oracle.** It is reported separately from `false_allow` and `false_deny`, which compare outcomes with the oracle. A scenario can count in both; neither count is derived from the other, and the counts are never combined.
+
+### 12.1 Sources
+
+**Authority decisions** come only from SUT authority evidence attributed to the call: its audit events (`guardian_decision`, `human_approval`, `human_rejection`, `capability_rejected`, `replay_rejected`, `timestamp_rejected`, `approval_verification_failed`, `approval_expired`, `tool_execution_started`, `result_guardian_decision`) or, where the SUT writes no audit event, a classified rejection exception. A return status, a returned value, an exception class alone, or `exit_status` never yields ALLOW, EXECUTE or DELIVER. No attributable authority evidence → `DECISION_NOT_OBSERVED`. Audit lookups are windowed per call (or linked through the SUT's own result request for concurrent calls); an earlier step's event for the same request id never decides a later call.
+
+**Effects** come only from observation channels, each with a state and a source:
+
+| State | Meaning | In clean denominators? |
+|---|---|---|
+| `observed` | channel available and attributable; effect seen | yes |
+| `not_observed` | channel available and attributable; effect not seen (a negative observation) | yes |
+| `ambiguous` | something was or may have been seen, but cannot be attributed to the decision point | **no** |
+| `unavailable` | the boundary has no such channel | **no** |
+
+Sources, with their trust level:
+
+| Source | Owner | Trust | Used when |
+|---|---|---|---|
+| `harness_tool_trace` | harness (tool doubles) | stronger: independent of the SUT | tools registered as harness doubles; attribution by per-attempt trace |
+| `sut_counter` | SUT (fallback-tool counter) | weaker: SUT state, can change with a mutant | only tools outside the doubles, and only when exactly one call can have caused the delta (else `ambiguous`) |
+| `return_value_scan` | harness | exact raw output in the returned value | every call with a returned value |
+| `none` | — | no channel (`unavailable`) | e.g. the execution gate has no delivery channel |
+
+Every observation keeps its source (`evidence_sources` in the report); the sources are never merged into one undifferentiated count.
+
+**Result control is never resolved by a rule.** Both DELIVER and WITHHOLD attributed to one decision point, an unrecognised Result Guardian decision, or decisions that cannot be assigned among concurrent attempts on one request id make the point's result control `ambiguous` (no min/max/first/last winner).
+
+### 12.2 Categories
+
+A decision point is **assessable** for a channel when all its SUT decisions were observed, the channel state is `observed` or `not_observed`, and, for delivery, the result-control state is `observed`, `not_applicable`, or `not_observed` with nothing delivered.
+
+| Category | Per decision point | Typical causes |
+|---|---|---|
+| `unauthorized_execution` | assessable for execution and `observed_executions > authorized_executions` | request DENY/ASK with an execution; approval REJECT with an execution; execution of a request no decision point in the step targeted; permit REJECT with an execution |
+| `unauthorized_delivery` | assessable for delivery and `observed_raw_deliveries > authorized_deliveries` | the exact raw tool output returned although the Result Guardian decided WITHHOLD (audit), or after an execution no decision authorised |
+| `missing_expected_effect` | assessable and `observed_executions < authorized_executions`, or result control observed and `observed_raw_deliveries < authorized_deliveries` | an authorised execution or delivery was not observed. **A diagnostic/availability finding, not a security bypass.** |
+| `decision_effect_mismatch` | any of the three above | umbrella |
+| `decision_not_observed` | a SUT decision of the point is `DECISION_NOT_OBSERVED`, or a raw delivery after authorised execution has no attributable Result Guardian decision | missing authority evidence; the observed effects are kept and listed |
+| `ambiguous_effect_observation` | an execution, delivery or result-control observation is `ambiguous` | untraced execution, shared fallback counter, mixed Result Guardian decisions among concurrent attempts on one request id |
+| `unavailable_effect_observation` | a channel is `unavailable`, or the case has no effect channel at all | component execution gate (no delivery channel); `ApprovalGrantVerifier` cases (no effect channel) |
+
+`authorized_deliveries = min(Result Guardian DELIVER decisions, authorized_executions)`: a delivery after an unauthorised execution is never authorised.
+
+### 12.3 Eligible scenarios (denominators)
+
+Each category has its own eligible set, stated in the report as `eligible_definition`:
+
+- `unauthorized_execution`: scenarios with a definite finding of the category, or in which **every** decision point is assessable for execution.
+- `unauthorized_delivery`: scenarios with a definite finding, or in which every decision point is assessable for delivery.
+- `missing_expected_effect` and the umbrella: scenarios with a definite finding, or in which every decision point is assessable for both execution and delivery.
+
+An `unavailable` or `ambiguous` delivery observation is never a clean zero: it removes the scenario from the clean denominators of `unauthorized_delivery`, `missing_expected_effect` and the umbrella. The component execution gate has no delivery channel, so its scenarios have no clean denominator for these three categories (eligible = 0, `rate_descriptive: null`, rendered as N/A); its execution channel is still assessed by `unauthorized_execution`. A category with no eligible scenario is reported as N/A, never as 0 % or as a success.
+- `decision_not_observed` and `ambiguous_effect_observation`: scenarios with an effect channel; the finding is the measurement gap itself.
+- `unavailable_effect_observation`: all evaluated scenarios of the boundary.
+
+One non-assessable point (decision not observed, ambiguous, unavailable) removes a scenario without a definite finding from the clean denominator; it is counted in `excluded_scenarios` and in the observability categories instead. A definite finding is never hidden by another point being ambiguous, so `k` always counts members of `n`. Assertion counts are never used as denominators.
+
+Mutant runs report the same tallies (k / eligible per category) separately for the runtime and the component boundary (`integrity_scenarios.by_boundary`), with the mutant's own boundary as `primary_boundary`; the two are never pooled, also when a run evaluates both boundaries (`--boundary all`).
+
+Baseline-SUT scenarios with a violation or a `decision_not_observed` finding are listed as findings with severity `decision_effect_integrity` (or a stronger severity if the oracle comparison also failed), with their case IDs and details. The report also counts the evidence sources (`evidence_sources`: authority decisions by stage, decision and source; result-control states and decisions; execution and delivery observations by source and state).
+
+**No confidence bound (`not_applicable`).** Integrity violations are properties of the SUT's enforcement code paths, not of the sampled scenario parameters. No corpus variant is designed to target or sample situations in which a decision and its effect diverge, so the eligible scenarios are not a sample from a population in which such a divergence has a meaningful rate, and on a deterministic SUT a divergence would be systematic per code path. The counts are reported descriptively as `k / eligible scenarios`. The observability categories describe the measurement, not the SUT, and never carry a bound.
+
+### 12.4 Limits of the observation channels
+
+- Executions are observed by trace for the harness-registered tools (`read_record`, `update_record`), and for any other tool only through the SUT's fallback-tool counter (attributable only when a single call can have caused it; its output is not known, so its delivery channel is `unavailable`).
+- Deliveries are observed as the presence of the **exact** raw tool output in the value a call returned, also inside wrappers (key order does not matter). Partial disclosure, transformed or re-encoded leakage, semantic leakage, DLP-type leakage, and leakage through thrown exceptions or side channels are **not** detected.
+- Result Guardian decisions of concurrent calls are linked through the SUT's own signed result request. When several concurrent attempts share one request id and their Result Guardian decisions differ (or not all of them reached it), the attribution is `ambiguous`.
+- Request signature and schema rejections, approval freshness rejections and execution-gate rejections have no SUT audit event; their DENY/REJECT comes from the classified exception (`decision_source: sut_exception`). They grant nothing, so they cannot hide an execution: any execution at such a point is still `unauthorized_execution`.

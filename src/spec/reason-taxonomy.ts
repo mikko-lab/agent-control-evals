@@ -50,6 +50,8 @@ export const REASON_CLASSES = [
   "PERMIT_BINDING_MISMATCH",
   // component: approval verifier
   "APPROVAL_VERIFIED",
+  // decision/effect disagreement: the observed effect (tool execution or not) contradicts the SUT's reported decision
+  "DECISION_EFFECT_MISMATCH",
   // reserved: not emitted by the v0.1 ACS adapter (ACS has no dedicated cross-session code)
   "CROSS_SESSION_MISMATCH",
 ] as const;
