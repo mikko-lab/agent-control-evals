@@ -50,7 +50,7 @@ See [`docs/evaluation-spec.md`](docs/evaluation-spec.md) for the control matrix,
 
 **Zero failures.** This means *zero observed failures in this evaluated corpus*. It does not mean zero failure probability.
 
-**Confidence bounds.** Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production.
+**Confidence bounds.** Confidence bounds are conditional on the declared synthetic corpus sampling model. They are not estimates of the real-world probability that the system will fail in production. Since report schema 0.2.0, bounds are computed only on scenario proportions. Assertion counts are descriptive, and breadth is the number of designed variants, not the number of cases (`docs/evaluation-spec.md` §10–11).
 
 **Oracle.** The oracle is a human-written specification, not an independent source of security truth. Its policy parameters were written down from the pinned SUT's documented demo configuration, so a misunderstanding shared by both authors would not be detected.
 

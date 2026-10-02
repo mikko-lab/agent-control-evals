@@ -1,5 +1,18 @@
 # Open review items for v0.1 (draft review)
 
+## Status after the fix commits (pending independent review)
+
+The analysis below is kept as written against `92452ad`/`fd1bcdf`. The fixes are separate, scoped commits on top of `fd1bcdf`. **They change measurement semantics and need independent review; they do not close the findings by themselves.**
+
+| Item | Fix commit | What changed | Still open |
+|---|---|---|---|
+| A1 adapter masking | `5a087f5` | Decision and effect are kept apart. An observed execution is never an `AdapterError`: outcomes follow the effect, the SUT's report is kept in `sut_decision` with `decision_effect_mismatch`, and every disagreement is listed in `decision_effect_mismatches`. A post-execution-looking exception without an execution becomes a flagged REJECT, never an EXECUTE (no false kills). Remaining `AdapterError`s keep partial evidence (`raw_sut_evidence.partial`, `observed_executions`). Adapter 0.2.0, taxonomy 0.1.1. | Result delivery is still taken from the SUT's return value; there is no independent effect channel for delivery. Attribution of fallback-tool executions within concurrent request steps is per attempt window and can be ambiguous. |
+| B1 statistical unit | `f092859` | Bounds only on scenario proportions (`scenario_outcome_mismatch`, `false_allow`, `false_deny`, `bypass`), with k counting members of n and `bound()` rejecting k > n. Assertion counts are descriptive only. Report schema 0.2.0. | The binomial model still assumes the declared equally weighted variant mixture (documented in `docs/evaluation-spec.md` §10–11). |
+| B2 breadth | `f092859` | `variant_coverage` per boundary and family: variants, failures per variant, mean replication, with no bound. The headline leads with scenarios and variants. | Breadth is limited to the designed variants (102 runtime, 17 component). No bound is offered beyond them, by design. |
+| C clock boundary | not changed | A coverage limit, documented below. | Approvals in (240 s, 300 s], late or long-session executions and long-interval replay remain unmeasured. |
+
+Historical reports in `reports/v0.1/**` are unchanged and still validate against `schemas/report.schema.0.1.0.json`. No new 10k run was made after the fixes.
+
 Line references are to commit `92452ad3c4438bcbe483a11701c47e90a230fc78`. The referenced files are unchanged in `012ae23` and later documentation-only commits. These items are **reported, not fixed**: each fix would change measurement semantics and needs a separate review.
 
 ## A. Adapter masking
