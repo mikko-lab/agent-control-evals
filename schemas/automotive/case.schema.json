@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/case.schema.json",
+  "title": "Automotive Agent Assurance case, auto-0.1.0 (harness-owned input contract; not the ACS case schema)",
+  "description": "Root: the harness-owned case including harness-only annotations. $defs/adapterCase: the view an adapter may receive (no annotations). Trust is structural: scenario.trusted is trusted, scenario.untrusted is untrusted. All numbers are integers (money in minor units, km, kW).",
+  "type": "object",
+  "required": ["case_schema_version", "case_id", "domain", "variant", "scenario", "annotations"],
+  "additionalProperties": false,
+  "properties": {
+    "case_schema_version": { "$ref": "#/$defs/caseSchemaVersion" },
+    "case_id": { "$ref": "#/$defs/caseId" },
+    "domain": { "$ref": "#/$defs/domain" },
+    "variant": { "$ref": "#/$defs/variant" },
+    "scenario": { "$ref": "#/$defs/scenario" },
+    "annotations": { "$ref": "#/$defs/annotations" }
+  },
+  "allOf": [{ "$ref": "#/$defs/domainRules" }],
+  "$defs": {
+    "caseSchemaVersion": { "const": "auto-case-0.1.0" },
+    "caseId": { "type": "string", "pattern": "^auto-case-[0-9]{6}$" },
+    "label": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" },
+    "variant": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,63}$" },
+    "text": { "type": "string", "minLength": 1 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "minorAmount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "domain": { "enum": ["vehicle_fact_integrity", "price_attribution", "stale_inventory"] },
+    "status": { "enum": ["available", "reserved", "sold"] },
+    "fuel": { "enum": ["petrol", "diesel", "hybrid", "plug_in_hybrid", "electric"] },
+    "transmission": { "enum": ["manual", "automatic"] },
+    "mandatoryFeePolicy": { "enum": ["either_basis_if_labelled", "total_required"] },
+    "untrustedSource": { "enum": ["listing_description", "seller_message", "dealer_feed_note", "user_review", "image_alt_text"] },
+    "untrustedAuthorRole": { "enum": ["dealer", "private_seller", "third_party"] },
+    "probeField": { "enum": ["odometer", "model_year", "first_registration", "fuel", "transmission", "power", "status", "price"] },
+    "integerValuedField": { "enum": ["odometer", "model_year", "power", "price"] },
+    "stringValuedField": { "enum": ["first_registration", "fuel", "transmission", "status"] },
+    "firstRegistration": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+
+    "dealer": {
+      "type": "object",
+      "required": ["dealer_id", "display_name"],
+      "additionalProperties": false,
+      "properties": {
+        "dealer_id": { "$ref": "#/$defs/label" },
+        "display_name": { "$ref": "#/$defs/text" }
+      }
+    },
+    "supersededPrice": {
+      "type": "object",
+      "required": ["price_minor"],
+      "additionalProperties": false,
+      "properties": { "price_minor": { "$ref": "#/$defs/minorAmount" } }
+    },
+    "listing": {
+      "type": "object",
+      "required": [
+        "listing_id", "dealer_id", "status", "make", "model", "model_year", "first_registration", "odometer_km",
+        "fuel", "transmission", "power_kw", "body", "seats", "price_minor", "mandatory_fees_minor", "currency", "price_history"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "listing_id": { "$ref": "#/$defs/label" },
+        "dealer_id": { "$ref": "#/$defs/label" },
+        "status": { "$ref": "#/$defs/status" },
+        "make": { "$ref": "#/$defs/text" },
+        "model": { "$ref": "#/$defs/text" },
+        "model_year": { "type": "integer", "minimum": 1900, "maximum": 2100 },
+        "first_registration": { "$ref": "#/$defs/firstRegistration" },
+        "odometer_km": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "fuel": { "$ref": "#/$defs/fuel" },
+        "transmission": { "$ref": "#/$defs/transmission" },
+        "power_kw": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "body": { "$ref": "#/$defs/text" },
+        "seats": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "price_minor": { "$ref": "#/$defs/minorAmount" },
+        "mandatory_fees_minor": { "$ref": "#/$defs/minorAmount" },
+        "currency": { "$ref": "#/$defs/currency" },
+        "price_history": { "type": "array", "items": { "$ref": "#/$defs/supersededPrice" } }
+      }
+    },
+    "trusted": {
+      "type": "object",
+      "required": ["dealers", "inventory"],
+      "additionalProperties": false,
+      "properties": {
+        "dealers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/dealer" } },
+        "inventory": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/listing" } }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["mandatory_fee_policy"],
+      "additionalProperties": false,
+      "properties": { "mandatory_fee_policy": { "$ref": "#/$defs/mandatoryFeePolicy" } }
+    },
+    "untrustedContent": {
+      "type": "object",
+      "required": ["content_id", "source", "attached_to", "author_role", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "content_id": { "$ref": "#/$defs/label" },
+        "source": { "$ref": "#/$defs/untrustedSource" },
+        "attached_to": { "oneOf": [{ "$ref": "#/$defs/label" }, { "type": "null" }] },
+        "author_role": { "$ref": "#/$defs/untrustedAuthorRole" },
+        "text": { "$ref": "#/$defs/text" }
+      }
+    },
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "text"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "user_message" }, "text": { "$ref": "#/$defs/text" } }
+        },
+        {
+          "type": "object",
+          "required": ["op", "listing_id", "change"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "inventory_event" },
+            "listing_id": { "$ref": "#/$defs/label" },
+            "change": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["kind", "status"],
+                  "additionalProperties": false,
+                  "properties": { "kind": { "const": "status" }, "status": { "$ref": "#/$defs/status" } }
+                },
+                {
+                  "type": "object",
+                  "required": ["kind", "price_minor"],
+                  "additionalProperties": false,
+                  "properties": { "kind": { "const": "price" }, "price_minor": { "$ref": "#/$defs/minorAmount" } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["currency", "policy", "trusted", "untrusted", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "currency": { "$ref": "#/$defs/currency" },
+        "policy": { "$ref": "#/$defs/policy" },
+        "trusted": { "$ref": "#/$defs/trusted" },
+        "untrusted": { "type": "array", "items": { "$ref": "#/$defs/untrustedContent" } },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" },
+          "contains": { "type": "object", "required": ["op"], "properties": { "op": { "const": "user_message" } } }
+        }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "required": ["probe_id", "step", "listing_id", "field"],
+      "additionalProperties": false,
+      "properties": {
+        "probe_id": { "$ref": "#/$defs/label" },
+        "step": { "type": "integer", "minimum": 0 },
+        "listing_id": { "$ref": "#/$defs/label" },
+        "field": { "$ref": "#/$defs/probeField" }
+      }
+    },
+    "planted": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["content_id", "listing_id", "field", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "content_id": { "$ref": "#/$defs/label" },
+            "listing_id": { "$ref": "#/$defs/label" },
+            "field": { "$ref": "#/$defs/integerValuedField" },
+            "value": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["content_id", "listing_id", "field", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "content_id": { "$ref": "#/$defs/label" },
+            "listing_id": { "$ref": "#/$defs/label" },
+            "field": { "$ref": "#/$defs/stringValuedField" },
+            "value": { "$ref": "#/$defs/text" }
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "description": "Harness-only. Never sent to an adapter.",
+      "type": "object",
+      "required": ["probes", "planted"],
+      "additionalProperties": false,
+      "properties": {
+        "probes": { "type": "array", "items": { "$ref": "#/$defs/probe" } },
+        "planted": { "type": "array", "items": { "$ref": "#/$defs/planted" } }
+      }
+    },
+    "domainRules": {
+      "description": "Spec 7.1.2, 7.2 and 7.3: inventory transitions during the conversation belong to stale_inventory only.",
+      "allOf": [
+        {
+          "if": { "required": ["domain"], "properties": { "domain": { "const": "stale_inventory" } } },
+          "then": {
+            "properties": {
+              "scenario": {
+                "properties": {
+                  "steps": { "contains": { "type": "object", "required": ["op"], "properties": { "op": { "const": "inventory_event" } } } }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "scenario": {
+                "properties": {
+                  "steps": { "items": { "not": { "type": "object", "required": ["op"], "properties": { "op": { "const": "inventory_event" } } } } }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "adapterCase": {
+      "description": "The adapter-visible view of a case: identical to the root minus harness-only annotations.",
+      "type": "object",
+      "required": ["case_schema_version", "case_id", "domain", "variant", "scenario"],
+      "additionalProperties": false,
+      "properties": {
+        "case_schema_version": { "$ref": "#/$defs/caseSchemaVersion" },
+        "case_id": { "$ref": "#/$defs/caseId" },
+        "domain": { "$ref": "#/$defs/domain" },
+        "variant": { "$ref": "#/$defs/variant" },
+        "scenario": { "$ref": "#/$defs/scenario" }
+      },
+      "allOf": [{ "$ref": "#/$defs/domainRules" }]
+    }
+  }
+}
