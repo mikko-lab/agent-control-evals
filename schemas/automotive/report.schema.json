@@ -1,0 +1,1318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/report.schema.json",
+  "title": "Automotive Agent Assurance report (auto-report-0.1.0)",
+  "description": "Normative automotive evaluation report derived from the deterministic evaluator output. Counts and flattened findings only: no score, grade, rate, confidence bound or severity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_schema_version",
+    "pack_version",
+    "profile",
+    "manifest",
+    "run_valid",
+    "complete_execution",
+    "all_required_assessed",
+    "scenario_summary",
+    "check_summary",
+    "reason_counts",
+    "observation_evidence",
+    "by_domain",
+    "by_variant",
+    "findings",
+    "case_evaluations",
+    "harness_errors",
+    "adapter_errors",
+    "not_run_case_ids",
+    "limitations"
+  ],
+  "properties": {
+    "report_schema_version": {
+      "const": "auto-report-0.1.0"
+    },
+    "pack_version": {
+      "const": "auto-0.1.0"
+    },
+    "profile": {
+      "const": "auto-smoke-0.1.0"
+    },
+    "manifest": {
+      "$ref": "manifest.schema.json"
+    },
+    "run_valid": {
+      "type": "boolean"
+    },
+    "complete_execution": {
+      "type": "boolean"
+    },
+    "all_required_assessed": {
+      "type": "boolean"
+    },
+    "scenario_summary": {
+      "$ref": "#/$defs/scenarioCounts"
+    },
+    "check_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "optional"
+      ],
+      "properties": {
+        "required": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "PASS",
+            "VIOLATION",
+            "UNASSESSABLE",
+            "HARNESS_ERROR",
+            "assessed"
+          ],
+          "properties": {
+            "total": {
+              "$ref": "#/$defs/count"
+            },
+            "PASS": {
+              "$ref": "#/$defs/count"
+            },
+            "VIOLATION": {
+              "$ref": "#/$defs/count"
+            },
+            "UNASSESSABLE": {
+              "$ref": "#/$defs/count"
+            },
+            "HARNESS_ERROR": {
+              "$ref": "#/$defs/count"
+            },
+            "assessed": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "optional": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "PASS",
+            "VIOLATION"
+          ],
+          "properties": {
+            "total": {
+              "$ref": "#/$defs/count"
+            },
+            "PASS": {
+              "$ref": "#/$defs/count"
+            },
+            "VIOLATION": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        }
+      }
+    },
+    "reason_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "VIOLATION",
+        "UNASSESSABLE",
+        "HARNESS_ERROR"
+      ],
+      "properties": {
+        "VIOLATION": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "FACT_VALUE_MISMATCH",
+            "CROSS_LISTING_FACT",
+            "UNKNOWN_LISTING_REFERENCE",
+            "UNTRUSTED_VALUE_PROMOTED",
+            "PRICE_VALUE_MISMATCH",
+            "CROSS_LISTING_PRICE",
+            "SUPERSEDED_PRICE",
+            "PRICE_BASIS_MISMATCH",
+            "CURRENCY_MISMATCH",
+            "STALE_STATUS",
+            "STALE_PRICE"
+          ],
+          "properties": {
+            "FACT_VALUE_MISMATCH": {
+              "$ref": "#/$defs/count"
+            },
+            "CROSS_LISTING_FACT": {
+              "$ref": "#/$defs/count"
+            },
+            "UNKNOWN_LISTING_REFERENCE": {
+              "$ref": "#/$defs/count"
+            },
+            "UNTRUSTED_VALUE_PROMOTED": {
+              "$ref": "#/$defs/count"
+            },
+            "PRICE_VALUE_MISMATCH": {
+              "$ref": "#/$defs/count"
+            },
+            "CROSS_LISTING_PRICE": {
+              "$ref": "#/$defs/count"
+            },
+            "SUPERSEDED_PRICE": {
+              "$ref": "#/$defs/count"
+            },
+            "PRICE_BASIS_MISMATCH": {
+              "$ref": "#/$defs/count"
+            },
+            "CURRENCY_MISMATCH": {
+              "$ref": "#/$defs/count"
+            },
+            "STALE_STATUS": {
+              "$ref": "#/$defs/count"
+            },
+            "STALE_PRICE": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "UNASSESSABLE": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "CHANNEL_UNAVAILABLE",
+            "PROBE_UNANSWERED",
+            "PROBE_DECLINED",
+            "EVENT_DELIVERY_UNCONFIRMED",
+            "CLAIM_OUTSIDE_CONTRACT"
+          ],
+          "properties": {
+            "CHANNEL_UNAVAILABLE": {
+              "$ref": "#/$defs/count"
+            },
+            "PROBE_UNANSWERED": {
+              "$ref": "#/$defs/count"
+            },
+            "PROBE_DECLINED": {
+              "$ref": "#/$defs/count"
+            },
+            "EVENT_DELIVERY_UNCONFIRMED": {
+              "$ref": "#/$defs/count"
+            },
+            "CLAIM_OUTSIDE_CONTRACT": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "HARNESS_ERROR": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "PROTOCOL_ERROR",
+            "ADAPTER_ERROR",
+            "TIMEOUT",
+            "FIXTURE_INVALID",
+            "ORACLE_INTEGRITY_ERROR"
+          ],
+          "properties": {
+            "PROTOCOL_ERROR": {
+              "$ref": "#/$defs/count"
+            },
+            "ADAPTER_ERROR": {
+              "$ref": "#/$defs/count"
+            },
+            "TIMEOUT": {
+              "$ref": "#/$defs/count"
+            },
+            "FIXTURE_INVALID": {
+              "$ref": "#/$defs/count"
+            },
+            "ORACLE_INTEGRITY_ERROR": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        }
+      }
+    },
+    "observation_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quoted_claims",
+        "unverifiable_claims",
+        "attribution_counts",
+        "channel_states",
+        "event_delivery_states",
+        "unknown_reference_listing_ids"
+      ],
+      "properties": {
+        "quoted_claims": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "source_exists_count",
+            "missing_source_count"
+          ],
+          "properties": {
+            "total": {
+              "$ref": "#/$defs/count"
+            },
+            "source_exists_count": {
+              "$ref": "#/$defs/count"
+            },
+            "missing_source_count": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "unverifiable_claims": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "by_classification"
+          ],
+          "properties": {
+            "total": {
+              "$ref": "#/$defs/count"
+            },
+            "by_classification": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "qualitative",
+                "approximate",
+                "range",
+                "outside_contract"
+              ],
+              "properties": {
+                "qualitative": {
+                  "$ref": "#/$defs/count"
+                },
+                "approximate": {
+                  "$ref": "#/$defs/count"
+                },
+                "range": {
+                  "$ref": "#/$defs/count"
+                },
+                "outside_contract": {
+                  "$ref": "#/$defs/count"
+                }
+              }
+            }
+          }
+        },
+        "attribution_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trusted_fact",
+            "quoted_untrusted",
+            "approximate",
+            "unknown"
+          ],
+          "properties": {
+            "trusted_fact": {
+              "$ref": "#/$defs/count"
+            },
+            "quoted_untrusted": {
+              "$ref": "#/$defs/count"
+            },
+            "approximate": {
+              "$ref": "#/$defs/count"
+            },
+            "unknown": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "channel_states": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claim",
+            "reference",
+            "status"
+          ],
+          "properties": {
+            "claim": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "observed",
+                "not_observed",
+                "ambiguous",
+                "unavailable"
+              ],
+              "properties": {
+                "observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "not_observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "ambiguous": {
+                  "$ref": "#/$defs/count"
+                },
+                "unavailable": {
+                  "$ref": "#/$defs/count"
+                }
+              }
+            },
+            "reference": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "observed",
+                "not_observed",
+                "ambiguous",
+                "unavailable"
+              ],
+              "properties": {
+                "observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "not_observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "ambiguous": {
+                  "$ref": "#/$defs/count"
+                },
+                "unavailable": {
+                  "$ref": "#/$defs/count"
+                }
+              }
+            },
+            "status": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "observed",
+                "not_observed",
+                "ambiguous",
+                "unavailable"
+              ],
+              "properties": {
+                "observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "not_observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "ambiguous": {
+                  "$ref": "#/$defs/count"
+                },
+                "unavailable": {
+                  "$ref": "#/$defs/count"
+                }
+              }
+            }
+          }
+        },
+        "event_delivery_states": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "delivered",
+            "not_delivered",
+            "ambiguous",
+            "unavailable"
+          ],
+          "properties": {
+            "delivered": {
+              "$ref": "#/$defs/count"
+            },
+            "not_delivered": {
+              "$ref": "#/$defs/count"
+            },
+            "ambiguous": {
+              "$ref": "#/$defs/count"
+            },
+            "unavailable": {
+              "$ref": "#/$defs/count"
+            }
+          }
+        },
+        "unknown_reference_listing_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "by_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vehicle_fact_integrity",
+        "price_attribution",
+        "stale_inventory"
+      ],
+      "properties": {
+        "vehicle_fact_integrity": {
+          "$ref": "#/$defs/scenarioCounts"
+        },
+        "price_attribution": {
+          "$ref": "#/$defs/scenarioCounts"
+        },
+        "stale_inventory": {
+          "$ref": "#/$defs/scenarioCounts"
+        }
+      }
+    },
+    "by_variant": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^(vehicle_fact_integrity|price_attribution|stale_inventory)/[a-z0-9_]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/variantCounts"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "case_evaluations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/caseEvaluation"
+      }
+    },
+    "harness_errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/harnessError"
+      }
+    },
+    "adapter_errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/adapterError"
+      }
+    },
+    "not_run_case_ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmpty"
+      },
+      "uniqueItems": true
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 12,
+      "items": {
+        "$ref": "#/$defs/nonEmpty"
+      }
+    }
+  },
+  "$defs": {
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nonNegativeInt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "enum": [
+        "PASS",
+        "VIOLATION",
+        "UNASSESSABLE",
+        "HARNESS_ERROR"
+      ]
+    },
+    "domain": {
+      "enum": [
+        "vehicle_fact_integrity",
+        "price_attribution",
+        "stale_inventory"
+      ]
+    },
+    "reason": {
+      "enum": [
+        "FACT_VALUE_MISMATCH",
+        "CROSS_LISTING_FACT",
+        "UNKNOWN_LISTING_REFERENCE",
+        "UNTRUSTED_VALUE_PROMOTED",
+        "PRICE_VALUE_MISMATCH",
+        "CROSS_LISTING_PRICE",
+        "SUPERSEDED_PRICE",
+        "PRICE_BASIS_MISMATCH",
+        "CURRENCY_MISMATCH",
+        "STALE_STATUS",
+        "STALE_PRICE",
+        "CHANNEL_UNAVAILABLE",
+        "PROBE_UNANSWERED",
+        "PROBE_DECLINED",
+        "EVENT_DELIVERY_UNCONFIRMED",
+        "CLAIM_OUTSIDE_CONTRACT",
+        "PROTOCOL_ERROR",
+        "ADAPTER_ERROR",
+        "TIMEOUT",
+        "FIXTURE_INVALID",
+        "ORACLE_INTEGRITY_ERROR"
+      ]
+    },
+    "field": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "odometer",
+            "model_year",
+            "first_registration",
+            "fuel",
+            "transmission",
+            "power",
+            "status",
+            "price"
+          ]
+        }
+      ]
+    },
+    "checkKind": {
+      "enum": [
+        "probe",
+        "claim",
+        "status_presentation"
+      ]
+    },
+    "verdictCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "PASS",
+        "VIOLATION",
+        "UNASSESSABLE",
+        "HARNESS_ERROR"
+      ],
+      "properties": {
+        "PASS": {
+          "$ref": "#/$defs/count"
+        },
+        "VIOLATION": {
+          "$ref": "#/$defs/count"
+        },
+        "UNASSESSABLE": {
+          "$ref": "#/$defs/count"
+        },
+        "HARNESS_ERROR": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "scenarioCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planned_scenarios",
+        "evaluated_scenarios",
+        "not_run_scenarios",
+        "verdict_counts",
+        "assessed_scenarios",
+        "violation_count"
+      ],
+      "properties": {
+        "planned_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "evaluated_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "not_run_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "verdict_counts": {
+          "$ref": "#/$defs/verdictCounts"
+        },
+        "assessed_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "violation_count": {
+          "$ref": "#/$defs/count"
+        }
+      }
+    },
+    "variantCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planned_scenarios",
+        "evaluated_scenarios",
+        "not_run_scenarios",
+        "verdict_counts",
+        "assessed_scenarios",
+        "violation_count",
+        "domain",
+        "variant",
+        "case_ids"
+      ],
+      "properties": {
+        "planned_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "evaluated_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "not_run_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "verdict_counts": {
+          "$ref": "#/$defs/verdictCounts"
+        },
+        "assessed_scenarios": {
+          "$ref": "#/$defs/count"
+        },
+        "violation_count": {
+          "$ref": "#/$defs/count"
+        },
+        "domain": {
+          "$ref": "#/$defs/domain"
+        },
+        "variant": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "case_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "reasonsForVerdict": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "PASS"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reasons": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "VIOLATION"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reasons": {
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "FACT_VALUE_MISMATCH",
+                    "CROSS_LISTING_FACT",
+                    "UNKNOWN_LISTING_REFERENCE",
+                    "UNTRUSTED_VALUE_PROMOTED",
+                    "PRICE_VALUE_MISMATCH",
+                    "CROSS_LISTING_PRICE",
+                    "SUPERSEDED_PRICE",
+                    "PRICE_BASIS_MISMATCH",
+                    "CURRENCY_MISMATCH",
+                    "STALE_STATUS",
+                    "STALE_PRICE"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "UNASSESSABLE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reasons": {
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "CHANNEL_UNAVAILABLE",
+                    "PROBE_UNANSWERED",
+                    "PROBE_DECLINED",
+                    "EVENT_DELIVERY_UNCONFIRMED",
+                    "CLAIM_OUTSIDE_CONTRACT"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "HARNESS_ERROR"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reasons": {
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "PROTOCOL_ERROR",
+                    "ADAPTER_ERROR",
+                    "TIMEOUT",
+                    "FIXTURE_INVALID",
+                    "ORACLE_INTEGRITY_ERROR"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_id",
+        "kind",
+        "required",
+        "step",
+        "listing_id",
+        "field",
+        "verdict",
+        "reasons",
+        "expected",
+        "observed"
+      ],
+      "properties": {
+        "check_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "kind": {
+          "$ref": "#/$defs/checkKind"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "step": {
+          "$ref": "#/$defs/nonNegativeInt"
+        },
+        "listing_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/nonEmpty"
+            }
+          ]
+        },
+        "field": {
+          "$ref": "#/$defs/field"
+        },
+        "verdict": {
+          "$ref": "#/$defs/verdict"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reason"
+          },
+          "uniqueItems": true
+        },
+        "expected": {
+          "description": "Arbitrary JSON evidence, kept exactly as D1 produced it."
+        },
+        "observed": {
+          "description": "Arbitrary JSON evidence, kept exactly as D1 produced it."
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/reasonsForVerdict"
+        },
+        {
+          "if": {
+            "properties": {
+              "required": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "PASS",
+                  "VIOLATION"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "quotedClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "listing_id",
+        "field",
+        "content_id",
+        "content_exists"
+      ],
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/nonNegativeInt"
+        },
+        "listing_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "field": {
+          "enum": [
+            "odometer",
+            "model_year",
+            "first_registration",
+            "fuel",
+            "transmission",
+            "power",
+            "status",
+            "price"
+          ]
+        },
+        "content_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "content_exists": {
+          "type": "boolean"
+        }
+      }
+    },
+    "unverifiableClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "listing_id",
+        "field",
+        "classification",
+        "text"
+      ],
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/nonNegativeInt"
+        },
+        "listing_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/nonEmpty"
+            }
+          ]
+        },
+        "field": {
+          "$ref": "#/$defs/field"
+        },
+        "classification": {
+          "enum": [
+            "qualitative",
+            "approximate",
+            "range",
+            "outside_contract"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "observationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turns",
+        "claims",
+        "status_presentations",
+        "references",
+        "channel_states",
+        "attribution_counts",
+        "unknown_reference_listing_ids",
+        "event_acknowledgements"
+      ],
+      "properties": {
+        "turns": {
+          "$ref": "#/$defs/count"
+        },
+        "claims": {
+          "$ref": "#/$defs/count"
+        },
+        "status_presentations": {
+          "$ref": "#/$defs/count"
+        },
+        "references": {
+          "$ref": "#/$defs/count"
+        },
+        "channel_states": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claim",
+            "reference",
+            "status"
+          ],
+          "properties": {
+            "claim": {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "observed",
+                  "not_observed",
+                  "ambiguous",
+                  "unavailable"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/count"
+              }
+            },
+            "reference": {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "observed",
+                  "not_observed",
+                  "ambiguous",
+                  "unavailable"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/count"
+              }
+            },
+            "status": {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "observed",
+                  "not_observed",
+                  "ambiguous",
+                  "unavailable"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/count"
+              }
+            }
+          }
+        },
+        "attribution_counts": {
+          "type": "object",
+          "propertyNames": {
+            "enum": [
+              "trusted_fact",
+              "quoted_untrusted",
+              "approximate",
+              "unknown"
+            ]
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/count"
+          }
+        },
+        "unknown_reference_listing_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true
+        },
+        "event_acknowledgements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "step",
+              "listing_id",
+              "delivery"
+            ],
+            "properties": {
+              "step": {
+                "$ref": "#/$defs/nonNegativeInt"
+              },
+              "listing_id": {
+                "$ref": "#/$defs/nonEmpty"
+              },
+              "delivery": {
+                "enum": [
+                  "delivered",
+                  "not_delivered",
+                  "ambiguous",
+                  "unavailable"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "caseEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evaluator_version",
+        "case_id",
+        "domain",
+        "variant",
+        "verdict",
+        "checks",
+        "quoted_claims",
+        "unverifiable_claims",
+        "observation_summary"
+      ],
+      "properties": {
+        "evaluator_version": {
+          "const": "auto-evaluator-0.1.0"
+        },
+        "case_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "domain": {
+          "$ref": "#/$defs/domain"
+        },
+        "variant": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "verdict": {
+          "$ref": "#/$defs/verdict"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        },
+        "quoted_claims": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "claims"
+          ],
+          "properties": {
+            "count": {
+              "$ref": "#/$defs/count"
+            },
+            "claims": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/quotedClaim"
+              }
+            }
+          }
+        },
+        "unverifiable_claims": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count",
+            "by_classification",
+            "claims"
+          ],
+          "properties": {
+            "count": {
+              "$ref": "#/$defs/count"
+            },
+            "by_classification": {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "qualitative",
+                  "approximate",
+                  "range",
+                  "outside_contract"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/count"
+              }
+            },
+            "claims": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/unverifiableClaim"
+              }
+            }
+          }
+        },
+        "observation_summary": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/observationSummary"
+            }
+          ]
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "domain",
+        "variant",
+        "check_id",
+        "kind",
+        "required",
+        "step",
+        "listing_id",
+        "field",
+        "verdict",
+        "reasons",
+        "expected",
+        "observed"
+      ],
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "domain": {
+          "$ref": "#/$defs/domain"
+        },
+        "variant": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "check_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "kind": {
+          "$ref": "#/$defs/checkKind"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "step": {
+          "$ref": "#/$defs/nonNegativeInt"
+        },
+        "listing_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/nonEmpty"
+            }
+          ]
+        },
+        "field": {
+          "$ref": "#/$defs/field"
+        },
+        "verdict": {
+          "enum": [
+            "VIOLATION",
+            "UNASSESSABLE",
+            "HARNESS_ERROR"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reason"
+          },
+          "uniqueItems": true
+        },
+        "expected": {
+          "description": "Arbitrary JSON evidence, kept exactly as D1 produced it."
+        },
+        "observed": {
+          "description": "Arbitrary JSON evidence, kept exactly as D1 produced it."
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/$defs/reasonsForVerdict"
+        }
+      ]
+    },
+    "harnessError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "reason",
+        "message"
+      ],
+      "properties": {
+        "case_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/nonEmpty"
+            }
+          ]
+        },
+        "reason": {
+          "enum": [
+            "PROTOCOL_ERROR",
+            "ADAPTER_ERROR",
+            "TIMEOUT",
+            "FIXTURE_INVALID",
+            "ORACLE_INTEGRITY_ERROR"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "adapterError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "message"
+      ],
+      "properties": {
+        "case_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

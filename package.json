@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-concurrency=1 \"dist/test/**/*.test.js\"",
     "check:oracle-boundary": "npm run build && node dist/scripts/check-oracle-boundary.js",
-    "ace": "node dist/src/cli.js"
+    "ace": "node dist/src/cli.js",
+    "ace:auto": "node dist/src/automotive-cli.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/manifest.schema.json",
+  "title": "Automotive Agent Assurance run manifest (auto-manifest-0.1.0)",
+  "description": "Reproducibility and identity data of one automotive evaluation bundle. Adapter and SUT identity are self-declared through the adapter hello.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "pack", "corpus", "evaluation", "evidence", "harness", "adapter", "sut"],
+  "properties": {
+    "manifest_version": { "const": "auto-manifest-0.1.0" },
+    "pack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pack_version",
+        "case_schema_version",
+        "reason_taxonomy_version",
+        "oracle_version",
+        "generator_version",
+        "corpus_entry_version",
+        "adapter_protocol_version",
+        "evaluator_version",
+        "report_schema_version"
+      ],
+      "properties": {
+        "pack_version": { "const": "auto-0.1.0" },
+        "case_schema_version": { "const": "auto-case-0.1.0" },
+        "reason_taxonomy_version": { "const": "auto-reasons-0.1.0" },
+        "oracle_version": { "const": "auto-oracle-0.1.0" },
+        "generator_version": { "const": "auto-generator-0.1.0" },
+        "corpus_entry_version": { "const": "auto-corpus-entry-0.1.0" },
+        "adapter_protocol_version": { "const": "auto-adapter-0.1.0" },
+        "evaluator_version": { "const": "auto-evaluator-0.1.0" },
+        "report_schema_version": { "const": "auto-report-0.1.0" }
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "pack_version", "case_schema_version", "oracle_version", "generator_version", "corpus_entry_version", "sha256", "bytes", "cases", "variants", "cases_per_domain"],
+      "properties": {
+        "profile": { "const": "auto-smoke-0.1.0" },
+        "pack_version": { "const": "auto-0.1.0" },
+        "case_schema_version": { "const": "auto-case-0.1.0" },
+        "oracle_version": { "const": "auto-oracle-0.1.0" },
+        "generator_version": { "const": "auto-generator-0.1.0" },
+        "corpus_entry_version": { "const": "auto-corpus-entry-0.1.0" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "$ref": "#/$defs/count" },
+        "cases": { "$ref": "#/$defs/count" },
+        "variants": { "$ref": "#/$defs/count" },
+        "cases_per_domain": { "$ref": "#/$defs/domainCounts" }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluator_version", "run_valid", "case_statuses"],
+      "properties": {
+        "evaluator_version": { "const": "auto-evaluator-0.1.0" },
+        "run_valid": { "type": "boolean" },
+        "case_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["evaluated", "harness_error", "not_run"],
+          "properties": {
+            "evaluated": { "$ref": "#/$defs/count" },
+            "harness_error": { "$ref": "#/$defs/count" },
+            "not_run": { "$ref": "#/$defs/count" }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_version", "sha256", "bytes", "records", "record_format", "order"],
+      "properties": {
+        "evidence_version": { "const": "auto-evidence-0.1.0" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "$ref": "#/$defs/count" },
+        "records": { "$ref": "#/$defs/count" },
+        "record_format": { "const": "deterministic JSON Lines; recursively sorted keys; finite numbers in ECMAScript shortest round-trip form; UTF-8; LF; one record per corpus case" },
+        "order": { "const": "corpus order" }
+      }
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "worktree_clean"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^([0-9a-f]{40}|unknown)$" },
+        "worktree_clean": { "type": "boolean" }
+      }
+    },
+    "adapter": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version", "protocol_version", "identity_source"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nonEmpty" },
+            "version": { "$ref": "#/$defs/nonEmpty" },
+            "protocol_version": { "const": "auto-adapter-0.1.0" },
+            "identity_source": { "const": "adapter_hello_self_declared" }
+          }
+        }
+      ]
+    },
+    "sut": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version", "revision", "identity_source"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nonEmpty" },
+            "version": { "$ref": "#/$defs/nonEmpty" },
+            "revision": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/nonEmpty" }] },
+            "identity_source": { "const": "adapter_hello_self_declared" }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "nonEmpty": { "type": "string", "minLength": 1 },
+    "domainCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vehicle_fact_integrity", "price_attribution", "stale_inventory"],
+      "properties": {
+        "vehicle_fact_integrity": { "$ref": "#/$defs/count" },
+        "price_attribution": { "$ref": "#/$defs/count" },
+        "stale_inventory": { "$ref": "#/$defs/count" }
+      }
+    }
+  }
+}
