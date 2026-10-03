@@ -6,10 +6,10 @@
  * consistency against the corpus; an inconsistent run is a report-build error and
  * no evidence is emitted.
  */
-import { canonicalJsonLines } from "../../util/canonical-json";
 import { AUTOMOTIVE_EVALUATOR_VERSION, AUTOMOTIVE_EVIDENCE_VERSION } from "../../spec/automotive/version";
 import type { AutomotiveCorpusEntry } from "../../corpus/automotive-generation/corpus-entry";
 import type { AutomotiveCaseEvaluation, AutomotiveRunOutput } from "../../eval/automotive/types";
+import { AutomotiveJsonError, automotiveJsonLines } from "./json";
 import { AutomotiveReportBuildError, type AutomotiveEvidenceRecord } from "./types";
 
 const fail = (m: string): never => {
@@ -85,13 +85,15 @@ function checkEvaluation(entry: AutomotiveCorpusEntry, ev: AutomotiveCaseEvaluat
 }
 
 /**
- * Exact evidence.jsonl bytes. Canonical JSON rejects non-integer numbers, so a raw_sut_evidence value holding
- * one cannot be written exactly; that is a report-build error rather than a silent normalisation.
+ * Exact evidence.jsonl bytes (./json.ts rules). raw_sut_evidence is written verbatim, floats included; only a
+ * value outside the JSON data model (NaN, Infinity, undefined, bigint, ...) is a report-build error, never a silent
+ * normalisation.
  */
 export function evidenceBytes(records: readonly AutomotiveEvidenceRecord[]): string {
   try {
-    return canonicalJsonLines(records);
+    return automotiveJsonLines(records);
   } catch (e) {
-    return fail(`evidence cannot be encoded as canonical JSON (raw_sut_evidence is kept verbatim and must contain integers only): ${(e as Error).message}`);
+    if (e instanceof AutomotiveJsonError) return fail(`evidence is not JSON-serialisable without loss: ${e.message}`);
+    throw e;
   }
 }

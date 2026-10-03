@@ -7,11 +7,11 @@
  * engine. Iteration order is fixed by the shared vocabularies and by case ids, so a
  * report and its parsed report.json render to identical bytes.
  */
-import { canonicalJson } from "../../util/canonical-json";
 import { EXECUTABLE_AUTOMOTIVE_DOMAINS } from "../../spec/automotive/domains";
 import { AUTOMOTIVE_VERDICTS } from "../../spec/automotive/outcomes";
 import { AUTOMOTIVE_HARNESS_ERROR_REASONS, AUTOMOTIVE_UNASSESSABLE_REASONS, AUTOMOTIVE_VIOLATION_REASONS } from "../../spec/automotive/reason-taxonomy";
 import { AUTOMOTIVE_REFERENCE_AGENT_VERSION } from "../../spec/automotive/version";
+import { automotiveJson } from "./json";
 import type { AutomotiveReport, AutomotiveScenarioCounts, AutomotiveVariantCounts } from "./types";
 
 /** The in-repo reference agent's hello identity (src/adapter/automotive-reference). Only this exact identity gets the self-test notice. */
@@ -38,7 +38,7 @@ function code(s: string): string {
   return longest > 0 ? `${fence} ${s} ${fence}` : `${fence}${s}${fence}`;
 }
 
-const json = (v: unknown) => code(canonicalJson(v));
+const json = (v: unknown) => code(automotiveJson(v));
 
 function sortedEntries(m: Record<string, number>): [string, number][] {
   return Object.keys(m)

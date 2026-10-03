@@ -7,7 +7,7 @@ import { runAutomotiveCorpus } from "../../src/eval/automotive/run";
 import type { AutomotiveRunOutput } from "../../src/eval/automotive/types";
 import { buildAutomotiveBundle } from "../../src/report/automotive/build";
 import { AUTOMOTIVE_REPORT_LIMITATIONS } from "../../src/report/automotive/limitations";
-import { prettyJsonFile } from "../../src/report/automotive/json";
+import { AutomotiveJsonError, automotiveJson, automotiveJsonLines, prettyJsonFile } from "../../src/report/automotive/json";
 import { AUTOMOTIVE_REFERENCE_IDENTITY, REFERENCE_AGENT_NOTICE, renderAutomotiveSummary } from "../../src/report/automotive/summary";
 import { AutomotiveReportBuildError, type AutomotiveBundle, type AutomotiveEvidenceRecord, type AutomotiveReport } from "../../src/report/automotive/types";
 import { referenceHello } from "../../src/adapter/automotive-reference/agent";
@@ -105,7 +105,7 @@ test("evidence: one record per corpus case in corpus order; adapter_error keeps 
   assert.equal(bundleOf(await runOf("reference")).evidenceBytes, canonicalJsonLines(ok), "canonical JSON Lines, one LF each");
 });
 
-test("raw_sut_evidence survives verbatim and never changes a verdict; a non-integer value is a build error, not a silent normalisation", async () => {
+test("raw_sut_evidence survives verbatim and never changes a verdict; only a value outside the JSON model is a build error", async () => {
   const base = await runOf("reference");
   const run = structuredClone(base);
   const raw = { nested: [1, "ä \u0000 ✓", { z: 1, a: null }], "key with spaces": true, empty: {} };
@@ -115,9 +115,11 @@ test("raw_sut_evidence survives verbatim and never changes a verdict; a non-inte
   assert.deepEqual(rec.adapter_result?.raw_sut_evidence, raw);
   assert.ok(b.evidenceBytes.includes(canonicalJson(raw)), "the exact canonical bytes of the raw evidence are in the file");
   assert.equal(canonicalJson(b.report.case_evaluations), canonicalJson(bundleOf(base).report.case_evaluations), "verdicts unchanged");
-  const float = structuredClone(base);
-  float.case_results[0].raw_sut_evidence = { latency_ms: 12.5 };
-  buildError(() => bundleOf(float), /raw_sut_evidence is kept verbatim/, "float in raw evidence");
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, undefined, 10n, () => 1, new Date(0)]) {
+    const r = structuredClone(base);
+    r.case_results[0].raw_sut_evidence = { x: bad };
+    buildError(() => bundleOf(r), /evidence is not JSON-serialisable without loss/, String(bad));
+  }
 });
 
 test("hashes: same inputs give the same bytes and SHAs; one changed evidence value or corpus byte changes the bound SHA", async () => {
@@ -158,8 +160,68 @@ test("the report embeds exactly the manifest; JSON files are deterministic, key-
   assert.equal(canonicalJson(JSON.parse(text)), canonicalJson(b.report));
   assert.ok(b.evidenceBytes.endsWith("}\n") && !b.evidenceBytes.endsWith("\n\n"));
   assert.ok(b.summary.endsWith("\n") && !b.summary.endsWith("\n\n"));
-  assert.throws(() => prettyJsonFile({ x: 0.5 }), /non-integer/);
+  assert.equal(prettyJsonFile({ x: 0.5, y: [-0, 1e21] }), '{\n  "x": 0.5,\n  "y": [\n    0,\n    1e+21\n  ]\n}\n');
+  assert.throws(() => prettyJsonFile({ x: Number.NaN }), /non-finite number at \$\.x/);
   assert.equal(prettyJsonFile({ b: [1, { d: 1, c: [] }], a: {} }), '{\n  "a": {},\n  "b": [\n    1,\n    {\n      "c": [],\n      "d": 1\n    }\n  ]\n}\n');
+});
+
+test("float raw evidence: evidence -> JSONL -> parse gives the same value, with deterministic bytes and SHA", async () => {
+  const base = await runOf("reference");
+  const raw = { confidence: 0.73, latency_ms: 12.5, scores: [0.1, 1e-7, 5e-324, 1.7976931348623157e308, -2.5], third: 1 / 3, nested: { z: 0.30000000000000004, a: -0 } };
+  const withFloat = () => {
+    const r = structuredClone(base);
+    r.case_results[6].raw_sut_evidence = structuredClone(raw);
+    return bundleOf(r);
+  };
+  const a = withFloat();
+  const b = withFloat();
+  assert.equal(a.evidenceBytes, b.evidenceBytes, "deterministic bytes");
+  assert.equal(a.manifest.evidence.sha256, b.manifest.evidence.sha256, "deterministic SHA");
+  assert.equal(a.manifest.evidence.sha256, sha256Hex(Buffer.from(a.evidenceBytes, "utf8")));
+  assert.notEqual(a.manifest.evidence.sha256, bundleOf(structuredClone(base)).manifest.evidence.sha256, "the float evidence is bound by the SHA");
+  const line = a.evidenceBytes.split("\n")[6];
+  assert.ok(line.includes('"raw_sut_evidence":{"confidence":0.73,"latency_ms":12.5,"nested":{"a":0,"z":0.30000000000000004},"scores":[0.1,1e-7,5e-324,1.7976931348623157e+308,-2.5],"third":0.3333333333333333}'), "sorted keys, shortest round-trip numbers");
+  const parsed = JSON.parse(line) as AutomotiveEvidenceRecord;
+  assert.deepEqual(parsed.adapter_result?.raw_sut_evidence, { ...raw, nested: { z: 0.30000000000000004, a: 0 } }, "every float round-trips exactly (-0 is written as 0)");
+  assert.equal((parsed.adapter_result?.raw_sut_evidence as { third: number }).third, 1 / 3);
+  // Re-serialising the parsed evidence reproduces the exact bytes.
+  assert.equal(automotiveJsonLines(recordsOf(a)), a.evidenceBytes);
+  assert.equal(canonicalJson(a.report.case_evaluations), canonicalJson(bundleOf(structuredClone(base)).report.case_evaluations), "raw evidence never changes an evaluation");
+});
+
+test("the automotive JSON serializer: full JSON model, sorted keys, finite numbers only, identical to canonical JSON on integers", () => {
+  assert.equal(automotiveJson({ b: 1, a: [true, null, "x\u0000\"", { d: 0.5, c: -1 }], "": {} }), '{"":{},"a":[true,null,"x\\u0000\\"",{"c":-1,"d":0.5}],"b":1}');
+  for (const [v, s] of [[0.73, "0.73"], [-0, "0"], [1e21, "1e+21"], [1e-7, "1e-7"], [123456789012345680000, "123456789012345680000"], [Number.MAX_SAFE_INTEGER + 2, "9007199254740992"]] as const) assert.equal(automotiveJson(v), s, String(v));
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  const sparse = [1, , 3];
+  for (const [v, re] of [
+    [Number.NaN, /non-finite number at \$/],
+    [{ a: [Number.POSITIVE_INFINITY] }, /non-finite number at \$\.a\[0\]/],
+    [{ a: undefined }, /undefined member at \$\.a/],
+    [[undefined], /undefined array element/],
+    [sparse, /undefined array element at \$\[1\]/],
+    [10n, /unsupported bigint/],
+    [Symbol("s"), /unsupported symbol/],
+    [() => 1, /unsupported function/],
+    [new Date(0), /non-plain object/],
+    [new Map(), /non-plain object/],
+    [Buffer.from("x"), /non-plain object/],
+    [cyclic, /cycle at \$\.self/],
+    [{ [Symbol("k")]: 1 }, /symbol-keyed member/],
+  ] as const) assert.throws(() => automotiveJson(v), (e: unknown) => e instanceof AutomotiveJsonError && re.test(e.message), String(re));
+  const shared = { x: 1 };
+  assert.equal(automotiveJson({ a: shared, b: shared }), '{"a":{"x":1},"b":{"x":1}}', "a repeated (non-cyclic) reference is fine");
+  // Integer-only values: byte-identical to canonical JSON, so integer evidence keeps its previous SHA.
+  for (const e of corpus.entries) assert.equal(automotiveJson(e), canonicalJson(e));
+  assert.equal(automotiveJsonLines(corpus.entries), corpus.bytes);
+  assert.equal(automotiveJsonLines([]), "");
+});
+
+test("integer-only reference evidence keeps the same bytes as canonical JSON Lines", async () => {
+  const b = bundleOf(await runOf("reference"));
+  assert.equal(b.evidenceBytes, canonicalJsonLines(recordsOf(b)));
+  assert.equal(b.manifest.evidence.sha256, "c14a39c1d613f4eeb362c98e20ed9570b9e25d7ac0058d6f16e6167785222ea0");
 });
 
 // ------------------------------------------------------------ consistency
@@ -336,7 +398,7 @@ function importsOf(file: string): string[] {
 
 test("the summary is a renderer: it imports no oracle, evaluator, corpus generator, adapter or run engine", () => {
   const imports = importsOf(join(ROOT, "src", "report", "automotive", "summary.ts"));
-  const allowed = new Set(["src/util/canonical-json.ts", "src/spec/automotive/domains.ts", "src/spec/automotive/outcomes.ts", "src/spec/automotive/reason-taxonomy.ts", "src/spec/automotive/version.ts", "src/report/automotive/types.ts"]);
+  const allowed = new Set(["src/report/automotive/json.ts", "src/spec/automotive/domains.ts", "src/spec/automotive/outcomes.ts", "src/spec/automotive/reason-taxonomy.ts", "src/spec/automotive/version.ts", "src/report/automotive/types.ts"]);
   assert.ok(imports.length > 0);
   for (const t of imports) assert.ok(allowed.has(t), `summary.ts imports ${t}`);
 });

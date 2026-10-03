@@ -80,7 +80,7 @@
         "sha256": { "$ref": "#/$defs/sha256" },
         "bytes": { "$ref": "#/$defs/count" },
         "records": { "$ref": "#/$defs/count" },
-        "record_format": { "const": "canonical JSON Lines; recursively sorted keys; UTF-8; LF; one record per corpus case" },
+        "record_format": { "const": "deterministic JSON Lines; recursively sorted keys; finite numbers in ECMAScript shortest round-trip form; UTF-8; LF; one record per corpus case" },
         "order": { "const": "corpus order" }
       }
     },

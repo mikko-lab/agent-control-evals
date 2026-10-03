@@ -44,7 +44,7 @@ export interface AutomotiveEvidenceRecord {
   evaluation: AutomotiveCaseEvaluation | null;
 }
 
-export const AUTOMOTIVE_EVIDENCE_RECORD_FORMAT = "canonical JSON Lines; recursively sorted keys; UTF-8; LF; one record per corpus case";
+export const AUTOMOTIVE_EVIDENCE_RECORD_FORMAT = "deterministic JSON Lines; recursively sorted keys; finite numbers in ECMAScript shortest round-trip form; UTF-8; LF; one record per corpus case";
 export const AUTOMOTIVE_EVIDENCE_ORDER = "corpus order";
 
 // ---------------------------------------------------------------- manifest

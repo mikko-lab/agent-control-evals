@@ -147,6 +147,29 @@ test("HARNESS_ERROR: exit 2, run_valid false, never counted as VIOLATION; a prot
   assert.ok(ev.slice(1).every((e) => e.status === "not_run" && e.adapter_result === null && e.evaluation === null));
 });
 
+test("float raw evidence end to end: valid bundle, exact round-trip through evidence.jsonl, deterministic SHA", () => {
+  const FLOAT = join(ROOT, "test", "fixtures", "automotive", "float-evidence-adapter.js");
+  const args = ["evaluate", "--profile", "smoke", "--adapter-command", process.execPath, "--adapter-arg", FLOAT];
+  const a = outDir();
+  const b = outDir();
+  const ra = cli(...args, "--out", a);
+  const rb = cli(...args, "--out", b);
+  assert.equal(ra.code, 0, ra.stdout + ra.stderr);
+  assert.deepEqual([ra.json.report_schema_valid, ra.json.manifest_schema_valid, ra.json.run_valid, ra.json.all_required_assessed], [true, true, true, true]);
+  assert.deepEqual(ra.json.scenario_verdicts, { PASS: 18, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 });
+  assert.equal(ra.json.evidence_sha256, rb.json.evidence_sha256, "deterministic evidence SHA");
+  for (const f of AUTOMOTIVE_BUNDLE_FILES) assert.ok(readFileSync(join(a, f)).equals(readFileSync(join(b, f))), f);
+  const evidence = readFileSync(join(a, "evidence.jsonl"));
+  assert.equal(sha256Hex(evidence), ra.json.evidence_sha256);
+  const records = evidenceOf(a);
+  assert.equal(records.length, 18);
+  records.forEach((r, i) => assert.deepEqual(r.adapter_result?.raw_sut_evidence, { big: 1e21, confidence: 0.73, latency_ms: 12.5 + i + 1, ratio: 1 / 3, tiny: 1e-7 }, r.case_id));
+  assert.ok(read(a, "evidence.jsonl").includes('"raw_sut_evidence":{"big":1e+21,"confidence":0.73,"latency_ms":13.5,"ratio":0.3333333333333333,"tiny":1e-7}'));
+  assert.ok(!read(a, "summary.md").includes("Reference-agent self-test"), "a different self-declared identity gets no self-test notice");
+  assert.equal(cli("validate-report", "--file", join(a, "report.json")).code, 0);
+  assert.equal(cli("validate-manifest", "--file", join(a, "manifest.json")).code, 0);
+});
+
 test("argument rules: one adapter source, smoke profile only, required --out, no shell", () => {
   const out = outDir();
   const usage = (args: string[], re: RegExp) => {
