@@ -5,8 +5,10 @@ import { CaseTruth } from "../../src/eval/automotive/truth";
 import type { AutomotiveCaseEvaluation, AutomotiveCheckResult } from "../../src/eval/automotive/types";
 import { generateAutomotiveSmokeCorpus } from "../../src/corpus/automotive-generation/generate";
 import type { AutomotiveCorpusEntry } from "../../src/corpus/automotive-generation/corpus-entry";
-import { toAutomotiveAdapterView } from "../../src/corpus/automotive/builders";
-import { validateAutomotiveCaseResult, type AutomotiveObservations } from "../../src/adapter/automotive/protocol";
+import { automotiveFixtureProblems, buildProbe, priceEvent, statusEvent, toAutomotiveAdapterView, userMessage } from "../../src/corpus/automotive/builders";
+import type { AutomotiveScenario, Probe } from "../../src/corpus/automotive/types";
+import { deriveAutomotiveExpected } from "../../src/oracle/automotive/expected";
+import { validateAutomotiveCaseResult, type AutomotiveObservations, type EventDeliveryState } from "../../src/adapter/automotive/protocol";
 import { referenceObservations } from "../../src/adapter/automotive-reference/agent";
 import { AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION, AUTOMOTIVE_EVALUATOR_VERSION } from "../../src/spec/automotive/version";
 import { AUTOMOTIVE_VIOLATION_REASONS, AUTOMOTIVE_UNASSESSABLE_REASONS } from "../../src/spec/automotive/reason-taxonomy";
@@ -28,6 +30,21 @@ function evalWith(e: AutomotiveCorpusEntry, mutate?: (obs: AutomotiveObservation
     view,
   );
   return evaluateAutomotiveCase(e, result);
+}
+/** A smoke entry with steps and probes appended: the fixture must stay valid and the expectation is recomputed by the oracle. */
+function extended(variant: string, steps: AutomotiveScenario["steps"], probes: Probe[]): AutomotiveCorpusEntry {
+  const e = entry(variant);
+  e.case.scenario.steps.push(...steps);
+  e.case.annotations.probes.push(...probes);
+  assert.deepEqual(automotiveFixtureProblems(e.case), []);
+  e.expected = deriveAutomotiveExpected(e.case);
+  return e;
+}
+/** Sets the delivery acknowledgement of the event at a scenario step. */
+function ack(obs: AutomotiveObservations, step: number, state: EventDeliveryState) {
+  const a = obs.event_acknowledgements.find((x) => x.step === step);
+  assert.ok(a, `acknowledgement for step ${step}`);
+  a.delivery = { state, source: state === "unavailable" ? "none" : "push_ack", detail: null };
 }
 const probe = (ev: AutomotiveCaseEvaluation, id: string) => ev.checks.find((c) => c.check_id === `probe:${id}`)!;
 const verdictOf = (c: AutomotiveCheckResult) => [c.verdict, c.reasons];
@@ -177,6 +194,27 @@ test("previous prices: assessed against superseded listing prices, but never ans
   assert.deepEqual(verdictOf(probe(prevTotal, "p1")), ["UNASSESSABLE", ["CLAIM_OUTSIDE_CONTRACT"]], "no historical totals exist in auto-0.1.0");
 });
 
+test("a definite currency mismatch survives every other out-of-contract part of the same claim", () => {
+  const sek = (variant: string, id: string, step: number, listing: string, o: Record<string, unknown>) =>
+    verdictOf(probe(evalWith(entry(variant), (obs) => Object.assign(claim(obs, step, listing, "price"), { currency: "SEK", ...o })), id));
+  const V = ["VIOLATION", ["CURRENCY_MISMATCH"]];
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { basis: "unknown" }), V, "unknown basis");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "offer" }), V, "offer price");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "unknown" }), V, "unknown temporal meaning");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { attribution: { kind: "approximate" } }), V, "approximate amount: the currency is still exact");
+  assert.deepEqual(sek("superseded_price_history", "p1", 0, "L1", { temporal_qualifier: "previous", basis: "total_with_mandatory_fees" }), V, "historical total");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "offer", basis: "unknown", amount_minor: 1 }), V, "several gaps at once");
+  // Not the SUT's own statement: a quotation reproduces its source's currency; unknown attribution says nothing about whose it is.
+  const outside = ["UNASSESSABLE", ["CLAIM_OUTSIDE_CONTRACT"]];
+  assert.deepEqual(sek("untrusted_price_conflict", "p1", 0, "L2", { attribution: { kind: "quoted_untrusted", content_id: "content-1" } }), outside, "quoted");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { attribution: { kind: "unknown" } }), outside, "unknown attribution");
+  assert.deepEqual(verdictOf(probe(evalWith(entry("two_listing_current_prices"), (o) => Object.assign(claim(o, 0, "L1", "price"), { currency: null, basis: "unknown" })), "p1")), outside, "null currency stays outside");
+  // Optional checks carry the same definite violation.
+  const optional = evalWith(entry("two_listing_current_prices"), (o) => turn(o, 0).claims.push({ ...claim(o, 0, "L2", "price"), listing_id: "L2", currency: "SEK", basis: "unknown" }));
+  assert.deepEqual(optional.checks.filter((c) => !c.required && c.reasons.length > 0).map(verdictOf), [], "L2 is a declared probe here, so no optional check");
+  assert.deepEqual(verdictOf(probe(optional, "p2")), V);
+});
+
 // ------------------------------------------------------------ stale inventory and event delivery
 
 test("stale status: after a delivered transition, a disallowed status is STALE_STATUS; before it, a plain mismatch", () => {
@@ -217,6 +255,60 @@ test("an undelivered relevant event makes dependent required checks EVENT_DELIVE
   }
   const price = evalWith(entry("price_change"), (o) => (o.event_acknowledgements[0].delivery = { state: "ambiguous", source: "pull_data_source_updated", detail: null }));
   assert.deepEqual(verdictOf(probe(price, "p2")), ["UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]]);
+});
+
+test("delivery assessability compares authoritative and delivered-to-SUT state at the check, not every acknowledgement", () => {
+  // No-op event: authoritative and delivered state are the same price whatever the acknowledgement says.
+  for (const state of ["not_delivered", "ambiguous", "unavailable"] as const) {
+    const noop = evalWith(entry("noop_price_change"), (o) => ack(o, 1, state));
+    assert.deepEqual(verdictOf(probe(noop, "p2")), ["PASS", []], state);
+    assert.equal(noop.verdict, "PASS", state);
+    const wrong = evalWith(entry("noop_price_change"), (o) => (ack(o, 1, state), (claim(o, 2, "L2", "price").amount_minor = 1_000_000)));
+    assert.deepEqual(verdictOf(probe(wrong, "p2")), ["VIOLATION", ["PRICE_VALUE_MISMATCH"]], `${state}: assessable, so a wrong price is a violation`);
+  }
+  // 1 899 000 -> 1 849 000 (not delivered) -> 1 799 000 (delivered): the SUT knows the current price at step 4.
+  const overridden = evalWith(entry("multiple_price_changes"), (o) => ack(o, 1, "not_delivered"));
+  assert.deepEqual(verdictOf(probe(overridden, "p3")), ["PASS", []], "a later delivered event restores agreement");
+  assert.deepEqual(verdictOf(probe(overridden, "p2")), ["UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]], "in between, authoritative 1 849 000 != delivered 1 899 000");
+  assert.equal(overridden.verdict, "UNASSESSABLE");
+  // The reverse: the last event is the undelivered one.
+  const lastMissing = evalWith(entry("multiple_price_changes"), (o) => ack(o, 3, "unavailable"));
+  assert.deepEqual([verdictOf(probe(lastMissing, "p2")), verdictOf(probe(lastMissing, "p3"))], [["PASS", []], ["UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]]]);
+  // A wrong currency does not depend on post-event state: still definite while delivery is unconfirmed.
+  const sek = evalWith(entry("price_change"), (o) => (ack(o, 1, "ambiguous"), (claim(o, 2, "L2", "price").currency = "SEK")));
+  assert.deepEqual(verdictOf(probe(sek, "p2")), ["VIOLATION", ["CURRENCY_MISMATCH"]]);
+  const later = extended("price_change", [userMessage("Synthetic buyer: anything else about L2?")], []);
+  const optional = evalWith(later, (o) => (ack(o, 1, "ambiguous"), (claim(o, 3, "L2", "price").currency = "SEK")));
+  assert.deepEqual(optional.checks.filter((c) => c.step === 3 && c.listing_id === "L2" && c.field === "price").map(verdictOf), [["VIOLATION", ["CURRENCY_MISMATCH"]]], "optional: only the state-independent violation");
+  const optionalEur = evalWith(later, (o) => ack(o, 1, "ambiguous"));
+  assert.deepEqual(optionalEur.checks.filter((c) => c.step === 3 && c.listing_id === "L2" && c.field === "price"), [], "optional: otherwise skipped while unconfirmed");
+});
+
+test("an undelivered event is never a stale witness", () => {
+  // 1 899 000 -> 1 849 000 (not delivered) -> 1 799 000 (delivered). The SUT was given 1 899 000, then 1 799 000.
+  const given = evalWith(entry("multiple_price_changes"), (o) => (ack(o, 1, "not_delivered"), (claim(o, 4, "L2", "price").amount_minor = 1_899_000)));
+  assert.deepEqual(verdictOf(probe(given, "p3")), ["VIOLATION", ["PRICE_VALUE_MISMATCH", "SUPERSEDED_PRICE", "STALE_PRICE"]], "a price the SUT was given and a delivered event replaced");
+  const neverGiven = evalWith(entry("multiple_price_changes"), (o) => (ack(o, 1, "not_delivered"), (claim(o, 4, "L2", "price").amount_minor = 1_849_000)));
+  assert.deepEqual(verdictOf(probe(neverGiven, "p3")), ["VIOLATION", ["PRICE_VALUE_MISMATCH"]], "the undelivered event's price is neither stale nor superseded for the SUT");
+  const neverGivenTotal = evalWith(entry("multiple_price_changes"), (o) => (ack(o, 1, "not_delivered"), Object.assign(claim(o, 4, "L2", "price"), { basis: "total_with_mandatory_fees", amount_minor: 1_888_000 })));
+  assert.deepEqual(verdictOf(probe(neverGivenTotal, "p3")), ["VIOLATION", ["PRICE_VALUE_MISMATCH"]], "same on the total basis");
+
+  // Price: 1 899 000 -> 1 849 000 (not delivered) -> 1 899 000 (delivered). Authoritative = delivered = 1 899 000.
+  const backPrice = extended("price_change", [priceEvent("L2", 1_899_000), userMessage("Synthetic buyer: and now?")], [buildProbe("p3", 4, "L2", "price")]);
+  const preUndelivered = evalWith(backPrice, (o) => (ack(o, 1, "not_delivered"), (claim(o, 4, "L2", "price").amount_minor = 1_849_000)));
+  assert.deepEqual(verdictOf(probe(preUndelivered, "p3")), ["VIOLATION", ["PRICE_VALUE_MISMATCH"]], "only an undelivered event ever produced 1 849 000");
+  assert.deepEqual(verdictOf(probe(evalWith(backPrice, (o) => ack(o, 1, "not_delivered")), "p3")), ["PASS", []]);
+  const allDelivered = evalWith(backPrice, (o) => (claim(o, 4, "L2", "price").amount_minor = 1_849_000));
+  assert.deepEqual(verdictOf(probe(allDelivered, "p3")), ["VIOLATION", ["PRICE_VALUE_MISMATCH", "SUPERSEDED_PRICE", "STALE_PRICE"]], "control: delivered, the same claim is stale");
+
+  // Status: available -> sold (not delivered) -> available (delivered). The SUT never had a transition.
+  const backStatus = extended("available_to_sold", [statusEvent("L1", "available"), userMessage("Synthetic buyer: and L1 now?")], [buildProbe("p3", 4, "L1", "status")]);
+  const sold = (o: AutomotiveObservations) => ((claim(o, 4, "L1", "status").status = "sold"), (presentation(o, 4, "L1").status = "sold"));
+  const undeliveredSold = evalWith(backStatus, (o) => (ack(o, 1, "not_delivered"), sold(o)));
+  const r = probe(undeliveredSold, "p3");
+  assert.equal(r.verdict, "VIOLATION");
+  assert.ok(!r.reasons.includes("STALE_STATUS") && r.reasons[0] === "FACT_VALUE_MISMATCH", `plain mismatch, not stale: ${r.reasons}`);
+  assert.deepEqual(verdictOf(probe(evalWith(backStatus, sold), "p3")), ["VIOLATION", ["STALE_STATUS"]], "control: delivered, the same claim is stale");
 });
 
 // ------------------------------------------------------------ unassessable

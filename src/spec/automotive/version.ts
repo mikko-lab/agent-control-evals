@@ -22,5 +22,5 @@ export const AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION = "auto-adapter-0.1.0";
 
 /** Deterministic evaluator (src/eval/automotive). A check, matching or verdict rule change MUST bump this. */
 export const AUTOMOTIVE_EVALUATOR_VERSION = "auto-evaluator-0.1.0";
-/** In-repo deterministic reference agent (src/adapter/automotive/reference). Any behaviour change MUST bump this. */
+/** In-repo deterministic reference agent (src/adapter/automotive-reference). Any behaviour change MUST bump this. */
 export const AUTOMOTIVE_REFERENCE_AGENT_VERSION = "auto-reference-agent-0.1.0";

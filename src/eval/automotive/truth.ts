@@ -6,18 +6,27 @@
  * oracle through one synthetic probe on a clone of the case, so every check uses
  * the truth source the golden corpus was built with. The only state the evaluator
  * replays itself is the minimum needed for event-delivery preconditions and stale
- * detection (which earlier events changed status or price), as the spec allows.
+ * detection: authoritative versus delivered-to-SUT status and price, as the spec allows.
  */
 import { canonicalJson } from "../../util/canonical-json";
 import { AUTOMOTIVE_CORPUS_ENTRY_VERSION } from "../../spec/automotive/version";
 import { deriveAutomotiveExpected } from "../../oracle/automotive/expected";
 import type { ProbeExpectation } from "../../oracle/automotive/types";
 import { automotiveFixtureProblems } from "../../corpus/automotive/builders";
-import type { AutomotiveCase, InventoryEventStep, ProbeField } from "../../corpus/automotive/types";
+import type { AutomotiveCase, InventoryEventStep, InventoryStatus, ProbeField } from "../../corpus/automotive/types";
 import type { AutomotiveCorpusEntry } from "../../corpus/automotive-generation/corpus-entry";
 import type { AutomotiveHarnessErrorRecord } from "./types";
 
 const SYNTHETIC_PROBE_ID = "evaluator-truth";
+
+/** Whether the inventory event at a scenario step was acknowledged by the adapter as delivered to the SUT. */
+export type DeliveredPredicate = (eventStep: number) => boolean;
+
+export interface DimensionReplay<V> {
+  authoritative: V;
+  delivered_to_sut: V;
+  superseded_by_delivered: V[];
+}
 
 export class AutomotiveEvaluatorError extends Error {
   constructor(message: string) {
@@ -92,34 +101,65 @@ export class CaseTruth {
     return out;
   }
 
-  /** Whether an earlier status event for the listing actually changed its status (replayed from the trusted initial status). */
-  hadStatusTransition(step: number, listing_id: string): boolean {
-    let prev = this.listing(listing_id).status;
-    for (const { event } of this.priorEvents(step, listing_id, "status")) {
-      if (event.change.kind !== "status") continue;
-      if (event.change.status !== prev) return true;
-      prev = event.change.status;
+  /**
+   * Replays one state dimension of a listing up to (not including) `step`, twice and in parallel, from the
+   * trusted initial value:
+   *  - `authoritative`: every inventory event applied in step order (what the truth says now);
+   *  - `delivered_to_sut`: only the events the adapter acknowledged as delivered, in step order (the state the
+   *    SUT can actually know about).
+   * A check that depends on this dimension is assessable exactly when the two agree at the check's step, so a
+   * no-op event or an undelivered event that a later delivered event overrides does not block assessment.
+   * `superseded_by_delivered` lists the values the delivered-to-SUT state held immediately before a delivered
+   * event changed it (first-seen order): the only admissible witnesses for stale diagnostics. An undelivered
+   * event never contributes one.
+   */
+  replay(step: number, listing_id: string, dimension: "status", isDelivered: DeliveredPredicate): DimensionReplay<InventoryStatus>;
+  replay(step: number, listing_id: string, dimension: "price", isDelivered: DeliveredPredicate): DimensionReplay<number>;
+  replay(step: number, listing_id: string, dimension: "status" | "price", isDelivered: DeliveredPredicate): DimensionReplay<InventoryStatus | number> {
+    const l = this.listing(listing_id);
+    const initial: InventoryStatus | number = dimension === "status" ? l.status : l.price_minor;
+    let authoritative = initial;
+    let delivered = initial;
+    const superseded: (InventoryStatus | number)[] = [];
+    for (const { step: at, event } of this.priorEvents(step, listing_id, dimension)) {
+      const next = event.change.kind === "status" ? event.change.status : event.change.price_minor;
+      authoritative = next;
+      if (!isDelivered(at)) continue;
+      if (next !== delivered && !superseded.includes(delivered)) superseded.push(delivered);
+      delivered = next;
     }
-    return false;
+    return { authoritative, delivered_to_sut: delivered, superseded_by_delivered: superseded };
+  }
+
+  /** Whether the dimension's authoritative state equals the delivered-to-SUT state at `step` (see `replay`). */
+  deliveryConsistent(step: number, listing_id: string, dimension: "status" | "price", isDelivered: DeliveredPredicate): boolean {
+    const r = dimension === "status" ? this.replay(step, listing_id, "status", isDelivered) : this.replay(step, listing_id, "price", isDelivered);
+    return r.authoritative === r.delivered_to_sut;
+  }
+
+  /** Whether a delivered earlier status event actually changed the status the SUT was given. Undelivered events never count. */
+  hadStatusTransition(step: number, listing_id: string, isDelivered: DeliveredPredicate): boolean {
+    return this.replay(step, listing_id, "status", isDelivered).superseded_by_delivered.length > 0;
   }
 
   /**
-   * Prices that were current immediately before an earlier price event changed them, per basis. Fees are
-   * constant during a conversation in auto-0.1.0 (only listing prices change), so a pre-event total is the
-   * pre-event listing price plus the listing's current fees. No historical fees are reconstructed.
+   * Prices the SUT was given that a later delivered price event replaced, per basis: the STALE_PRICE witnesses.
+   * Fees are constant during a conversation in auto-0.1.0 (only listing prices change), so a pre-event total is
+   * the pre-event listing price plus the listing's current fees. No historical fees are reconstructed.
    */
-  stalePriceAmounts(step: number, listing_id: string): { listing_price: number[]; total_with_mandatory_fees: number[] } {
-    const l = this.listing(listing_id);
-    let prev = l.price_minor;
-    const lp: number[] = [];
-    for (const { event } of this.priorEvents(step, listing_id, "price")) {
-      if (event.change.kind !== "price") continue;
-      if (event.change.price_minor !== prev) {
-        if (!lp.includes(prev)) lp.push(prev);
-        prev = event.change.price_minor;
-      }
-    }
-    return { listing_price: lp, total_with_mandatory_fees: lp.map((p) => p + l.mandatory_fees_minor) };
+  stalePriceAmounts(step: number, listing_id: string, isDelivered: DeliveredPredicate): { listing_price: number[]; total_with_mandatory_fees: number[] } {
+    const lp = this.replay(step, listing_id, "price", isDelivered).superseded_by_delivered;
+    const fees = this.listing(listing_id).mandatory_fees_minor;
+    return { listing_price: lp, total_with_mandatory_fees: lp.map((p) => p + fees) };
+  }
+
+  /**
+   * Superseded listing prices known to the SUT at `step`: the trusted price history plus the delivered stale
+   * witnesses. A price superseded only by an undelivered event is not among them.
+   */
+  supersededPricesKnownToSut(step: number, listing_id: string, isDelivered: DeliveredPredicate): number[] {
+    const history = this.listing(listing_id).price_history.map((h) => h.price_minor);
+    return [...new Set([...history, ...this.replay(step, listing_id, "price", isDelivered).superseded_by_delivered])];
   }
 
   private listing(id: string) {

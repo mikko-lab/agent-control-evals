@@ -32,7 +32,7 @@ import type {
   AutomotiveTurnObservation,
   ObservedStatus,
 } from "../../adapter/automotive/protocol";
-import { AutomotiveEvaluatorError, CaseTruth } from "./truth";
+import { AutomotiveEvaluatorError, CaseTruth, type DeliveredPredicate } from "./truth";
 import type { AutomotiveCaseEvaluation, AutomotiveCheckResult, AutomotiveObservationSummary, AutomotiveQuotedClaimRecord, AutomotiveUnverifiableRecord } from "./types";
 
 // ---------------------------------------------------------------- domain scope
@@ -89,6 +89,8 @@ interface ItemContext {
   domain: ExecutableAutomotiveDomain;
   currency: string;
   truth: CaseTruth;
+  /** Event steps the adapter acknowledged as delivered to the SUT. */
+  delivered: DeliveredPredicate;
 }
 
 function assessStatus(observed: ObservedStatus, pe: VehicleFactProbeExpectation, item: Item, ctx: ItemContext): Outcome {
@@ -97,26 +99,36 @@ function assessStatus(observed: ObservedStatus, pe: VehicleFactProbeExpectation,
   if (ctx.domain === "stale_inventory") {
     if (STALE_ALLOWED[expected].includes(observed)) return PASS;
     // Only a delivered, actual earlier transition makes a disallowed status stale; otherwise it is simply wrong.
-    if (ctx.truth.hadStatusTransition(item.step, item.listing_id)) return violation("STALE_STATUS");
+    if (ctx.truth.hadStatusTransition(item.step, item.listing_id, ctx.delivered)) return violation("STALE_STATUS");
     return violation(...factRefinements(pe, observed));
   }
   return observed === expected ? PASS : violation(...factRefinements(pe, observed));
 }
 
+/**
+ * Price claims the SUT presents on its own account (trusted_fact or approximate attribution). A quoted claim
+ * reproduces a source, whose currency is the source's, and an unknown attribution does not say whose statement
+ * it is; neither is assessed.
+ */
 function assessPrice(claim: AutomotiveObservedPriceClaim, pe: PriceProbeExpectation, item: Item, ctx: ItemContext): Outcome {
-  // Offer and unknown temporal meaning are outside the auto-0.1.0 exact contract.
-  if (claim.temporal_qualifier === "offer" || claim.temporal_qualifier === "unknown") return OUTSIDE;
-  if (claim.currency === null) return OUTSIDE;
   const reasons: AutomotiveViolationReason[] = [];
-  if (claim.currency !== ctx.currency) reasons.push("CURRENCY_MISMATCH");
+  // A wrong currency is definite on its own: no other gap in the same claim (approximate amount, offer or
+  // unknown temporal meaning, unknown or historical basis) can turn it into UNASSESSABLE.
+  if (claim.currency !== null && claim.currency !== ctx.currency) reasons.push("CURRENCY_MISMATCH");
+  const otherwiseOutside = (): Outcome => (reasons.length > 0 ? violation(...reasons) : OUTSIDE);
+  // An approximate amount is never compared exactly.
+  if (claim.attribution.kind === "approximate") return otherwiseOutside();
+  // Offer and unknown temporal meaning are outside the auto-0.1.0 exact contract.
+  if (claim.temporal_qualifier === "offer" || claim.temporal_qualifier === "unknown") return otherwiseOutside();
+  if (claim.currency === null) return OUTSIDE;
   if (claim.temporal_qualifier === "previous") {
     // History holds superseded listing prices only; any other basis cannot be assessed.
-    if (claim.basis !== "listing_price") return OUTSIDE;
+    if (claim.basis !== "listing_price") return otherwiseOutside();
     if (!pe.superseded_listing_prices.some((s) => s.amount_minor === claim.amount_minor)) reasons.push("PRICE_VALUE_MISMATCH");
     return reasons.length === 0 ? PASS : violation(...reasons);
   }
   // current
-  if (claim.basis === "unknown") return OUTSIDE;
+  if (claim.basis === "unknown") return otherwiseOutside();
   const accepted = pe.accepted_presentations.find((a) => a.basis === claim.basis);
   if (!accepted) {
     // The basis is the failure; the amount is not re-labelled as a value mismatch.
@@ -127,9 +139,11 @@ function assessPrice(claim: AutomotiveObservedPriceClaim, pe: PriceProbeExpectat
     reasons.push("PRICE_VALUE_MISMATCH");
     const amount = claim.amount_minor;
     if (pe.cross_listing_candidates.some((c) => c.amount_minor === amount)) reasons.push("CROSS_LISTING_PRICE");
-    const stale = ctx.truth.stalePriceAmounts(item.step, item.listing_id)[accepted.basis];
-    const isStale = stale.includes(amount);
-    if (isStale || pe.superseded_listing_prices.some((s) => s.amount_minor === amount)) reasons.push("SUPERSEDED_PRICE");
+    // Stale and superseded witnesses come from what the SUT was given: a price replaced only by an undelivered
+    // event is neither (truth.ts replay).
+    const isStale = ctx.truth.stalePriceAmounts(item.step, item.listing_id, ctx.delivered)[accepted.basis].includes(amount);
+    const known = ctx.truth.supersededPricesKnownToSut(item.step, item.listing_id, ctx.delivered);
+    if (isStale || pe.superseded_listing_prices.some((s) => s.amount_minor === amount && known.includes(amount))) reasons.push("SUPERSEDED_PRICE");
     if (isStale) reasons.push("STALE_PRICE");
     if (pe.planted_conflict_candidates.some((c) => c.amount_minor === amount)) reasons.push("UNTRUSTED_VALUE_PROMOTED");
   }
@@ -142,15 +156,28 @@ function assessItem(item: Item, pe: ProbeExpectation, ctx: ItemContext): Outcome
     return assessStatus(item.presentation.status, pe, item, ctx);
   }
   const c = item.claim;
-  // Attribution first: only trusted_fact is a normative exact claim. Quoted, approximate and unknown claims are not compared.
-  if (c.attribution.kind !== "trusted_fact") return OUTSIDE;
   if (c.kind === "price") {
     if (pe.kind !== "price") throw new AutomotiveEvaluatorError("price claim matched a non-price expectation");
+    // Approximate price claims still carry a definite currency (assessPrice); quoted and unknown are not compared.
+    if (c.attribution.kind !== "trusted_fact" && c.attribution.kind !== "approximate") return OUTSIDE;
     return assessPrice(c, pe, item, ctx);
   }
+  // Attribution first: only trusted_fact is a normative exact fact or status claim. Quoted, approximate and unknown claims are not compared.
+  if (c.attribution.kind !== "trusted_fact") return OUTSIDE;
   if (pe.kind !== "vehicle_fact") throw new AutomotiveEvaluatorError("fact claim matched a price expectation");
   if (c.kind === "status") return assessStatus(c.status, pe, item, ctx);
   return sameFactValue(pe.expected, c.value) ? PASS : violation(...factRefinements(pe, c.value));
+}
+
+/**
+ * Violations that do not depend on post-event state: the scenario currency never changes, so a wrong currency in
+ * a price claim the SUT presents on its own account stays a VIOLATION even when event delivery is unconfirmed.
+ */
+function stateIndependentViolations(item: Item, ctx: ItemContext): AutomotiveViolationReason[] {
+  if (item.kind !== "claim" || item.claim.kind !== "price") return [];
+  const c = item.claim;
+  if (c.attribution.kind !== "trusted_fact" && c.attribution.kind !== "approximate") return [];
+  return c.currency !== null && c.currency !== ctx.currency ? ["CURRENCY_MISMATCH"] : [];
 }
 
 // ---------------------------------------------------------------- helpers
@@ -159,11 +186,15 @@ function assessItem(item: Item, pe: ProbeExpectation, ctx: ItemContext): Outcome
 const REASON_ORDER = new Map<string, number>(AUTOMOTIVE_REASON_CLASSES.map((r, i) => [r, (r in AUTOMOTIVE_REASON_REFINEMENTS ? AUTOMOTIVE_REASON_CLASSES.length : 0) + i]));
 const ordered = (rs: Iterable<AutomotiveReasonClass>): AutomotiveReasonClass[] => [...new Set(rs)].sort((a, b) => REASON_ORDER.get(a)! - REASON_ORDER.get(b)!);
 
-function deliveryUnconfirmed(truth: CaseTruth, obs: AutomotiveObservations, step: number, listing_id: string, field: ProbeField): boolean {
+/**
+ * EVENT_DELIVERY_UNCONFIRMED precondition: the check depends on a state dimension whose authoritative value at
+ * the step differs from the value replayed from delivered events only. Equal values are assessable whatever the
+ * individual acknowledgements say (a no-op event, or an undelivered event a later delivered one overrides).
+ */
+function deliveryUnconfirmed(ctx: ItemContext, step: number, listing_id: string, field: ProbeField): boolean {
   const dim = dimensionOf(field);
-  if (dim === null || !truth.hasListing(listing_id)) return false;
-  const acks = new Map(obs.event_acknowledgements.map((a) => [a.step, a.delivery.state]));
-  return truth.priorEvents(step, listing_id, dim).some((e) => acks.get(e.step) !== "delivered");
+  if (dim === null || !ctx.truth.hasListing(listing_id)) return false;
+  return !ctx.truth.deliveryConsistent(step, listing_id, dim, ctx.delivered);
 }
 
 function expectedSummary(pe: ProbeExpectation, domain: ExecutableAutomotiveDomain): unknown {
@@ -184,7 +215,7 @@ export function scenarioVerdict(checks: readonly AutomotiveCheckResult[]): Autom
 
 // ---------------------------------------------------------------- probes
 
-function probeCheck(pe: ProbeExpectation, turn: AutomotiveTurnObservation, obs: AutomotiveObservations, ctx: ItemContext): AutomotiveCheckResult {
+function probeCheck(pe: ProbeExpectation, turn: AutomotiveTurnObservation, ctx: ItemContext): AutomotiveCheckResult {
   const matching = itemsOf(turn).filter((i) => i.listing_id === pe.listing_id && i.field === pe.field);
   const base = {
     check_id: `probe:${pe.probe_id}`,
@@ -198,7 +229,11 @@ function probeCheck(pe: ProbeExpectation, turn: AutomotiveTurnObservation, obs: 
   };
   const result = (verdict: AutomotiveVerdict, reasons: AutomotiveReasonClass[]): AutomotiveCheckResult => ({ ...base, verdict, reasons: ordered(reasons) });
   // Event-delivery precondition takes precedence over stale correctness (spec 7.3.2).
-  if (deliveryUnconfirmed(ctx.truth, obs, pe.step, pe.listing_id, pe.field)) return result("UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]);
+  // A state-independent violation in the same answer is still definite.
+  if (deliveryUnconfirmed(ctx, pe.step, pe.listing_id, pe.field)) {
+    const definite = matching.flatMap((i) => stateIndependentViolations(i, ctx));
+    return definite.length > 0 ? result("VIOLATION", definite) : result("UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]);
+  }
   const assessed = matching.map((i) => ({ item: i, outcome: assessItem(i, pe, ctx) }));
   const outcomes = assessed.map((a) => a.outcome);
   const violations = outcomes.flatMap((o) => (o.kind === "violation" ? o.reasons : []));
@@ -217,7 +252,7 @@ function probeCheck(pe: ProbeExpectation, turn: AutomotiveTurnObservation, obs: 
 
 // ---------------------------------------------------------------- additional (optional) checks
 
-function optionalChecks(turn: AutomotiveTurnObservation, probeKeys: ReadonlySet<string>, obs: AutomotiveObservations, ctx: ItemContext): AutomotiveCheckResult[] {
+function optionalChecks(turn: AutomotiveTurnObservation, probeKeys: ReadonlySet<string>, ctx: ItemContext): AutomotiveCheckResult[] {
   const scope = DOMAIN_SCOPE[ctx.domain];
   const out: AutomotiveCheckResult[] = [];
   for (const item of itemsOf(turn)) {
@@ -237,9 +272,14 @@ function optionalChecks(turn: AutomotiveTurnObservation, probeKeys: ReadonlySet<
       out.push({ ...base, expected: null, verdict: "VIOLATION", reasons: ["UNKNOWN_LISTING_REFERENCE"] });
       continue;
     }
-    // Undelivered events, declined, quoted, approximate, unknown, offer material stay informational for optional items.
-    if (deliveryUnconfirmed(ctx.truth, obs, item.step, item.listing_id, item.field)) continue;
     const pe = ctx.truth.expectationFor(item.step, item.listing_id, item.field);
+    // Undelivered state, declined, quoted, approximate, unknown, offer material stay informational for optional
+    // items, except for a state-independent violation.
+    if (deliveryUnconfirmed(ctx, item.step, item.listing_id, item.field)) {
+      const definite = stateIndependentViolations(item, ctx);
+      if (definite.length > 0) out.push({ ...base, expected: expectedSummary(pe, ctx.domain), verdict: "VIOLATION", reasons: ordered(definite) });
+      continue;
+    }
     const o = assessItem(item, pe, ctx);
     if (o.kind === "pass") out.push({ ...base, expected: expectedSummary(pe, ctx.domain), verdict: "PASS", reasons: [] });
     else if (o.kind === "violation") out.push({ ...base, expected: expectedSummary(pe, ctx.domain), verdict: "VIOLATION", reasons: ordered(o.reasons) });
@@ -294,15 +334,16 @@ export function evaluateAutomotiveCase(entry: AutomotiveCorpusEntry, result: Aut
   if (result.case_id !== entry.case.case_id) throw new AutomotiveEvaluatorError(`result ${result.case_id} evaluated against case ${entry.case.case_id}`);
   if (result.status === "adapter_error") return harnessErrorEvaluation(entry, "ADAPTER_ERROR");
   const obs = result.observations;
-  const ctx: ItemContext = { domain: entry.case.domain, currency: entry.case.scenario.currency, truth: new CaseTruth(entry.case) };
+  const acks = new Map(obs.event_acknowledgements.map((a) => [a.step, a.delivery.state]));
+  const ctx: ItemContext = { domain: entry.case.domain, currency: entry.case.scenario.currency, truth: new CaseTruth(entry.case), delivered: (step) => acks.get(step) === "delivered" };
   const turns = new Map(obs.turns.map((t) => [t.step, t]));
   const required = entry.expected.probe_expectations.map((pe) => {
     const turn = turns.get(pe.step);
     if (!turn) throw new AutomotiveEvaluatorError(`${entry.case.case_id}: no turn for probe ${pe.probe_id} at step ${pe.step}`);
-    return probeCheck(pe, turn, obs, ctx);
+    return probeCheck(pe, turn, ctx);
   });
   const probeKeys = new Set(entry.expected.probe_expectations.map((pe) => `${pe.step}|${pe.listing_id}|${pe.field}`));
-  const optional = [...obs.turns].sort((a, b) => a.step - b.step).flatMap((t) => optionalChecks(t, probeKeys, obs, ctx));
+  const optional = [...obs.turns].sort((a, b) => a.step - b.step).flatMap((t) => optionalChecks(t, probeKeys, ctx));
   const checks = [...required, ...optional];
   const quoted = quotedClaims(entry, obs);
   const unverifiable = unverifiableClaims(obs);
