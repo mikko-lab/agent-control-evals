@@ -16,3 +16,6 @@ export const AUTOMOTIVE_ORACLE_VERSION = "auto-oracle-0.1.0";
 export const AUTOMOTIVE_GENERATOR_VERSION = "auto-generator-0.1.0";
 /** Harness-owned corpus entry shape (case + expected). */
 export const AUTOMOTIVE_CORPUS_ENTRY_VERSION = "auto-corpus-entry-0.1.0";
+
+/** Automotive adapter process protocol (src/adapter/automotive/protocol.ts). Any message or observation shape change MUST bump this. */
+export const AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION = "auto-adapter-0.1.0";
