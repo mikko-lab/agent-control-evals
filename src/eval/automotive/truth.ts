@@ -148,7 +148,7 @@ export class CaseTruth {
 
   /**
    * Prices the SUT was given that a later delivered price event replaced, per basis: the STALE_PRICE witnesses.
-   * Fees are constant during a conversation in auto-0.1.0 (only listing prices change), so a pre-event total is
+   * Fees are constant during a conversation (only listing prices change), so a pre-event total is
    * the pre-event listing price plus the listing's current fees. No historical fees are reconstructed.
    */
   stalePriceAmounts(step: number, listing_id: string, isDelivered: DeliveredPredicate): { listing_price: number[]; total_with_mandatory_fees: number[] } {

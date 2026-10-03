@@ -124,12 +124,12 @@ test("bundles from every run class validate: PASS, VIOLATION, UNASSESSABLE, HARN
 
 test("unsupported versions fail without being validated against the current schema", async () => {
   const b = await bundle("reference");
-  for (const v of ["auto-manifest-0.2.0", "auto-manifest-9.9.9", undefined, 1]) {
+  for (const v of ["auto-manifest-0.1.0", "auto-manifest-9.9.9", undefined, 1]) {
     const r = validateAutomotiveManifest({ ...b.manifest, manifest_version: v });
     assert.equal(r.ok, false);
     assert.match(r.errors[0], /unsupported manifest_version/);
   }
-  for (const v of ["auto-report-0.2.0", "0.4.0", null]) {
+  for (const v of ["auto-report-0.1.0", "0.4.0", null]) {
     const r = validateAutomotiveReport({ ...b.report, report_schema_version: v });
     assert.equal(r.ok, false);
     assert.match(r.errors[0], /unsupported report_schema_version/);

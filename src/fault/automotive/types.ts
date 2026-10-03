@@ -1,5 +1,5 @@
 /**
- * Automotive fault-sensitivity contracts (auto-faults-0.1.0, auto-fault-report-0.1.0).
+ * Automotive fault-sensitivity contracts (auto-faults-0.2.0, auto-fault-report-0.2.0).
  *
  * A fault is a deliberately planted synthetic SUT behaviour, not a source mutant. The
  * gate reports counts and a boolean only: no score, rate, percentage or severity.
@@ -19,7 +19,8 @@ export interface AutomotiveFaultDefinition {
   domain: ExecutableAutomotiveDomain;
   description: string;
   target_behavior: string;
-  expected_field: ProbeField;
+  /** The witness finding's field; null for recommendation_integrity, whose checks carry no field. */
+  expected_field: ProbeField | null;
   /** All must be carried by one witness VIOLATION finding; extra diagnostic reasons are allowed. */
   expected_reasons: AutomotiveViolationReason[];
   /** Smoke variant names of the declared domain. */
@@ -37,7 +38,7 @@ export interface AutomotiveFaultResult {
   fault_id: string;
   domain: ExecutableAutomotiveDomain;
   description: string;
-  expected_field: ProbeField;
+  expected_field: ProbeField | null;
   expected_reasons: AutomotiveViolationReason[];
   witness_variants: string[];
   status: AutomotiveFaultStatus;

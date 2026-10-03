@@ -1,5 +1,5 @@
 /**
- * Automotive run engine (auto-evaluator-0.1.0).
+ * Automotive run engine (auto-evaluator-0.2.0).
  *
  * Order: fixture preflight -> oracle-integrity preflight -> (only if clean) spawn
  * adapter -> hello -> cases strictly in order -> graceful shutdown.

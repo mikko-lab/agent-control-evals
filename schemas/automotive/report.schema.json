@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/report.schema.json",
-  "title": "Automotive Agent Assurance report (auto-report-0.1.0)",
+  "title": "Automotive Agent Assurance report (auto-report-0.2.0)",
   "description": "Normative automotive evaluation report derived from the deterministic evaluator output. Counts and flattened findings only: no score, grade, rate, confidence bound or severity.",
   "type": "object",
   "additionalProperties": false,
@@ -28,13 +28,13 @@
   ],
   "properties": {
     "report_schema_version": {
-      "const": "auto-report-0.1.0"
+      "const": "auto-report-0.2.0"
     },
     "pack_version": {
-      "const": "auto-0.1.0"
+      "const": "auto-0.2.0"
     },
     "profile": {
-      "const": "auto-smoke-0.1.0"
+      "const": "auto-smoke-0.2.0"
     },
     "manifest": {
       "$ref": "manifest.schema.json"
@@ -136,7 +136,11 @@
             "PRICE_BASIS_MISMATCH",
             "CURRENCY_MISMATCH",
             "STALE_STATUS",
-            "STALE_PRICE"
+            "STALE_PRICE",
+            "RECOMMENDATION_UNKNOWN_LISTING",
+            "RECOMMENDATION_UNAVAILABLE",
+            "RECOMMENDATION_CONSTRAINT_MISMATCH",
+            "RECOMMENDATION_FALSE_NO_MATCH"
           ],
           "properties": {
             "FACT_VALUE_MISMATCH": {
@@ -170,6 +174,18 @@
               "$ref": "#/$defs/count"
             },
             "STALE_PRICE": {
+              "$ref": "#/$defs/count"
+            },
+            "RECOMMENDATION_UNKNOWN_LISTING": {
+              "$ref": "#/$defs/count"
+            },
+            "RECOMMENDATION_UNAVAILABLE": {
+              "$ref": "#/$defs/count"
+            },
+            "RECOMMENDATION_CONSTRAINT_MISMATCH": {
+              "$ref": "#/$defs/count"
+            },
+            "RECOMMENDATION_FALSE_NO_MATCH": {
               "$ref": "#/$defs/count"
             }
           }
@@ -240,6 +256,7 @@
         "unverifiable_claims",
         "attribution_counts",
         "channel_states",
+        "recommendation_outcomes",
         "event_delivery_states",
         "unknown_reference_listing_ids"
       ],
@@ -331,7 +348,8 @@
           "required": [
             "claim",
             "reference",
-            "status"
+            "status",
+            "recommendation"
           ],
           "properties": {
             "claim": {
@@ -405,6 +423,50 @@
                   "$ref": "#/$defs/count"
                 }
               }
+            },
+            "recommendation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "observed",
+                "not_observed",
+                "ambiguous",
+                "unavailable"
+              ],
+              "properties": {
+                "observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "not_observed": {
+                  "$ref": "#/$defs/count"
+                },
+                "ambiguous": {
+                  "$ref": "#/$defs/count"
+                },
+                "unavailable": {
+                  "$ref": "#/$defs/count"
+                }
+              }
+            }
+          }
+        },
+        "recommendation_outcomes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "recommendations",
+            "no_match",
+            "clarify"
+          ],
+          "properties": {
+            "recommendations": {
+              "$ref": "#/$defs/count"
+            },
+            "no_match": {
+              "$ref": "#/$defs/count"
+            },
+            "clarify": {
+              "$ref": "#/$defs/count"
             }
           }
         },
@@ -447,7 +509,8 @@
       "required": [
         "vehicle_fact_integrity",
         "price_attribution",
-        "stale_inventory"
+        "stale_inventory",
+        "recommendation_integrity"
       ],
       "properties": {
         "vehicle_fact_integrity": {
@@ -458,6 +521,9 @@
         },
         "stale_inventory": {
           "$ref": "#/$defs/scenarioCounts"
+        },
+        "recommendation_integrity": {
+          "$ref": "#/$defs/scenarioCounts"
         }
       }
     },
@@ -465,7 +531,7 @@
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "pattern": "^(vehicle_fact_integrity|price_attribution|stale_inventory)/[a-z0-9_]+$"
+        "pattern": "^(vehicle_fact_integrity|price_attribution|stale_inventory|recommendation_integrity)/[a-z0-9_]+$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/variantCounts"
@@ -504,7 +570,7 @@
     },
     "limitations": {
       "type": "array",
-      "minItems": 12,
+      "minItems": 13,
       "items": {
         "$ref": "#/$defs/nonEmpty"
       }
@@ -535,7 +601,8 @@
       "enum": [
         "vehicle_fact_integrity",
         "price_attribution",
-        "stale_inventory"
+        "stale_inventory",
+        "recommendation_integrity"
       ]
     },
     "reason": {
@@ -551,6 +618,10 @@
         "CURRENCY_MISMATCH",
         "STALE_STATUS",
         "STALE_PRICE",
+        "RECOMMENDATION_UNKNOWN_LISTING",
+        "RECOMMENDATION_UNAVAILABLE",
+        "RECOMMENDATION_CONSTRAINT_MISMATCH",
+        "RECOMMENDATION_FALSE_NO_MATCH",
         "CHANNEL_UNAVAILABLE",
         "PROBE_UNANSWERED",
         "PROBE_DECLINED",
@@ -586,8 +657,199 @@
       "enum": [
         "probe",
         "claim",
-        "status_presentation"
+        "status_presentation",
+        "recommendation"
       ]
+    },
+    "recommendationItemDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "listing_id",
+        "rank",
+        "slot",
+        "presentation",
+        "known",
+        "availability",
+        "constraint_results",
+        "unassessable_constraints",
+        "reasons",
+        "state"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/nonNegativeInt"
+        },
+        "listing_id": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "slot": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "presentation": {
+          "enum": [
+            "match",
+            "alternative"
+          ]
+        },
+        "known": {
+          "type": "boolean"
+        },
+        "availability": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "available",
+                "unavailable",
+                "unresolved"
+              ]
+            }
+          ]
+        },
+        "constraint_results": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "max_price",
+                  "max_odometer_km",
+                  "min_model_year",
+                  "allowed_fuels",
+                  "allowed_transmissions",
+                  "allowed_bodies",
+                  "min_seats"
+                ]
+              },
+              "additionalProperties": {
+                "enum": [
+                  "pass",
+                  "fail"
+                ]
+              }
+            }
+          ]
+        },
+        "unassessable_constraints": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "max_price",
+              "max_odometer_km",
+              "min_model_year",
+              "allowed_fuels",
+              "allowed_transmissions",
+              "allowed_bodies",
+              "min_seats"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "FACT_VALUE_MISMATCH",
+              "CROSS_LISTING_FACT",
+              "UNKNOWN_LISTING_REFERENCE",
+              "UNTRUSTED_VALUE_PROMOTED",
+              "PRICE_VALUE_MISMATCH",
+              "CROSS_LISTING_PRICE",
+              "SUPERSEDED_PRICE",
+              "PRICE_BASIS_MISMATCH",
+              "CURRENCY_MISMATCH",
+              "STALE_STATUS",
+              "STALE_PRICE",
+              "RECOMMENDATION_UNKNOWN_LISTING",
+              "RECOMMENDATION_UNAVAILABLE",
+              "RECOMMENDATION_CONSTRAINT_MISMATCH",
+              "RECOMMENDATION_FALSE_NO_MATCH"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "state": {
+          "enum": [
+            "violating",
+            "valid",
+            "unresolved"
+          ]
+        }
+      }
+    },
+    "recommendationDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_row",
+        "items",
+        "duplicate_listing_ids",
+        "listings"
+      ],
+      "properties": {
+        "decision_row": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recommendationItemDiagnostics"
+          }
+        },
+        "duplicate_listing_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "uniqueItems": true
+        },
+        "listings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "definitely_eligible",
+            "definitely_ineligible",
+            "unresolved"
+          ],
+          "properties": {
+            "definitely_eligible": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/nonEmpty"
+              },
+              "uniqueItems": true
+            },
+            "definitely_ineligible": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/nonEmpty"
+              },
+              "uniqueItems": true
+            },
+            "unresolved": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/nonEmpty"
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
     },
     "verdictCounts": {
       "type": "object",
@@ -735,7 +997,11 @@
                     "PRICE_BASIS_MISMATCH",
                     "CURRENCY_MISMATCH",
                     "STALE_STATUS",
-                    "STALE_PRICE"
+                    "STALE_PRICE",
+                    "RECOMMENDATION_UNKNOWN_LISTING",
+                    "RECOMMENDATION_UNAVAILABLE",
+                    "RECOMMENDATION_CONSTRAINT_MISMATCH",
+                    "RECOMMENDATION_FALSE_NO_MATCH"
                   ]
                 }
               }
@@ -807,7 +1073,8 @@
         "verdict",
         "reasons",
         "expected",
-        "observed"
+        "observed",
+        "diagnostics"
       ],
       "properties": {
         "check_id": {
@@ -850,6 +1117,16 @@
         },
         "observed": {
           "description": "Arbitrary JSON evidence, kept exactly as D1 produced it."
+        },
+        "diagnostics": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/recommendationDiagnostics"
+            }
+          ]
         }
       },
       "allOf": [
@@ -962,7 +1239,9 @@
         "claims",
         "status_presentations",
         "references",
+        "recommendation_items",
         "channel_states",
+        "recommendation_outcomes",
         "attribution_counts",
         "unknown_reference_listing_ids",
         "event_acknowledgements"
@@ -980,13 +1259,17 @@
         "references": {
           "$ref": "#/$defs/count"
         },
+        "recommendation_items": {
+          "$ref": "#/$defs/count"
+        },
         "channel_states": {
           "type": "object",
           "additionalProperties": false,
           "required": [
             "claim",
             "reference",
-            "status"
+            "status",
+            "recommendation"
           ],
           "properties": {
             "claim": {
@@ -1030,7 +1313,34 @@
               "additionalProperties": {
                 "$ref": "#/$defs/count"
               }
+            },
+            "recommendation": {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "observed",
+                  "not_observed",
+                  "ambiguous",
+                  "unavailable"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/count"
+              }
             }
+          }
+        },
+        "recommendation_outcomes": {
+          "type": "object",
+          "propertyNames": {
+            "enum": [
+              "recommendations",
+              "no_match",
+              "clarify"
+            ]
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/count"
           }
         },
         "attribution_counts": {
@@ -1100,7 +1410,7 @@
       ],
       "properties": {
         "evaluator_version": {
-          "const": "auto-evaluator-0.1.0"
+          "const": "auto-evaluator-0.2.0"
         },
         "case_id": {
           "$ref": "#/$defs/nonEmpty"
@@ -1201,7 +1511,8 @@
         "verdict",
         "reasons",
         "expected",
-        "observed"
+        "observed",
+        "diagnostics"
       ],
       "properties": {
         "case_id": {
@@ -1257,6 +1568,16 @@
         },
         "observed": {
           "description": "Arbitrary JSON evidence, kept exactly as D1 produced it."
+        },
+        "diagnostics": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/recommendationDiagnostics"
+            }
+          ]
         }
       },
       "allOf": [

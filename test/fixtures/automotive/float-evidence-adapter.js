@@ -1,4 +1,4 @@
-// Synthetic automotive adapter fixture for evidence-serialisation tests (auto-adapter-0.1.0).
+// Synthetic automotive adapter fixture for evidence-serialisation tests (auto-adapter-0.2.0).
 // Observations come from the compiled in-repo reference agent; every case result carries
 // raw_sut_evidence with finite floats, which the protocol allows as arbitrary JSON. It declares
 // its own identity, so it is not the reference agent. No network, no filesystem writes.
@@ -7,7 +7,7 @@ const readline = require("node:readline");
 const path = require("node:path");
 const { referenceObservations } = require(path.join(__dirname, "..", "..", "..", "dist", "src", "adapter", "automotive-reference", "agent.js"));
 
-const VERSION = "auto-adapter-0.1.0";
+const VERSION = "auto-adapter-0.2.0";
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 let n = 0;

@@ -1,5 +1,5 @@
 /**
- * Automotive run manifest (auto-manifest-0.1.0): reproducibility and identity.
+ * Automotive run manifest (auto-manifest-0.2.0): reproducibility and identity.
  *
  * Every version is taken from the version constants, every count from the corpus
  * entries, every hash from the exact bytes. Adapter and SUT identity come only from

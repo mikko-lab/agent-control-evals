@@ -35,20 +35,20 @@ const buildError = (fn: () => unknown, re: RegExp, what: string) => assert.throw
 
 // ------------------------------------------------------------ reference bundle
 
-test("reference run: an 18/18 PASS bundle with complete counts, no findings and the D1 evaluations unchanged", async () => {
+test("reference run: a 24/24 PASS bundle with complete counts, no findings and the D1 evaluations unchanged", async () => {
   const run = await runOf("reference");
   const b = bundleOf(run);
   const r = b.report;
   assert.deepEqual([r.run_valid, r.complete_execution, r.all_required_assessed], [true, true, true]);
   assert.deepEqual(r.scenario_summary, {
-    planned_scenarios: 18,
-    evaluated_scenarios: 18,
+    planned_scenarios: 24,
+    evaluated_scenarios: 24,
     not_run_scenarios: 0,
-    verdict_counts: { PASS: 18, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 },
-    assessed_scenarios: 18,
+    verdict_counts: { PASS: 24, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 },
+    assessed_scenarios: 24,
     violation_count: 0,
   });
-  assert.deepEqual(r.check_summary.required, { total: 32, PASS: 32, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0, assessed: 32 });
+  assert.deepEqual(r.check_summary.required, { total: 39, PASS: 39, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0, assessed: 39 });
   assert.equal(r.check_summary.optional.total, r.check_summary.optional.PASS);
   assert.ok(r.check_summary.optional.total > 100);
   assert.equal(r.check_summary.optional.VIOLATION, 0);
@@ -59,11 +59,11 @@ test("reference run: an 18/18 PASS bundle with complete counts, no findings and 
   assert.equal(canonicalJson(r.case_evaluations), canonicalJson(run.case_evaluations), "D1 evaluations are embedded unchanged");
   assert.deepEqual(r.limitations, [...AUTOMOTIVE_REPORT_LIMITATIONS]);
   const m = b.manifest;
-  assert.deepEqual(m.adapter, { name: "automotive-reference-adapter", version: "auto-reference-agent-0.1.0", protocol_version: "auto-adapter-0.1.0", identity_source: "adapter_hello_self_declared" });
-  assert.deepEqual(m.sut, { name: "automotive-reference-agent", version: "auto-reference-agent-0.1.0", revision: null, identity_source: "adapter_hello_self_declared" });
-  assert.deepEqual(m.corpus.cases_per_domain, { vehicle_fact_integrity: 6, price_attribution: 6, stale_inventory: 6 });
-  assert.deepEqual([m.corpus.profile, m.corpus.cases, m.corpus.variants, m.corpus.sha256], ["auto-smoke-0.1.0", 18, 18, "49c50fae1deeb1bd6f5a608ea0d9a2d5ebfd252e8df3ad59dc02b7cceb421a54"]);
-  assert.deepEqual(m.evaluation.case_statuses, { evaluated: 18, harness_error: 0, not_run: 0 });
+  assert.deepEqual(m.adapter, { name: "automotive-reference-adapter", version: "auto-reference-agent-0.2.0", protocol_version: "auto-adapter-0.2.0", identity_source: "adapter_hello_self_declared" });
+  assert.deepEqual(m.sut, { name: "automotive-reference-agent", version: "auto-reference-agent-0.2.0", revision: null, identity_source: "adapter_hello_self_declared" });
+  assert.deepEqual(m.corpus.cases_per_domain, { vehicle_fact_integrity: 6, price_attribution: 6, stale_inventory: 6, recommendation_integrity: 6 });
+  assert.deepEqual([m.corpus.profile, m.corpus.cases, m.corpus.variants, m.corpus.sha256], ["auto-smoke-0.2.0", 24, 24, "beb5b3eccc034d50489c13f39905e3ee94d7ae53d25c8504e54e5d8cd97e0399"]);
+  assert.deepEqual(m.evaluation.case_statuses, { evaluated: 24, harness_error: 0, not_run: 0 });
   assert.deepEqual(m.harness, ID);
 });
 
@@ -98,7 +98,7 @@ test("evidence: one record per corpus case in corpus order; adapter_error keeps 
   const hello = bundleOf(await runOf("wrong_protocol_version"));
   assert.ok(recordsOf(hello).every((r) => r.status === "not_run" && r.adapter_result === null && r.evaluation === null));
   assert.deepEqual([hello.manifest.adapter, hello.manifest.sut], [null, null], "no identity without a successful hello");
-  assert.deepEqual([hello.report.complete_execution, hello.report.all_required_assessed, hello.report.scenario_summary.not_run_scenarios], [false, false, 18]);
+  assert.deepEqual([hello.report.complete_execution, hello.report.all_required_assessed, hello.report.scenario_summary.not_run_scenarios], [false, false, 24]);
 
   const ok = recordsOf(bundleOf(await runOf("reference")));
   assert.ok(ok.every((r) => r.status === "evaluated" && r.adapter_result !== null && r.evaluation !== null));
@@ -132,7 +132,7 @@ test("hashes: same inputs give the same bytes and SHAs; one changed evidence val
   assert.equal(a.summary, b.summary);
   assert.equal(a.manifest.evidence.sha256, sha256Hex(Buffer.from(a.evidenceBytes, "utf8")));
   assert.equal(a.manifest.evidence.bytes, Buffer.byteLength(a.evidenceBytes, "utf8"));
-  assert.equal(a.manifest.evidence.records, 18);
+  assert.equal(a.manifest.evidence.records, 24);
   assert.equal(a.manifest.corpus.sha256, sha256Hex(Buffer.from(corpus.bytes, "utf8")));
 
   const changedEvidence = structuredClone(run);
@@ -221,7 +221,7 @@ test("the automotive JSON serializer: full JSON model, sorted keys, finite numbe
 test("integer-only reference evidence keeps the same bytes as canonical JSON Lines", async () => {
   const b = bundleOf(await runOf("reference"));
   assert.equal(b.evidenceBytes, canonicalJsonLines(recordsOf(b)));
-  assert.equal(b.manifest.evidence.sha256, "c14a39c1d613f4eeb362c98e20ed9570b9e25d7ac0058d6f16e6167785222ea0");
+  assert.equal(b.manifest.evidence.sha256, "d66d48ac1c8b54e2af7144b331ba3708f0dc8ddb6e07dc9d0642d556d36de8ef");
 });
 
 // ------------------------------------------------------------ consistency
@@ -293,24 +293,24 @@ test("a VIOLATION report shows the violation in scenario counts, domain, variant
 
 test("an UNASSESSABLE report is never PASS, never in the assessed denominator, visible in findings, all_required_assessed false", async () => {
   const r = bundleOf(await runOf("silent_claim_channel")).report;
-  assert.deepEqual(r.scenario_summary.verdict_counts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 18, HARNESS_ERROR: 0 });
+  assert.deepEqual(r.scenario_summary.verdict_counts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 24, HARNESS_ERROR: 0 });
   assert.deepEqual([r.scenario_summary.assessed_scenarios, r.check_summary.required.assessed, r.check_summary.required.PASS], [0, 0, 0]);
-  assert.equal(r.check_summary.required.UNASSESSABLE, 32);
+  assert.equal(r.check_summary.required.UNASSESSABLE, 39);
   assert.deepEqual([r.run_valid, r.complete_execution, r.all_required_assessed], [true, true, false]);
-  assert.equal(r.findings.length, 32);
+  assert.equal(r.findings.length, 39);
   assert.ok(r.findings.every((f) => f.verdict === "UNASSESSABLE" && f.reasons[0] === "PROBE_UNANSWERED"));
-  assert.equal(r.reason_counts.UNASSESSABLE.PROBE_UNANSWERED, 32);
-  assert.match(renderAutomotiveSummary(r), /No VIOLATION checks were observed in this evaluated corpus\.\n\n32 non-PASS checks/);
+  assert.equal(r.reason_counts.UNASSESSABLE.PROBE_UNANSWERED, 39);
+  assert.match(renderAutomotiveSummary(r), /No VIOLATION checks were observed in this evaluated corpus\.\n\n39 non-PASS checks/);
 });
 
 test("a HARNESS_ERROR report has run_valid false and never counts a harness failure as a violation", async () => {
   const r = bundleOf(await runOf("adapter_error")).report;
   assert.equal(r.run_valid, false);
-  assert.deepEqual(r.scenario_summary.verdict_counts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 18 });
+  assert.deepEqual(r.scenario_summary.verdict_counts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 24 });
   assert.deepEqual([r.scenario_summary.violation_count, r.scenario_summary.assessed_scenarios], [0, 0]);
   assert.ok(Object.values(r.reason_counts.VIOLATION).every((n) => n === 0));
-  assert.equal(r.reason_counts.HARNESS_ERROR.ADAPTER_ERROR, 32);
-  assert.equal(r.adapter_errors.length, 18);
+  assert.equal(r.reason_counts.HARNESS_ERROR.ADAPTER_ERROR, 39);
+  assert.equal(r.adapter_errors.length, 24);
   assert.ok(r.findings.every((f) => f.verdict === "HARNESS_ERROR"));
 });
 
@@ -334,7 +334,7 @@ test("observation evidence aggregates D1's informational evidence and creates no
 
 test("every report carries the complete limitations set and the summary renders the report's own copy", async () => {
   for (const mode of ["reference", "silent_claim_channel", "adapter_error", "missing_turn"]) assert.deepEqual(bundleOf(await runOf(mode)).report.limitations, [...AUTOMOTIVE_REPORT_LIMITATIONS], mode);
-  assert.equal(AUTOMOTIVE_REPORT_LIMITATIONS.length, 12);
+  assert.equal(AUTOMOTIVE_REPORT_LIMITATIONS.length, 13);
   const r = bundleOf(await runOf("reference")).report;
   const altered: AutomotiveReport = { ...structuredClone(r), limitations: ["Synthetic limitation A.", "Synthetic limitation B."] };
   const s = renderAutomotiveSummary(altered);
@@ -348,11 +348,13 @@ test("every report carries the complete limitations set and the summary renders 
 test("summary: factual headline and sections, notice only for the exact reference identity, identical from the parsed report.json", async () => {
   const b = bundleOf(await runOf("reference"));
   const s = b.summary;
-  assert.ok(s.startsWith("# Automotive Agent Assurance auto-0.1.0\n\n" + REFERENCE_AGENT_NOTICE + "\n\n- Corpus: auto-smoke-0.1.0\n- Planned scenarios: 18\n- Scenario verdicts: PASS 18 | VIOLATION 0 | UNASSESSABLE 0 | HARNESS_ERROR 0\n- Not run: 0\n- Required checks assessed: 32 / 32\n"));
+  assert.ok(s.startsWith("# Automotive Agent Assurance auto-0.2.0\n\n" + REFERENCE_AGENT_NOTICE + "\n\n- Corpus: auto-smoke-0.2.0\n- Planned scenarios: 24\n- Scenario verdicts: PASS 24 | VIOLATION 0 | UNASSESSABLE 0 | HARNESS_ERROR 0\n- Not run: 0\n- Required checks assessed: 39 / 39\n"));
   for (const h of ["Run identity", "Scenario verdicts", "Results by domain", "Results by variant", "Required / optional checks", "Findings", "Unassessable evidence", "Quoted / unverifiable evidence", "Reproducibility", "Limitations"]) assert.ok(s.includes(`\n## ${h}\n`), h);
   assert.match(s, /No VIOLATION checks were observed in this evaluated corpus\./);
   assert.match(s, /self-declared via adapter hello/);
   assert.match(s, /\| stale_inventory \/ noop_price_change \| auto-case-000018 \| PASS \|/);
+  assert.match(s, /\| recommendation_integrity \/ hard_constraint_mismatch \| auto-case-000024 \| PASS \|/);
+  assert.match(s, /- Recommendation outcomes \(turns\): clarify 0 \| no_match 1 \| recommendations 6\n/);
   const beforeLimitations = s.slice(0, s.indexOf("## Limitations"));
   for (const w of [/certif/i, /\bcompliant\b/i, /\bcompliance\b/i, /production-ready/i, /fully assured/i, /\bsafe\b/i, /100%/, /no problems/i]) assert.ok(!w.test(beforeLimitations), String(w));
   assert.equal(renderAutomotiveSummary(JSON.parse(prettyJsonFile(b.report))), s, "renders identically from report.json");
@@ -377,7 +379,9 @@ test("no aggregate score, grade, rate, maturity, assurance level or confidence f
   };
   for (const mode of ["reference", "cross_listing_value", "silent_claim_channel", "adapter_error"]) {
     const b = bundleOf(await runOf(mode));
-    for (const p of [...keys(b.report, "report", []), ...keys(b.manifest, "manifest", [])]) assert.ok(!forbidden.test(p.split(".").pop()!), `${mode}: ${p}`);
+    // The only exception is the SUT's own stated recommendation order (spec 7.4.7): structured evidence, never scored.
+    const statedRank = (p: string) => /\.items\[\d+\]\.rank$/.test(p);
+    for (const p of [...keys(b.report, "report", []), ...keys(b.manifest, "manifest", [])]) assert.ok(statedRank(p) || !forbidden.test(p.split(".").pop()!), `${mode}: ${p}`);
   }
 });
 

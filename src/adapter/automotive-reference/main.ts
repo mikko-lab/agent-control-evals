@@ -1,5 +1,5 @@
 /**
- * Reference agent process: speaks the automotive adapter protocol (auto-adapter-0.1.0)
+ * Reference agent process: speaks the automotive adapter protocol (auto-adapter-0.2.0)
  * over JSON Lines on stdin/stdout, one message at a time. Diagnostics go to stderr.
  *
  *   node dist/src/adapter/automotive-reference/main.js

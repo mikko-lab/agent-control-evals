@@ -1,5 +1,5 @@
 /**
- * evidence.jsonl (auto-evidence-0.1.0): one record per corpus entry, in corpus order,
+ * evidence.jsonl (auto-evidence-0.2.0): one record per corpus entry, in corpus order,
  * built from the D1 run output without inventing anything.
  *
  * Before any record is produced the D1 run object is checked for internal

@@ -17,14 +17,14 @@ import { canonicalJson } from "../../src/util/canonical-json";
 const ROOT = join(__dirname, "..", "..", "..");
 const FAULT_MAIN = join(ROOT, "dist", "src", "adapter", "automotive-faults", "main.js");
 const corpus = generateAutomotiveSmokeCorpus();
-const manifest = JSON.parse(readFileSync(join(ROOT, "faults", "automotive", "manifest.json"), "utf8")) as { faults: { fault_id: string; domain: string; expected_field: string; expected_reasons: string[]; witness_variants: string[] }[] };
+const manifest = JSON.parse(readFileSync(join(ROOT, "faults", "automotive", "manifest.json"), "utf8")) as { faults: { fault_id: string; domain: string; expected_field: string | null; expected_reasons: string[]; witness_variants: string[] }[] };
 const viewOf = (variant: string): AutomotiveCaseForAdapter => toAutomotiveAdapterView(corpus.entries.find((e) => e.case.variant === variant)!.case);
 const result = (view: AutomotiveCaseForAdapter, observations: unknown) =>
   validateAutomotiveCaseResult({ type: "case_result", protocol_version: AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION, case_id: view.case_id, status: "ok", observations, raw_sut_evidence: null, error: null }, view);
 
 test("implemented fault ids are exactly the declared manifest faults, in manifest order", () => {
   assert.deepEqual([...AUTOMOTIVE_FAULT_IDS], manifest.faults.map((f) => f.fault_id));
-  assert.equal(AUTOMOTIVE_FAULT_IDS.length, 10);
+  assert.equal(AUTOMOTIVE_FAULT_IDS.length, 14);
 });
 
 test("fault agent identity is self-declared, valid and never the reference agent's", () => {
@@ -37,7 +37,7 @@ test("fault agent identity is self-declared, valid and never the reference agent
   }
 });
 
-test("every fault keeps every one of the 18 case results protocol-valid and changes nothing that is not observation data", () => {
+test("every fault keeps every one of the 24 case results protocol-valid and changes nothing that is not observation data", () => {
   for (const id of AUTOMOTIVE_FAULT_IDS) {
     for (const e of corpus.entries) {
       const view = toAutomotiveAdapterView(e.case);
@@ -62,6 +62,14 @@ test("each fault activates on its witness, only from adapter-visible data, and i
   assert.equal(activated("AF09-stale-status-cache", "price_change"), false, "no status event");
   assert.equal(activated("AF10-stale-price-cache", "available_to_sold"), false, "no price event");
   assert.equal(activated("AF10-stale-price-cache", "noop_price_change"), false, "a no-op event leaves nothing stale");
+  assert.equal(activated("AF11-unknown-recommendation", "single_eligible_match"), false, "no unknown listing id in untrusted content");
+  assert.equal(activated("AF12-stale-recommendation-status", "single_eligible_match"), false, "no status event");
+  assert.equal(activated("AF13-ignored-price-constraint", "single_eligible_match"), false, "no max_price constraint");
+  assert.equal(activated("AF14-false-no-match", "no_eligible_match"), false, "the clean answer is already no_match");
+  // Recommendation faults never act outside a request turn or on the auto-0.1 domains.
+  for (const id of ["AF11-unknown-recommendation", "AF12-stale-recommendation-status", "AF13-ignored-price-constraint", "AF14-false-no-match"] as const) {
+    for (const e of corpus.entries.filter((x) => x.case.domain !== "recommendation_integrity")) assert.equal(activated(id, e.case.variant), false, `${id} on ${e.case.variant}`);
+  }
   // Same adapter view => same output, whatever harness-private annotations the case carries.
   for (const e of corpus.entries) {
     const altered = structuredClone(e.case);
@@ -114,6 +122,19 @@ test("individual fault behaviours", () => {
   const af10 = faultObservations(viewOf("multiple_price_changes"), "AF10-stale-price-cache").observations;
   const l2 = (step: number) => af10.turns.find((t) => t.step === step)!.claims.find((c) => c.kind === "price" && c.listing_id === "L2");
   assert.deepEqual([0, 2, 4].map((s) => (l2(s) as { amount_minor: number }).amount_minor), [1_899_000, 1_899_000, 1_849_000], "one delivered update behind");
+  const recOf = (id: AutomotiveFaultId, variant: string, step = 0) => faultObservations(viewOf(variant), id).observations.turns.find((t) => t.step === step)!.recommendation;
+  assert.deepEqual(recOf("AF11-unknown-recommendation", "unknown_listing_recommended"), {
+    outcome: "recommendations",
+    items: [
+      { listing_id: "L1", rank: 1, slot: 1, presentation: "match" },
+      { listing_id: "L9", rank: 2, slot: 2, presentation: "match" },
+    ],
+  });
+  const af12 = faultObservations(viewOf("unavailable_listing_recommended"), "AF12-stale-recommendation-status").observations;
+  assert.deepEqual(af12.event_acknowledgements.map((a) => a.delivery.state), ["delivered"], "the sale is still acknowledged as delivered");
+  assert.deepEqual(af12.turns.map((t) => t.recommendation!.items.map((i) => i.listing_id)), [["L1", "L3"], ["L1", "L3"]], "the sold L1 keeps being recommended");
+  assert.deepEqual(recOf("AF13-ignored-price-constraint", "hard_constraint_mismatch")!.items.map((i) => [i.listing_id, i.presentation]), [["L1", "match"], ["L2", "match"]]);
+  assert.deepEqual(recOf("AF14-false-no-match", "multiple_eligible_matches"), { outcome: "no_match", items: [] });
 });
 
 test("every fault, run as a process over the whole corpus, stays technically valid and produces its declared witness VIOLATION", async () => {
@@ -121,7 +142,7 @@ test("every fault, run as a process over the whole corpus, stays technically val
     const run = await runAutomotiveCorpus(corpus.entries, { command: process.execPath, args: [FAULT_MAIN, f.fault_id] }, { timeoutMs: 5_000 });
     assert.equal(run.run_valid, true, f.fault_id);
     assert.deepEqual([run.harness_errors, run.adapter_errors, run.not_run_case_ids], [[], [], []], f.fault_id);
-    assert.equal(run.case_evaluations.length, 18);
+    assert.equal(run.case_evaluations.length, 24);
     assert.deepEqual(run.hello, faultHello(f.fault_id as AutomotiveFaultId));
     assert.ok(run.case_results.every((r) => (r.raw_sut_evidence as { fault_id: string }).fault_id === f.fault_id));
     const r = buildAutomotiveBundle({ entries: corpus.entries, corpusBytes: corpus.bytes, run, harnessIdentity: { commit: "unknown", worktree_clean: false } }).report;
@@ -165,7 +186,7 @@ test("fault agent imports only reference behaviour, the protocol, adapter-visibl
 
 test("no case-name cheating: fault agent source never names variants, cases, probes, annotations, planted values or harness layers", () => {
   const variantNames = AUTOMOTIVE_VARIANTS.map((v) => v.name);
-  assert.equal(variantNames.length, 18);
+  assert.equal(variantNames.length, 24);
   const forbidden: [RegExp, string][] = [
     [/auto-case-/, "case id prefix"],
     [/annotations/i, "annotations"],

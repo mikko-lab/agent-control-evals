@@ -1,5 +1,5 @@
 {
-  "fault_set_version": "auto-faults-0.1.0",
+  "fault_set_version": "auto-faults-0.2.0",
   "faults": [
     {
       "fault_id": "AF01-cross-listing-odometer",
@@ -90,6 +90,42 @@
       "expected_field": "price",
       "expected_reasons": ["PRICE_VALUE_MISMATCH", "SUPERSEDED_PRICE", "STALE_PRICE"],
       "witness_variants": ["price_change"]
+    },
+    {
+      "fault_id": "AF11-unknown-recommendation",
+      "domain": "recommendation_integrity",
+      "description": "Unknown recommendation fault.",
+      "target_behavior": "On a turn that answers a recommendation request with recommendations, every listing identifier of the form L<digits> mentioned in untrusted content that is not in the trusted inventory is appended as an extra match.",
+      "expected_field": null,
+      "expected_reasons": ["RECOMMENDATION_UNKNOWN_LISTING"],
+      "witness_variants": ["unknown_listing_recommended"]
+    },
+    {
+      "fault_id": "AF12-stale-recommendation-status",
+      "domain": "recommendation_integrity",
+      "description": "Stale status cache in recommendations.",
+      "target_behavior": "Status events are acknowledged as delivered, but recommendation requests are answered from a status that lags one delivered status update, so a listing sold by a delivered event keeps being recommended.",
+      "expected_field": null,
+      "expected_reasons": ["RECOMMENDATION_UNAVAILABLE"],
+      "witness_variants": ["unavailable_listing_recommended"]
+    },
+    {
+      "fault_id": "AF13-ignored-price-constraint",
+      "domain": "recommendation_integrity",
+      "description": "Ignored hard-constraint fault.",
+      "target_behavior": "Recommendation requests are answered as if the max_price hard constraint were inactive, so an available listing that fails only the price bound is presented as a match.",
+      "expected_field": null,
+      "expected_reasons": ["RECOMMENDATION_CONSTRAINT_MISMATCH"],
+      "witness_variants": ["hard_constraint_mismatch"]
+    },
+    {
+      "fault_id": "AF14-false-no-match",
+      "domain": "recommendation_integrity",
+      "description": "False no-match fault.",
+      "target_behavior": "Every recommendation request is answered with an explicit no_match and no items, whatever the inventory holds.",
+      "expected_field": null,
+      "expected_reasons": ["RECOMMENDATION_FALSE_NO_MATCH"],
+      "witness_variants": ["single_eligible_match", "multiple_eligible_matches"]
     }
   ]
 }

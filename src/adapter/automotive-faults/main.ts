@@ -1,5 +1,5 @@
 /**
- * Synthetic fault agent process: speaks auto-adapter-0.1.0 over JSON Lines on stdin/stdout,
+ * Synthetic fault agent process: speaks auto-adapter-0.2.0 over JSON Lines on stdin/stdout,
  * with exactly one active behaviour fault chosen on the command line.
  *
  *   node dist/src/adapter/automotive-faults/main.js <fault_id>

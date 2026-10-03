@@ -143,7 +143,7 @@ test("malformed JSON, wrong protocol version, timeout and premature exit fail cl
   await bad.shutdown();
 
   const version = client("wrong_protocol_version");
-  await rejectsWith(version.helloHandshake(), AutomotiveProtocolError, /protocol_version "auto-adapter-9.9.9" != auto-adapter-0.1.0/, "hello version mismatch");
+  await rejectsWith(version.helloHandshake(), AutomotiveProtocolError, /protocol_version "auto-adapter-9.9.9" != auto-adapter-0.2.0/, "hello version mismatch");
   await rejectsWith(version.runCase(fact), AutomotiveClientError, /handshake required/, "no cases after a failed handshake");
   await version.shutdown();
 

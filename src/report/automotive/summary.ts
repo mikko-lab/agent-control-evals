@@ -117,7 +117,7 @@ export function renderAutomotiveSummary(r: AutomotiveReport): string {
     `| required | ${req.total} | ${req.PASS} | ${req.VIOLATION} | ${req.UNASSESSABLE} | ${req.HARNESS_ERROR} | ${req.assessed} |`,
     `| optional | ${opt.total} | ${opt.PASS} | ${opt.VIOLATION} | n/a | n/a | n/a |`,
     "",
-    "Required checks are the declared probes. Optional checks are additional exact observed items and are only ever PASS or VIOLATION.",
+    "Required checks are the declared probes and recommendation requests. Optional checks are additional exact observed items and are only ever PASS or VIOLATION.",
     "",
   );
 
@@ -135,6 +135,22 @@ export function renderAutomotiveSummary(r: AutomotiveReport): string {
         `  - expected: ${json(f.expected)}`,
         `  - observed: ${json(f.observed)}`,
       );
+      if (f.diagnostics !== null) {
+        push(`  - decision row: ${f.diagnostics.decision_row}`);
+        for (const it of f.diagnostics.items) {
+          const results = it.constraint_results;
+          const constraints =
+            results === null
+              ? "unknown listing"
+              : Object.keys(results)
+                  .sort()
+                  .map((k) => `${k} ${results[k as keyof typeof results] === "pass" ? "passed" : "failed"}`)
+                  .join(", ") || "no active constraint";
+          const unassessable = it.unassessable_constraints.length > 0 ? `; not assessable: ${it.unassessable_constraints.join(", ")}` : "";
+          push(`  - item ${it.index}: ${it.listing_id} ${it.presentation}, rank ${it.rank}, slot ${it.slot}, ${it.state}${it.reasons.length > 0 ? ` (${it.reasons.join(", ")})` : ""}; ${constraints}${unassessable}`);
+        }
+        if (f.diagnostics.duplicate_listing_ids.length > 0) push(`  - duplicate listing ids: ${f.diagnostics.duplicate_listing_ids.join(", ")}`);
+      }
     }
     push("");
   }
@@ -174,6 +190,8 @@ export function renderAutomotiveSummary(r: AutomotiveReport): string {
     `- Claim channel (turns): ${countList(o.channel_states.claim)}`,
     `- Reference channel (turns): ${countList(o.channel_states.reference)}`,
     `- Status channel (turns): ${countList(o.channel_states.status)}`,
+    `- Recommendation channel (turns): ${countList(o.channel_states.recommendation)}`,
+    `- Recommendation outcomes (turns): ${countList(o.recommendation_outcomes)}`,
     `- Event delivery acknowledgements: ${countList(o.event_delivery_states)}`,
     `- Unknown listing ids in references: ${o.unknown_reference_listing_ids.length === 0 ? "none" : o.unknown_reference_listing_ids.join(", ")}`,
     "",

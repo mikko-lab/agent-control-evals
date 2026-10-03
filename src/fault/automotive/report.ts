@@ -1,5 +1,5 @@
 /**
- * Fault judge and fault-sensitivity report builder (auto-fault-report-0.1.0). Pure: it receives
+ * Fault judge and fault-sensitivity report builder (auto-fault-report-0.2.0). Pure: it receives
  * the validated fault set, the baseline D2 report, one run outcome per fault and the harness
  * identity. It runs no SUT and reads no Git, filesystem or clock.
  *
@@ -34,7 +34,7 @@ const showHarness = (h: AutomotiveHarnessIdentity) => `${h.commit} (worktree cle
 
 /**
  * Problems that make a baseline unusable for the gate (empty = usable): it must be the exact merged reference
- * agent, by its hello identity, and a clean full PASS. A clean 18/18 PASS from any other adapter is not a baseline.
+ * agent, by its hello identity, and a clean full PASS. A clean full PASS from any other adapter is not a baseline.
  */
 export function automotiveBaselineProblems(r: AutomotiveReport): string[] {
   const p: string[] = [];

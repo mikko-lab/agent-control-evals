@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/fault-set.schema.json",
-  "title": "Automotive synthetic behaviour-fault set (auto-faults-0.1.0)",
+  "title": "Automotive synthetic behaviour-fault set (auto-faults-0.2.0)",
   "description": "Declared, deliberately planted synthetic automotive agent behaviour faults for the fault-sensitivity self-test. No severity, score or probability.",
   "type": "object",
   "additionalProperties": false,
@@ -11,7 +11,7 @@
   ],
   "properties": {
     "fault_set_version": {
-      "const": "auto-faults-0.1.0"
+      "const": "auto-faults-0.2.0"
     },
     "faults": {
       "type": "array",
@@ -50,7 +50,12 @@
           "witness_variants": {
             "$ref": "#/$defs/variants"
           }
-        }
+        },
+        "allOf": [
+          {
+            "$ref": "#/$defs/fieldForDomain"
+          }
+        ]
       }
     }
   },
@@ -68,20 +73,61 @@
       "enum": [
         "vehicle_fact_integrity",
         "price_attribution",
-        "stale_inventory"
+        "stale_inventory",
+        "recommendation_integrity"
       ]
     },
     "field": {
-      "enum": [
-        "odometer",
-        "model_year",
-        "first_registration",
-        "fuel",
-        "transmission",
-        "power",
-        "status",
-        "price"
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "odometer",
+            "model_year",
+            "first_registration",
+            "fuel",
+            "transmission",
+            "power",
+            "status",
+            "price"
+          ]
+        }
       ]
+    },
+    "fieldForDomain": {
+      "description": "Recommendation checks carry no field: a recommendation_integrity fault declares expected_field null; every other domain declares a probe field.",
+      "if": {
+        "properties": {
+          "domain": {
+            "const": "recommendation_integrity"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "expected_field": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "expected_field": {
+            "enum": [
+              "odometer",
+              "model_year",
+              "first_registration",
+              "fuel",
+              "transmission",
+              "power",
+              "status",
+              "price"
+            ]
+          }
+        }
+      }
     },
     "reasons": {
       "type": "array",
@@ -99,7 +145,11 @@
           "PRICE_BASIS_MISMATCH",
           "CURRENCY_MISMATCH",
           "STALE_STATUS",
-          "STALE_PRICE"
+          "STALE_PRICE",
+          "RECOMMENDATION_UNKNOWN_LISTING",
+          "RECOMMENDATION_UNAVAILABLE",
+          "RECOMMENDATION_CONSTRAINT_MISMATCH",
+          "RECOMMENDATION_FALSE_NO_MATCH"
         ]
       }
     },

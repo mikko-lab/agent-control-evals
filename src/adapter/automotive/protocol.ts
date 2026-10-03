@@ -1,5 +1,5 @@
 /**
- * Automotive adapter protocol (auto-adapter-0.1.0): process boundary, JSON Lines
+ * Automotive adapter protocol (auto-adapter-0.2.0): process boundary, JSON Lines
  * over stdin/stdout. Types and strict structural validation only.
  *
  * The adapter reports what the SUT presented, as structured observations. It does
@@ -8,7 +8,13 @@
  * never a protocol error. Protocol errors are reserved for malformed records:
  * wrong versions or ids, missing or duplicate step records, event
  * acknowledgements bound to a different event, impossible channel states,
- * malformed units, attributions or vocabularies, and non-integer numbers.
+ * malformed units, attributions or vocabularies, non-integer numbers, and
+ * recommendation channel/outcome/item combinations that spec 7.4.7 forbids.
+ * A structurally valid but wrong or odd recommendation (unknown listing,
+ * duplicates, repeated or gapped ranks and slots) is evidence, never an error.
+ *
+ * auto-adapter-0.2.0 keeps every auto-adapter-0.1.0 observation semantic and adds
+ * the dedicated per-turn recommendation observation (spec 7.4.7).
  *
  * Independent of the JSON Schema (schemas/automotive/adapter-protocol.schema.json):
  * this module validates everything the schema validates, plus the bindings to the
@@ -37,7 +43,7 @@ export class AutomotiveProtocolError extends Error {
 
 /** Channel observation states (semantics shared with, but not typed as, the ACS adapter's). */
 export const AUTOMOTIVE_OBSERVATION_STATES = ["observed", "not_observed", "ambiguous", "unavailable"] as const;
-/** Where a channel's observations come from. Free-text extraction is not a source in auto-0.1.0. */
+/** Where a channel's observations come from. Free-text extraction is not a source. */
 export const AUTOMOTIVE_OBSERVATION_SOURCES = ["sut_structured_output", "adapter_structured_mapping", "none"] as const;
 export const CLAIM_ATTRIBUTION_KINDS = ["trusted_fact", "quoted_untrusted", "approximate", "unknown"] as const;
 /**
@@ -50,7 +56,12 @@ export const OBSERVED_PRICE_BASES = ["listing_price", "total_with_mandatory_fees
 export const PRICE_TEMPORAL_QUALIFIERS = ["current", "previous", "offer", "unknown"] as const;
 /** Observed status vocabulary. `unavailable` and `unknown` are presentations, not trusted inventory states. */
 export const OBSERVED_STATUSES = ["available", "reserved", "sold", "unavailable", "unknown"] as const;
+/** Informational, backward-compatible references. Never normative recommendation evidence (spec 7.4.7). */
 export const REFERENCE_KINDS = ["mentioned", "recommended"] as const;
+/** Recommendation outcome of an observed recommendation channel (spec 7.4.7). */
+export const RECOMMENDATION_OUTCOMES = ["recommendations", "no_match", "clarify"] as const;
+/** How a recommendation item is presented: as a constraint-satisfying match or explicitly as an alternative. */
+export const RECOMMENDATION_PRESENTATIONS = ["match", "alternative"] as const;
 export const UNVERIFIABLE_CLASSIFICATIONS = ["qualitative", "approximate", "range", "outside_contract"] as const;
 export const EVENT_DELIVERY_STATES = ["delivered", "not_delivered", "ambiguous", "unavailable"] as const;
 export const EVENT_DELIVERY_SOURCES = ["push_ack", "pull_data_source_updated", "none"] as const;
@@ -64,6 +75,8 @@ export type ObservedPriceBasis = (typeof OBSERVED_PRICE_BASES)[number];
 export type PriceTemporalQualifier = (typeof PRICE_TEMPORAL_QUALIFIERS)[number];
 export type ObservedStatus = (typeof OBSERVED_STATUSES)[number];
 export type ReferenceKind = (typeof REFERENCE_KINDS)[number];
+export type RecommendationOutcome = (typeof RECOMMENDATION_OUTCOMES)[number];
+export type RecommendationPresentation = (typeof RECOMMENDATION_PRESENTATIONS)[number];
 export type UnverifiableClassification = (typeof UNVERIFIABLE_CLASSIFICATIONS)[number];
 export type EventDeliveryState = (typeof EVENT_DELIVERY_STATES)[number];
 export type EventDeliverySource = (typeof EVENT_DELIVERY_SOURCES)[number];
@@ -136,6 +149,23 @@ export interface AutomotiveStatusPresentation {
   status: ObservedStatus;
 }
 
+/**
+ * One structured recommendation item. `rank` is the SUT's stated order and `slot` the presentation position,
+ * both 1-based; neither is scored and they are never conflated. Duplicates and gaps are evidence, not errors.
+ */
+export interface AutomotiveRecommendationItem {
+  listing_id: string;
+  rank: number;
+  slot: number;
+  presentation: RecommendationPresentation;
+}
+
+/** recommendations: at least one item; no_match and clarify: zero items (spec 7.4.7). */
+export interface AutomotiveRecommendationObservation {
+  outcome: RecommendationOutcome;
+  items: AutomotiveRecommendationItem[];
+}
+
 /** Exactly one per user_message step, including silent turns. */
 export interface AutomotiveTurnObservation {
   step: number;
@@ -146,6 +176,9 @@ export interface AutomotiveTurnObservation {
   references: AutomotiveObservedReference[];
   status_channel: AutomotiveChannelObservation;
   status_presentations: AutomotiveStatusPresentation[];
+  /** The dedicated recommendation channel. Only `observed` carries a recommendation. */
+  recommendation_channel: AutomotiveChannelObservation;
+  recommendation: AutomotiveRecommendationObservation | null;
 }
 
 /** Exactly one per inventory_event step, bound to that event's listing and change. */
@@ -313,8 +346,38 @@ function consistent(ch: AutomotiveChannelObservation, items: number, where: stri
   if (items === 0 && ch.state === "observed") fail(where, "an observed channel must record at least one item (use not_observed for silence)");
 }
 
+function positive(x: unknown, where: string): number {
+  if (!Number.isSafeInteger(x) || (x as number) < 1) fail(where, `must be a positive integer, got ${JSON.stringify(x)}`);
+  return x as number;
+}
+
+/** Channel/outcome/item consistency of spec 7.4.7. Item content (known listing, duplicates, rank gaps) is evidence. */
+function recommendation(ch: AutomotiveChannelObservation, x: unknown, where: string): void {
+  if (ch.state !== "observed") {
+    if (x !== null) fail(where, `a ${ch.state} recommendation channel must carry recommendation: null`);
+    return;
+  }
+  if (x === null) fail(where, "an observed recommendation channel must carry exactly one outcome");
+  const o = obj(x, ["outcome", "items"], where);
+  const outcome = oneOf(RECOMMENDATION_OUTCOMES, o.outcome, `${where}.outcome`);
+  const items = arr(o.items, `${where}.items`);
+  items.forEach((it, i) => {
+    const io = obj(it, ["listing_id", "rank", "slot", "presentation"], `${where}.items[${i}]`);
+    nonEmpty(io.listing_id, `${where}.items[${i}].listing_id`);
+    positive(io.rank, `${where}.items[${i}].rank`);
+    positive(io.slot, `${where}.items[${i}].slot`);
+    oneOf(RECOMMENDATION_PRESENTATIONS, io.presentation, `${where}.items[${i}].presentation`);
+  });
+  if (outcome === "recommendations" && items.length === 0) fail(where, "outcome recommendations requires at least one item");
+  if (outcome !== "recommendations" && items.length > 0) fail(where, `outcome ${outcome} must carry zero items`);
+}
+
 function turn(x: unknown, where: string): AutomotiveTurnObservation {
-  const o = obj(x, ["step", "claim_channel", "claims", "unverifiable_claims", "reference_channel", "references", "status_channel", "status_presentations"], where);
+  const o = obj(
+    x,
+    ["step", "claim_channel", "claims", "unverifiable_claims", "reference_channel", "references", "status_channel", "status_presentations", "recommendation_channel", "recommendation"],
+    where,
+  );
   count(o.step, `${where}.step`);
   const cc = channel(o.claim_channel, `${where}.claim_channel`);
   const claims = arr(o.claims, `${where}.claims`);
@@ -338,6 +401,8 @@ function turn(x: unknown, where: string): AutomotiveTurnObservation {
     oneOf(OBSERVED_STATUSES, so.status, `${where}.status_presentations[${i}].status`);
   });
   consistent(sc, sps.length, `${where}.status_channel`);
+  const rec = channel(o.recommendation_channel, `${where}.recommendation_channel`);
+  recommendation(rec, o.recommendation, `${where}.recommendation`);
   return o as unknown as AutomotiveTurnObservation;
 }
 

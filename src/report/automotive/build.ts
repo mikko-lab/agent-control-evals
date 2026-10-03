@@ -1,5 +1,5 @@
 /**
- * Pure automotive bundle builder (auto-report-0.1.0).
+ * Pure automotive bundle builder (auto-report-0.2.0).
  *
  *   entries + exact corpus bytes + D1 run output + injected harness identity
  *     -> evidence bytes, manifest, report, summary (all in memory)
@@ -21,7 +21,7 @@ import {
 } from "../../spec/automotive/reason-taxonomy";
 import { AUTOMOTIVE_PACK_VERSION, AUTOMOTIVE_REPORT_SCHEMA_VERSION } from "../../spec/automotive/version";
 import type { AutomotiveCorpusEntry } from "../../corpus/automotive-generation/corpus-entry";
-import { AUTOMOTIVE_OBSERVATION_STATES, CLAIM_ATTRIBUTION_KINDS, EVENT_DELIVERY_STATES, UNVERIFIABLE_CLASSIFICATIONS } from "../../adapter/automotive/protocol";
+import { AUTOMOTIVE_OBSERVATION_STATES, CLAIM_ATTRIBUTION_KINDS, EVENT_DELIVERY_STATES, RECOMMENDATION_OUTCOMES, UNVERIFIABLE_CLASSIFICATIONS } from "../../adapter/automotive/protocol";
 import type { AutomotiveCaseEvaluation, AutomotiveRunOutput } from "../../eval/automotive/types";
 import { buildEvidenceRecords, evidenceBytes } from "./evidence";
 import { AUTOMOTIVE_REPORT_LIMITATIONS } from "./limitations";
@@ -129,6 +129,7 @@ function findings(records: readonly AutomotiveEvidenceRecord[]): AutomotiveRepor
               reasons: [...c.reasons],
               expected: structuredClone(c.expected),
               observed: structuredClone(c.observed),
+              diagnostics: structuredClone(c.diagnostics),
             },
           ],
     ),
@@ -145,7 +146,13 @@ function observationEvidence(evs: readonly AutomotiveCaseEvaluation[]): Automoti
   const byClass: Record<string, number> = zeros(UNVERIFIABLE_CLASSIFICATIONS);
   for (const u of unverifiable) byClass[u.classification] = (byClass[u.classification] ?? 0) + 1;
   const attribution: Record<string, number> = zeros(CLAIM_ATTRIBUTION_KINDS);
-  const channels = { claim: zeros(AUTOMOTIVE_OBSERVATION_STATES) as Record<string, number>, reference: zeros(AUTOMOTIVE_OBSERVATION_STATES) as Record<string, number>, status: zeros(AUTOMOTIVE_OBSERVATION_STATES) as Record<string, number> };
+  const channels = {
+    claim: zeros(AUTOMOTIVE_OBSERVATION_STATES) as Record<string, number>,
+    reference: zeros(AUTOMOTIVE_OBSERVATION_STATES) as Record<string, number>,
+    status: zeros(AUTOMOTIVE_OBSERVATION_STATES) as Record<string, number>,
+    recommendation: zeros(AUTOMOTIVE_OBSERVATION_STATES) as Record<string, number>,
+  };
+  const outcomes: Record<string, number> = zeros(RECOMMENDATION_OUTCOMES);
   const delivery: Record<string, number> = zeros(EVENT_DELIVERY_STATES);
   const unknownIds = new Set<string>();
   for (const e of evs) {
@@ -155,6 +162,8 @@ function observationEvidence(evs: readonly AutomotiveCaseEvaluation[]): Automoti
     addAll(channels.claim, s.channel_states.claim);
     addAll(channels.reference, s.channel_states.reference);
     addAll(channels.status, s.channel_states.status);
+    addAll(channels.recommendation, s.channel_states.recommendation);
+    addAll(outcomes, s.recommendation_outcomes);
     for (const a of s.event_acknowledgements) delivery[a.delivery] = (delivery[a.delivery] ?? 0) + 1;
     for (const id of s.unknown_reference_listing_ids) unknownIds.add(id);
   }
@@ -167,6 +176,7 @@ function observationEvidence(evs: readonly AutomotiveCaseEvaluation[]): Automoti
     unverifiable_claims: { total: unverifiable.length, by_classification: byClass },
     attribution_counts: attribution,
     channel_states: channels,
+    recommendation_outcomes: outcomes,
     event_delivery_states: delivery,
     unknown_reference_listing_ids: [...unknownIds].sort(),
   };

@@ -225,7 +225,7 @@ export async function automotiveMain(argv: readonly string[], root = AUTOMOTIVE_
   switch (p.cmd) {
     case "evaluate": {
       const profile = str("profile") ?? "smoke";
-      if (profile !== "smoke") return usage(`unsupported automotive profile ${JSON.stringify(profile)}; only "smoke" exists in auto-0.1.0`);
+      if (profile !== "smoke") return usage(`unsupported automotive profile ${JSON.stringify(profile)}; only "smoke" exists in auto-0.2.0`);
       const out = str("out");
       if (!out) return usage("--out is required");
       const reference = p.flags.get("reference-agent") === true;
@@ -249,7 +249,7 @@ export async function automotiveMain(argv: readonly string[], root = AUTOMOTIVE_
     }
     case "faults": {
       const profile = str("profile") ?? "smoke";
-      if (profile !== "smoke") return usage(`unsupported automotive profile ${JSON.stringify(profile)}; only "smoke" exists in auto-0.1.0`);
+      if (profile !== "smoke") return usage(`unsupported automotive profile ${JSON.stringify(profile)}; only "smoke" exists in auto-0.2.0`);
       const out = str("out");
       if (!out) return usage("--out is required");
       if (p.flags.has("reference-agent") || p.flags.has("adapter-command") || p.adapterArgs.length > 0 || p.flags.has("timeout-ms")) return usage("faults always uses the in-repo reference baseline and synthetic fault agent; adapter options are not accepted");

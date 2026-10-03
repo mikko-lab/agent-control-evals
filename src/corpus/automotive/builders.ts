@@ -12,6 +12,7 @@
 import { EXECUTABLE_AUTOMOTIVE_DOMAINS, type ExecutableAutomotiveDomain } from "../../spec/automotive/domains";
 import { AUTOMOTIVE_CASE_SCHEMA_VERSION } from "../../spec/automotive/version";
 import { SYNTHETIC_CURRENCY, SYNTHETIC_DEALERS, SYNTHETIC_DEFAULT_QUESTION, SYNTHETIC_DEFAULT_UNTRUSTED_TEXT, SYNTHETIC_LISTINGS } from "./fixtures";
+import { recommendationRequestProblems, renderRecommendationRequest } from "./request";
 import {
   AUTOMOTIVE_CASE_ID_PATTERN,
   AUTOMOTIVE_LABEL_PATTERN,
@@ -32,12 +33,14 @@ import {
   type AutomotiveCase,
   type AutomotiveCaseForAdapter,
   type AutomotiveScenario,
+  type HardConstraints,
   type HarnessAnnotations,
   type InventoryEventStep,
   type InventoryStatus,
   type PlantedValue,
   type Probe,
   type ProbeField,
+  type RecommendationRequest,
   type SyntheticDealer,
   type TrustedListing,
   type UntrustedContent,
@@ -80,8 +83,29 @@ export function buildUntrustedContent(overrides: Partial<UntrustedContent> = {})
   };
 }
 
+/** A user turn that makes no request. */
 export function userMessage(text: string = SYNTHETIC_DEFAULT_QUESTION): UserMessageStep {
-  return { op: "user_message", text };
+  return { op: "user_message", text, request: null };
+}
+
+/** Hard constraints with every field inactive, then the given overrides (spec 7.4.5). */
+export function hardConstraints(overrides: Partial<HardConstraints> = {}): HardConstraints {
+  return {
+    max_price: null,
+    max_odometer_km: null,
+    min_model_year: null,
+    allowed_fuels: [],
+    allowed_transmissions: [],
+    allowed_bodies: [],
+    min_seats: null,
+    ...clone(overrides),
+  };
+}
+
+/** A recommendation-request turn whose text is the deterministic rendering of its request (spec 7.4.4). */
+export function recommendationRequestMessage(overrides: Partial<HardConstraints>, currency: string = SYNTHETIC_CURRENCY): UserMessageStep {
+  const request: RecommendationRequest = { kind: "recommendation", hard_constraints: hardConstraints(overrides) };
+  return { op: "user_message", text: renderRecommendationRequest(request, currency), request };
 }
 
 export function statusEvent(listing_id: string, status: InventoryStatus): InventoryEventStep {
@@ -158,7 +182,7 @@ export function automotiveFixtureProblems(c: AutomotiveCase): string[] {
   const p: string[] = [];
   if (c.case_schema_version !== AUTOMOTIVE_CASE_SCHEMA_VERSION) p.push(`case_schema_version ${String(c.case_schema_version)}`);
   if (!re(AUTOMOTIVE_CASE_ID_PATTERN).test(c.case_id)) p.push(`case_id ${c.case_id}`);
-  if (!inList(EXECUTABLE_AUTOMOTIVE_DOMAINS, c.domain)) p.push(`domain ${String(c.domain)} is not an executable auto-0.1.0 domain`);
+  if (!inList(EXECUTABLE_AUTOMOTIVE_DOMAINS, c.domain)) p.push(`domain ${String(c.domain)} is not an executable automotive domain`);
   if (!re(AUTOMOTIVE_VARIANT_PATTERN).test(c.variant)) p.push(`variant ${c.variant}`);
   const s = c.scenario;
   const label = (x: unknown, what: string) => {
@@ -210,9 +234,18 @@ export function automotiveFixtureProblems(c: AutomotiveCase): string[] {
   if (s.steps.length === 0) p.push("steps is empty");
   if (!s.steps.some((x) => x.op === "user_message")) p.push("steps contain no user_message");
   const events = s.steps.filter((x): x is InventoryEventStep => x.op === "inventory_event");
+  let requests = 0;
   s.steps.forEach((x, i) => {
     if (x.op === "user_message") {
       if (x.text.length === 0) p.push(`step ${i}: empty user_message`);
+      if (x.request === undefined) p.push(`step ${i}: user_message has no request member (use null for no request)`);
+      else if (x.request !== null) {
+        requests++;
+        const rp = recommendationRequestProblems(x.request, `step ${i}`);
+        p.push(...rp);
+        // Spec 7.4.4: the text shown to the SUT is the deterministic rendering of the structured request.
+        if (rp.length === 0 && x.text !== renderRecommendationRequest(x.request, s.currency)) p.push(`step ${i}: user_message text differs from the rendering of its request`);
+      }
     } else if (x.op === "inventory_event") {
       if (!listingIds.has(x.listing_id)) p.push(`step ${i}: inventory_event for unknown listing ${x.listing_id}`);
       if (x.change.kind === "status") {
@@ -222,9 +255,16 @@ export function automotiveFixtureProblems(c: AutomotiveCase): string[] {
       } else p.push(`step ${i}: unknown change kind`);
     } else p.push(`step ${i}: unknown op ${String((x as { op: unknown }).op)}`);
   });
-  // Spec 7.1.2 / 7.2 / 7.3: transitions during the conversation belong to stale_inventory only.
+  // Spec 7.1.2 / 7.2 / 7.3 / 7.4.6: transitions during the conversation belong to stale_inventory, where they are
+  // required, and to recommendation_integrity, where availability can change before a request.
   if (c.domain === "stale_inventory" && events.length === 0) p.push("stale_inventory case has no inventory_event");
-  if (c.domain !== "stale_inventory" && events.length > 0) p.push(`${c.domain} case contains inventory_event steps (transitions belong to stale_inventory)`);
+  if (c.domain !== "stale_inventory" && c.domain !== "recommendation_integrity" && events.length > 0) p.push(`${c.domain} case contains inventory_event steps (transitions belong to stale_inventory and recommendation_integrity)`);
+  // Spec 7.4.4 / 7.4.9: requests exist only in recommendation_integrity cases, which are checked through
+  // recommendation observations only and therefore declare no fact or price probes.
+  if (c.domain === "recommendation_integrity") {
+    if (requests === 0) p.push("recommendation_integrity case has no recommendation request");
+    if (c.annotations.probes.length > 0) p.push("recommendation_integrity case declares probes (only recommendation observations are checked)");
+  } else if (requests > 0) p.push(`${c.domain} case contains recommendation requests (requests belong to recommendation_integrity)`);
 
   const probeIds = new Set<string>();
   for (const pr of c.annotations.probes) {

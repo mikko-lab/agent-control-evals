@@ -29,18 +29,17 @@ import { CASE_SCHEMA_VERSION, HARNESS_VERSION, REASON_TAXONOMY_VERSION } from ".
 const ROOT = join(__dirname, "..", "..", "..");
 
 test("automotive versions are exact and independent of the ACS versions", () => {
-  assert.equal(AUTOMOTIVE_PACK_VERSION, "auto-0.1.0");
-  assert.equal(AUTOMOTIVE_CASE_SCHEMA_VERSION, "auto-case-0.1.0");
-  assert.equal(AUTOMOTIVE_REASON_TAXONOMY_VERSION, "auto-reasons-0.1.0");
+  assert.equal(AUTOMOTIVE_PACK_VERSION, "auto-0.2.0");
+  assert.equal(AUTOMOTIVE_CASE_SCHEMA_VERSION, "auto-case-0.2.0");
+  assert.equal(AUTOMOTIVE_REASON_TAXONOMY_VERSION, "auto-reasons-0.2.0");
   for (const v of [AUTOMOTIVE_PACK_VERSION, AUTOMOTIVE_CASE_SCHEMA_VERSION, AUTOMOTIVE_REASON_TAXONOMY_VERSION]) {
     assert.ok(![CASE_SCHEMA_VERSION, HARNESS_VERSION, REASON_TAXONOMY_VERSION].includes(v as never), `${v} collides with an ACS version`);
   }
 });
 
-test("domain registry: 3 executable, 7 planned, 10 total, no duplicates", () => {
-  assert.deepEqual([...EXECUTABLE_AUTOMOTIVE_DOMAINS], ["vehicle_fact_integrity", "price_attribution", "stale_inventory"]);
+test("domain registry: 4 executable, 6 planned, 10 total, no duplicates", () => {
+  assert.deepEqual([...EXECUTABLE_AUTOMOTIVE_DOMAINS], ["vehicle_fact_integrity", "price_attribution", "stale_inventory", "recommendation_integrity"]);
   assert.deepEqual([...PLANNED_AUTOMOTIVE_DOMAINS], [
-    "recommendation_integrity",
     "financing_fact_integrity",
     "prompt_injection_from_listing",
     "unauthorized_external_action",
@@ -81,15 +80,19 @@ test("reason taxonomy: exact classes, partitioned by non-PASS verdict, versioned
     "CURRENCY_MISMATCH",
     "STALE_STATUS",
     "STALE_PRICE",
+    "RECOMMENDATION_UNKNOWN_LISTING",
+    "RECOMMENDATION_UNAVAILABLE",
+    "RECOMMENDATION_CONSTRAINT_MISMATCH",
+    "RECOMMENDATION_FALSE_NO_MATCH",
   ]);
   assert.deepEqual([...AUTOMOTIVE_UNASSESSABLE_REASONS], ["CHANNEL_UNAVAILABLE", "PROBE_UNANSWERED", "PROBE_DECLINED", "EVENT_DELIVERY_UNCONFIRMED", "CLAIM_OUTSIDE_CONTRACT"]);
   assert.deepEqual([...AUTOMOTIVE_HARNESS_ERROR_REASONS], ["PROTOCOL_ERROR", "ADAPTER_ERROR", "TIMEOUT", "FIXTURE_INVALID", "ORACLE_INTEGRITY_ERROR"]);
-  assert.equal(AUTOMOTIVE_REASON_CLASSES.length, 21);
-  assert.equal(new Set(AUTOMOTIVE_REASON_CLASSES).size, 21, "no duplicate reason classes");
+  assert.equal(AUTOMOTIVE_REASON_CLASSES.length, 25);
+  assert.equal(new Set(AUTOMOTIVE_REASON_CLASSES).size, 25, "no duplicate reason classes");
   assert.deepEqual(Object.keys(AUTOMOTIVE_REASONS_BY_VERDICT).sort(), ["HARNESS_ERROR", "UNASSESSABLE", "VIOLATION"], "PASS carries no reason class");
   const partition = Object.values(AUTOMOTIVE_REASONS_BY_VERDICT).flat();
   assert.deepEqual([...partition].sort(), [...AUTOMOTIVE_REASON_CLASSES].sort(), "every class belongs to exactly one verdict");
-  assert.equal(AUTOMOTIVE_REASON_TAXONOMY.version, "auto-reasons-0.1.0");
+  assert.equal(AUTOMOTIVE_REASON_TAXONOMY.version, "auto-reasons-0.2.0");
   for (const r of AUTOMOTIVE_REASON_CLASSES) assert.equal(isAutomotiveReasonClass(r), true);
   assert.equal(isAutomotiveReasonClass("POLICY_DENY"), false);
   assert.equal(isAutomotiveReasonClass(undefined), false);

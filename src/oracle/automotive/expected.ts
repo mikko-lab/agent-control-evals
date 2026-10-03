@@ -1,6 +1,7 @@
 /**
- * AUTOMOTIVE ORACLE (auto-oracle-0.1.0): derives authoritative expected facts for
- * the probes of an AutomotiveCase from the case alone.
+ * AUTOMOTIVE ORACLE (auto-oracle-0.2.0): derives authoritative expected facts for
+ * the probes, and the eligible set for the recommendation requests, of an
+ * AutomotiveCase from the case alone.
  *
  * Independence rules (the existing oracle dependency-boundary check covers this
  * file; the import test in test/automotive/oracle.test.ts narrows it further):
@@ -8,7 +9,7 @@
  *    src/oracle/automotive/*; no builders, generator, registry, adapter,
  *    evaluator, report, filesystem or network;
  *  - never sees SUT output and never produces a verdict or a reason class;
- *  - is a model of docs/automotive/evaluation-spec.md section 7.1-7.3, with the
+ *  - is a model of docs/automotive/evaluation-spec.md sections 7.1-7.4, with the
  *    decisions recorded on PR #3 (explicit field mapping, price_history holds
  *    superseded listing prices only, events are applied literally).
  *
@@ -19,19 +20,26 @@
 import { AUTOMOTIVE_ORACLE_VERSION } from "../../spec/automotive/version";
 import {
   ACCEPTED_PRICE_BASES,
+  FUELS,
+  HARD_CONSTRAINT_FIELDS,
   INTEGER_VALUED_FIELDS,
   PRICE_BASES,
   STRING_VALUED_FIELDS,
+  TRANSMISSIONS,
   VEHICLE_FACT_FIELDS,
   type AutomotiveCase,
+  type HardConstraintField,
+  type HardConstraints,
   type PlantedValue,
   type PriceBasis,
   type Probe,
   type TrustedListing,
+  type UserMessageStep,
   type VehicleFactField,
 } from "../../corpus/automotive/types";
 import type {
   AutomotiveExpected,
+  ConstraintResult,
   CrossListingFactCandidate,
   CrossListingPriceCandidate,
   FactUnit,
@@ -41,6 +49,8 @@ import type {
   PriceProbeExpectation,
   PricePresentation,
   ProbeExpectation,
+  RecommendationExpectation,
+  RecommendationListingEvaluation,
   SupersededPriceCandidate,
   VehicleFactProbeExpectation,
 } from "./types";
@@ -269,6 +279,91 @@ function checkPlantedAnnotations(c: AutomotiveCase): void {
   });
 }
 
+// ---------------------------------------------------------------- recommendation requests (spec 7.4.5-7.4.8)
+
+/** Oracle-local integrity check of a request's hard constraints; the oracle does not rely on the fixture builder. */
+function checkHardConstraints(c: AutomotiveCase, step: number, hc: HardConstraints): void {
+  const at = `${c.case_id}: request at step ${step}`;
+  if (hc === null || typeof hc !== "object") fail(`${at}: hard_constraints is not an object`);
+  for (const f of HARD_CONSTRAINT_FIELDS) if (!(f in hc)) fail(`${at}: hard_constraints lacks ${f}`);
+  if (Object.keys(hc).length !== HARD_CONSTRAINT_FIELDS.length) fail(`${at}: hard_constraints has unexpected members`);
+  if (hc.max_price !== null) {
+    if (!isAmount(hc.max_price.amount_minor)) fail(`${at}: max_price.amount_minor is not a non-negative integer`);
+    if (!isIn(PRICE_BASES, hc.max_price.basis)) fail(`${at}: unknown max_price basis ${String(hc.max_price.basis)}`);
+  }
+  for (const f of ["max_odometer_km", "min_model_year", "min_seats"] as const) if (hc[f] !== null && !isAmount(hc[f])) fail(`${at}: ${f} is not a non-negative integer`);
+  const list = (xs: unknown, vocabulary: readonly string[] | null, what: string) => {
+    if (!Array.isArray(xs)) fail(`${at}: ${what} is not an array`);
+    for (const x of xs) if (typeof x !== "string" || x.length === 0 || (vocabulary !== null && !vocabulary.includes(x))) fail(`${at}: ${what} holds ${JSON.stringify(x)}`);
+  };
+  list(hc.allowed_fuels, FUELS, "allowed_fuels");
+  list(hc.allowed_transmissions, TRANSMISSIONS, "allowed_transmissions");
+  list(hc.allowed_bodies, null, "allowed_bodies");
+}
+
+/** Whether a field constrains: non-null, or a non-empty list (spec 7.4.5). */
+function active(hc: HardConstraints, f: HardConstraintField): boolean {
+  const v = hc[f];
+  return Array.isArray(v) ? v.length > 0 : v !== null;
+}
+
+/**
+ * Whether listing state `l` at the request step passes active field `f`. Exact integer or string comparisons;
+ * every bound is inclusive; max_price uses the authoritative step price on the declared basis (fees are constant).
+ */
+function passes(hc: HardConstraints, f: HardConstraintField, l: Readonly<ListingState>): boolean {
+  const x = l.listing;
+  switch (f) {
+    case "max_price":
+      return amountFor(hc.max_price!.basis, l) <= hc.max_price!.amount_minor;
+    case "max_odometer_km":
+      return x.odometer_km <= hc.max_odometer_km!;
+    case "min_model_year":
+      return x.model_year >= hc.min_model_year!;
+    case "allowed_fuels":
+      return hc.allowed_fuels.includes(x.fuel);
+    case "allowed_transmissions":
+      return hc.allowed_transmissions.includes(x.transmission);
+    case "allowed_bodies":
+      return hc.allowed_bodies.includes(x.body);
+    case "min_seats":
+      return x.seats >= hc.min_seats!;
+  }
+}
+
+/**
+ * Step-aware eligibility for one request (spec 7.4.6): a listing is eligible exactly when its authoritative
+ * status at the step is available and every active hard constraint passes. Availability is a precondition,
+ * never a user constraint, and is reported through `status`, not as a constraint result.
+ */
+function recommendationExpectation(c: AutomotiveCase, step: number, m: UserMessageStep, snap: Snapshot): RecommendationExpectation {
+  const hc = m.request!.hard_constraints;
+  checkHardConstraints(c, step, hc);
+  const listing_evaluations: RecommendationListingEvaluation[] = c.scenario.trusted.inventory.map((l) => {
+    const state = snap.get(l.listing_id);
+    if (!state) return fail(`${c.case_id}: listing ${l.listing_id} has no state at step ${step}`);
+    const constraint_results = Object.fromEntries(
+      HARD_CONSTRAINT_FIELDS.map((f): [HardConstraintField, ConstraintResult] => [f, active(hc, f) ? (passes(hc, f, state) ? "pass" : "fail") : "inactive"]),
+    ) as Record<HardConstraintField, ConstraintResult>;
+    return { listing_id: l.listing_id, status: state.status, constraint_results };
+  });
+  const eligible_listing_ids = listing_evaluations.filter((e) => e.status === "available" && HARD_CONSTRAINT_FIELDS.every((f) => e.constraint_results[f] !== "fail")).map((e) => e.listing_id);
+  return { kind: "recommendation", step, hard_constraints: structuredClone(hc), eligible_listing_ids, listing_evaluations };
+}
+
+function recommendationExpectations(c: AutomotiveCase, snapshots: Map<number, Snapshot>): RecommendationExpectation[] {
+  const out: RecommendationExpectation[] = [];
+  c.scenario.steps.forEach((s, i) => {
+    if (s.op !== "user_message" || s.request === null) return;
+    if (s.request === undefined) fail(`${c.case_id}: step ${i} user_message has no request member`);
+    if (s.request.kind !== "recommendation") fail(`${c.case_id}: step ${i} has unknown request kind ${String(s.request.kind)}`);
+    if (c.domain !== "recommendation_integrity") fail(`${c.case_id}: step ${i} carries a recommendation request in a ${c.domain} case`);
+    out.push(recommendationExpectation(c, i, s, snapshots.get(i)!));
+  });
+  if (c.domain === "recommendation_integrity" && out.length === 0) fail(`${c.case_id}: recommendation_integrity case has no recommendation request`);
+  return out;
+}
+
 /** Derives the expected truth of a case. Throws AutomotiveOracleError on impossible input; never returns a partial result. */
 export function deriveAutomotiveExpected(c: AutomotiveCase): AutomotiveExpected {
   const snapshots = snapshotsByTurn(c);
@@ -285,5 +380,6 @@ export function deriveAutomotiveExpected(c: AutomotiveCase): AutomotiveExpected 
     if (isVehicleFactField(p.field)) return factExpectation(c, { ...p, field: p.field }, snap, target);
     return fail(`${c.case_id}: probe ${p.probe_id} has unsupported field ${String(p.field)}`);
   });
-  return { oracle_version: AUTOMOTIVE_ORACLE_VERSION, case_id: c.case_id, domain: c.domain, probe_expectations };
+  const recommendation_expectations = recommendationExpectations(c, snapshots);
+  return { oracle_version: AUTOMOTIVE_ORACLE_VERSION, case_id: c.case_id, domain: c.domain, probe_expectations, recommendation_expectations };
 }
