@@ -172,6 +172,21 @@ test("min_model_year: negative, fractional and unsafe values are rejected alike 
   }
 });
 
+test("min_seats: 0 is rejected and 1 accepted alike by the validator, the schema, the oracle and the builder (spec 7.4.5: null or positive integer)", () => {
+  const one = recCase(L(), [recommendationRequestMessage({ min_seats: 1 })]);
+  assert.deepEqual(automotiveFixtureProblems(one), []);
+  assert.ok(caseSchema(one), JSON.stringify(caseSchema.errors));
+  assert.deepEqual(deriveAutomotiveExpected(one).recommendation_expectations[0].listing_evaluations.map((l) => l.constraint_results.min_seats), ["pass", "pass", "pass"]);
+  for (const bad of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const c = structuredClone(one) as any;
+    c.scenario.steps[0].request.hard_constraints.min_seats = bad;
+    assert.ok(automotiveFixtureProblems(c).some((p) => /min_seats/.test(p)), `validator: ${bad}`);
+    assert.equal(caseSchema(c), false, `schema: ${bad}`);
+    assert.throws(() => deriveAutomotiveExpected(c), (e: unknown) => e instanceof AutomotiveOracleError && /min_seats is not a safe positive integer/.test((e as Error).message), `oracle: ${bad}`);
+    assert.throws(() => recCase(L(), [recommendationRequestMessage({ min_seats: bad })]), AutomotiveFixtureError, `builder: ${bad}`);
+  }
+});
+
 // ------------------------------------------------------------ smoke-corpus coverage controls (spec 7.4.11)
 
 test("corpus controls: both price bases, every constraint field, an availability event, a genuinely empty eligible set", () => {
