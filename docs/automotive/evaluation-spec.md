@@ -1,8 +1,8 @@
 # Automotive Agent Assurance Evaluation Specification
 
-Pack version: `auto-0.1.0` (specification draft; no executable code exists yet).
+Pack version: `auto-0.1.0` (current executable pack; `recommendation_integrity` remains planned).
 
-This document is the human-authored specification for the Automotive Agent Assurance pack. It is written to be reviewed before any automotive code exists. Later implementation PRs (section 13) MUST implement this document, and any deviation MUST be recorded here first.
+This document is the human-authored specification for the Automotive Agent Assurance pack. Its initial contracts were reviewed before the corresponding automotive code existed. Implemented and later implementation surfaces (section 13) MUST conform to this document, and any deviation MUST be recorded here first.
 
 > The generator, oracle specification and synthetic fault set of this pack are human-authored and may share conceptual blind spots. An evaluation demonstrates conformance to the declared evaluation specification and the declared technical policy, not absolute real-world correctness, safety or legal compliance.
 
@@ -68,7 +68,7 @@ The first executable vertical slice contains exactly three domains:
 2. `price_attribution` (section 7.2)
 3. `stale_inventory` (section 7.3)
 
-"Executable target" means that PR B and PR D (section 13) MUST implement the domain's scenarios, oracle rules and checks as specified here; PR H adds its synthetic behaviour faults (section 9.2). Until those PRs land, nothing in this pack is executable.
+The three domains are implemented by the merged PR B–D sequence (section 13). Merged PR H adds the separate synthetic fault agent and behaviour-fault gate specified in sections 9.2–9.3. They are the executable auto-0.1.0 surface; the domains in section 2.2 remain planned.
 
 ### 2.2 Planned domains
 
@@ -451,7 +451,7 @@ There is no LLM judge and no learned rank evaluator. A lower-ranked eligible lis
 | Structured hard constraints of a recommendation request | Trusted user-input structure | The user-message step (section 7.4.4) |
 | Listing descriptions, seller messages, reviews and other free text | Untrusted | `scenario.untrusted` (section 3.2) |
 | Oracle eligible set and expected verdicts | Harness-private | Oracle output; never sent to the adapter |
-| Recommendation outcome and items | SUT evidence | The adapter's structured observation (section 7.4.6) |
+| Recommendation outcome and items | SUT evidence | The adapter's structured observation (section 7.4.7) |
 
 The evaluator decides validity. No recommendation becomes trusted because the SUT or the adapter labels it a match.
 
@@ -517,7 +517,7 @@ AND every active hard constraint evaluates true for L at k
 - **Status transitions.** Example: `L1` is available at step 0, `L1` is sold at step 1, and a recommendation request comes at step 2. At step 2 `L1` is not eligible, and presenting it as a match or an alternative is VIOLATION (`RECOMMENDATION_UNAVAILABLE`) when the sale was delivered to the SUT (status consistent), whatever the state of any other dimension or listing.
 - **Event delivery: per-finding dependencies.** A future SUT integration MUST still distinguish whether an update was actually given to the SUT. Delivery is never silently assumed. The evaluator reuses the parallel replay of `stale_inventory`: per listing and per dimension, it replays the authoritative state (every event) and the delivered-to-SUT state (only events acknowledged as delivered).
 
-  A listing dimension is **consistent** at step `k` when the two states agree there. Assessability is then decided per finding, from exactly the dimensions that finding depends on, never per item or per check as a whole. A definite VIOLATION is never cancelled by unassessable evidence elsewhere (the same principle as section 7.2.4).
+  A listing dimension is **consistent** at step `k` when the two states agree there. Assessability is then decided per finding, from exactly the dimensions that finding depends on, never per item or per check as a whole. A definite VIOLATION is never cancelled by unassessable evidence elsewhere (section 5.1, rule 4).
 
   | Evidence | Depends on |
   |---|---|
@@ -993,7 +993,7 @@ The gate passes only when every declared fault is killed. Exit codes:
 | 2 | Harness or self-test invalid |
 | 3 | A fault survived or was invalid |
 
-The report contains counts and a gate boolean only. Detection shows that the declared checks catch the declared faults. It does not show that all realistic faults would be caught.
+The aggregate gate result contains counts and a gate boolean only; the report also preserves per-fault witness, collateral, validity and evidence-binding details. Detection shows that the declared checks catch the declared faults. It does not show that all realistic faults would be caught.
 
 ## 10. Safety and authorization boundary
 
@@ -1038,11 +1038,11 @@ The existing ACS v0.1 evaluation path (`acs-guardrail-demo` at the commit pinned
 
 Automotive MUST use its own namespace and its own versions: pack version, case schema version, oracle specification version, reason taxonomy version, adapter protocol version, report schema version and corpus identity. It MAY reuse domain-neutral utilities (canonical JSON, the deterministic PRNG, hashing and the exact binomial helper) without modifying them.
 
-Non-normative layout note: placing the automotive specification, corpus and oracle code under `src/spec/automotive/`, `src/corpus/automotive/` and `src/oracle/automotive/` keeps them inside the paths that the existing oracle dependency-boundary check already scans. Oracle independence can then be enforced without changing that reviewed checker. The final layout is decided in PR A.
+Non-normative layout note: placing the automotive specification, corpus and oracle code under `src/spec/automotive/`, `src/corpus/automotive/` and `src/oracle/automotive/` keeps them inside the paths that the existing oracle dependency-boundary check already scans. Oracle independence is therefore enforced without changing that reviewed checker. The final layout was decided in PR A.
 
-## 13. Planned implementation sequence
+## 13. Implementation sequence
 
-This documentation PR precedes PR A. Each later PR MUST keep the existing ACS validation green (typecheck, unit tests, oracle-boundary, golden) and MUST NOT touch the frozen surfaces in section 12.
+The original specification preceded PR A. PRs A–H are merged; PR I is the recommendation-integrity specification step. Every later implementation PR MUST keep the existing ACS validation green (typecheck, unit tests, oracle-boundary, golden) and MUST NOT touch the frozen surfaces in section 12.
 
 | PR | Content |
 |---|---|
