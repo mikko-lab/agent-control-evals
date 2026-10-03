@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/adapter-protocol.schema.json",
+  "title": "Automotive Agent Assurance adapter protocol, auto-adapter-0.1.0 (one JSON object per line)",
+  "description": "Structure only. Turn completeness and event-acknowledgement binding to the sent case cannot be expressed here and are enforced by src/adapter/automotive/protocol.ts. Observations are evidence: wrong values, stale prices and unknown listing ids are valid here.",
+  "$defs": {
+    "protocolVersion": { "const": "auto-adapter-0.1.0" },
+    "nonEmpty": { "type": "string", "minLength": 1 },
+    "nonEmptyOrNull": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+    "count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "observationState": { "enum": ["observed", "not_observed", "ambiguous", "unavailable"] },
+    "observationSource": { "enum": ["sut_structured_output", "adapter_structured_mapping", "none"] },
+    "attributionKind": { "enum": ["trusted_fact", "quoted_untrusted", "approximate", "unknown"] },
+    "observedFactField": { "enum": ["odometer", "model_year", "first_registration", "fuel", "transmission", "power"] },
+    "observedPriceBasis": { "enum": ["listing_price", "total_with_mandatory_fees", "unknown"] },
+    "priceTemporalQualifier": { "enum": ["current", "previous", "offer", "unknown"] },
+    "observedStatus": { "enum": ["available", "reserved", "sold", "unavailable", "unknown"] },
+    "referenceKind": { "enum": ["mentioned", "recommended"] },
+    "unverifiableClassification": { "enum": ["qualitative", "approximate", "range", "outside_contract"] },
+    "probeField": { "enum": ["odometer", "model_year", "first_registration", "fuel", "transmission", "power", "status", "price"] },
+    "eventDeliveryState": { "enum": ["delivered", "not_delivered", "ambiguous", "unavailable"] },
+    "eventDeliverySource": { "enum": ["push_ack", "pull_data_source_updated", "none"] },
+    "inventoryStatus": { "enum": ["available", "reserved", "sold"] },
+    "fuel": { "enum": ["petrol", "diesel", "hybrid", "plug_in_hybrid", "electric"] },
+    "transmission": { "enum": ["manual", "automatic"] },
+
+    "harnessToAdapter": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "protocol_version"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "hello" }, "protocol_version": { "$ref": "#/$defs/protocolVersion" } }
+        },
+        {
+          "type": "object",
+          "required": ["type", "protocol_version", "case"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "case" },
+            "protocol_version": { "$ref": "#/$defs/protocolVersion" },
+            "case": { "$ref": "case.schema.json#/$defs/adapterCase", "description": "The adapter view only: no annotations, probes, planted values or expected output." }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "protocol_version"],
+          "additionalProperties": false,
+          "properties": { "type": { "const": "shutdown" }, "protocol_version": { "$ref": "#/$defs/protocolVersion" } }
+        }
+      ]
+    },
+
+    "helloResponse": {
+      "type": "object",
+      "required": ["type", "protocol_version", "adapter", "adapter_version", "sut"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "hello" },
+        "protocol_version": { "$ref": "#/$defs/protocolVersion" },
+        "adapter": { "$ref": "#/$defs/nonEmpty" },
+        "adapter_version": { "$ref": "#/$defs/nonEmpty" },
+        "sut": {
+          "type": "object",
+          "required": ["name", "version", "revision"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "$ref": "#/$defs/nonEmpty" },
+            "version": { "$ref": "#/$defs/nonEmpty" },
+            "revision": { "$ref": "#/$defs/nonEmptyOrNull", "description": "Commit, image digest, build id or other stable revision; null if none is exposed." }
+          }
+        }
+      }
+    },
+
+    "channel": {
+      "type": "object",
+      "required": ["state", "source", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "state": { "$ref": "#/$defs/observationState" },
+        "source": { "$ref": "#/$defs/observationSource" },
+        "detail": { "$ref": "#/$defs/nonEmptyOrNull" }
+      },
+      "oneOf": [
+        { "properties": { "state": { "const": "unavailable" }, "source": { "const": "none" } } },
+        { "properties": { "state": { "enum": ["observed", "not_observed", "ambiguous"] }, "source": { "enum": ["sut_structured_output", "adapter_structured_mapping"] } } }
+      ]
+    },
+
+    "attribution": {
+      "oneOf": [
+        { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "trusted_fact" } } },
+        {
+          "type": "object",
+          "required": ["kind", "content_id"],
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "quoted_untrusted" }, "content_id": { "$ref": "#/$defs/nonEmpty" } }
+        },
+        { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "approximate" } } },
+        { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "unknown" } } }
+      ]
+    },
+
+    "factClaim": {
+      "type": "object",
+      "required": ["kind", "listing_id", "field", "value", "unit", "attribution"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "vehicle_fact" },
+        "listing_id": { "$ref": "#/$defs/nonEmpty" },
+        "field": { "$ref": "#/$defs/observedFactField" },
+        "value": {},
+        "unit": {},
+        "attribution": { "$ref": "#/$defs/attribution" }
+      },
+      "oneOf": [
+        { "properties": { "field": { "const": "odometer" }, "value": { "$ref": "#/$defs/count" }, "unit": { "const": "km" } } },
+        { "properties": { "field": { "const": "model_year" }, "value": { "$ref": "#/$defs/count" }, "unit": { "const": "year" } } },
+        { "properties": { "field": { "const": "first_registration" }, "value": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" }, "unit": { "const": null } } },
+        { "properties": { "field": { "const": "fuel" }, "value": { "$ref": "#/$defs/fuel" }, "unit": { "const": null } } },
+        { "properties": { "field": { "const": "transmission" }, "value": { "$ref": "#/$defs/transmission" }, "unit": { "const": null } } },
+        { "properties": { "field": { "const": "power" }, "value": { "$ref": "#/$defs/count" }, "unit": { "const": "kW" } } }
+      ]
+    },
+    "priceClaim": {
+      "type": "object",
+      "required": ["kind", "listing_id", "field", "amount_minor", "currency", "basis", "temporal_qualifier", "attribution"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "price" },
+        "listing_id": { "$ref": "#/$defs/nonEmpty" },
+        "field": { "const": "price" },
+        "amount_minor": { "$ref": "#/$defs/count" },
+        "currency": { "oneOf": [{ "type": "string", "pattern": "^[A-Z]{3}$" }, { "type": "null" }] },
+        "basis": { "$ref": "#/$defs/observedPriceBasis" },
+        "temporal_qualifier": { "$ref": "#/$defs/priceTemporalQualifier" },
+        "attribution": { "$ref": "#/$defs/attribution" }
+      }
+    },
+    "statusClaim": {
+      "type": "object",
+      "required": ["kind", "listing_id", "field", "status", "attribution"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "status" },
+        "listing_id": { "$ref": "#/$defs/nonEmpty" },
+        "field": { "const": "status" },
+        "status": { "$ref": "#/$defs/observedStatus" },
+        "attribution": { "$ref": "#/$defs/attribution" }
+      }
+    },
+    "claim": { "oneOf": [{ "$ref": "#/$defs/factClaim" }, { "$ref": "#/$defs/priceClaim" }, { "$ref": "#/$defs/statusClaim" }] },
+
+    "unverifiableClaim": {
+      "type": "object",
+      "required": ["listing_id", "field", "classification", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "listing_id": { "$ref": "#/$defs/nonEmptyOrNull" },
+        "field": { "oneOf": [{ "$ref": "#/$defs/probeField" }, { "type": "null" }] },
+        "classification": { "$ref": "#/$defs/unverifiableClassification" },
+        "text": { "$ref": "#/$defs/nonEmpty" }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": ["listing_id", "kind"],
+      "additionalProperties": false,
+      "properties": { "listing_id": { "$ref": "#/$defs/nonEmpty" }, "kind": { "$ref": "#/$defs/referenceKind" } }
+    },
+    "statusPresentation": {
+      "type": "object",
+      "required": ["listing_id", "status"],
+      "additionalProperties": false,
+      "properties": { "listing_id": { "$ref": "#/$defs/nonEmpty" }, "status": { "$ref": "#/$defs/observedStatus" } }
+    },
+
+    "turn": {
+      "type": "object",
+      "required": ["step", "claim_channel", "claims", "unverifiable_claims", "reference_channel", "references", "status_channel", "status_presentations"],
+      "additionalProperties": false,
+      "properties": {
+        "step": { "$ref": "#/$defs/count" },
+        "claim_channel": { "$ref": "#/$defs/channel" },
+        "claims": { "type": "array", "items": { "$ref": "#/$defs/claim" } },
+        "unverifiable_claims": { "type": "array", "items": { "$ref": "#/$defs/unverifiableClaim" } },
+        "reference_channel": { "$ref": "#/$defs/channel" },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/reference" } },
+        "status_channel": { "$ref": "#/$defs/channel" },
+        "status_presentations": { "type": "array", "items": { "$ref": "#/$defs/statusPresentation" } }
+      },
+      "allOf": [
+        {
+          "description": "Claims and unverifiable claims only on an observed claim channel; an observed claim channel records at least one of them.",
+          "if": { "properties": { "claim_channel": { "properties": { "state": { "const": "observed" } } } } },
+          "then": { "anyOf": [{ "properties": { "claims": { "minItems": 1 } } }, { "properties": { "unverifiable_claims": { "minItems": 1 } } }] },
+          "else": { "properties": { "claims": { "maxItems": 0 }, "unverifiable_claims": { "maxItems": 0 } } }
+        },
+        {
+          "if": { "properties": { "reference_channel": { "properties": { "state": { "const": "observed" } } } } },
+          "then": { "properties": { "references": { "minItems": 1 } } },
+          "else": { "properties": { "references": { "maxItems": 0 } } }
+        },
+        {
+          "if": { "properties": { "status_channel": { "properties": { "state": { "const": "observed" } } } } },
+          "then": { "properties": { "status_presentations": { "minItems": 1 } } },
+          "else": { "properties": { "status_presentations": { "maxItems": 0 } } }
+        }
+      ]
+    },
+
+    "inventoryChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "status"],
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "status" }, "status": { "$ref": "#/$defs/inventoryStatus" } }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "price_minor"],
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "price" }, "price_minor": { "$ref": "#/$defs/count" } }
+        }
+      ]
+    },
+    "eventAcknowledgement": {
+      "type": "object",
+      "required": ["step", "listing_id", "change", "delivery"],
+      "additionalProperties": false,
+      "properties": {
+        "step": { "$ref": "#/$defs/count" },
+        "listing_id": { "$ref": "#/$defs/nonEmpty" },
+        "change": { "$ref": "#/$defs/inventoryChange" },
+        "delivery": {
+          "type": "object",
+          "required": ["state", "source", "detail"],
+          "additionalProperties": false,
+          "properties": {
+            "state": { "$ref": "#/$defs/eventDeliveryState" },
+            "source": { "$ref": "#/$defs/eventDeliverySource" },
+            "detail": { "$ref": "#/$defs/nonEmptyOrNull" }
+          },
+          "oneOf": [
+            { "properties": { "state": { "const": "unavailable" }, "source": { "const": "none" } } },
+            { "properties": { "state": { "enum": ["delivered", "not_delivered", "ambiguous"] }, "source": { "enum": ["push_ack", "pull_data_source_updated"] } } }
+          ]
+        }
+      }
+    },
+
+    "observations": {
+      "type": "object",
+      "required": ["turns", "event_acknowledgements"],
+      "additionalProperties": false,
+      "properties": {
+        "turns": { "type": "array", "items": { "$ref": "#/$defs/turn" } },
+        "event_acknowledgements": { "type": "array", "items": { "$ref": "#/$defs/eventAcknowledgement" } }
+      }
+    },
+
+    "caseResult": {
+      "type": "object",
+      "required": ["type", "protocol_version", "case_id", "status", "observations", "raw_sut_evidence", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "case_result" },
+        "protocol_version": { "$ref": "#/$defs/protocolVersion" },
+        "case_id": { "type": "string", "pattern": "^auto-case-[0-9]{6}$" },
+        "status": { "enum": ["ok", "adapter_error"] },
+        "observations": {},
+        "raw_sut_evidence": {},
+        "error": {}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "const": "ok" },
+            "observations": { "$ref": "#/$defs/observations" },
+            "error": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "status": { "const": "adapter_error" },
+            "observations": { "type": "null" },
+            "error": {
+              "type": "object",
+              "required": ["message"],
+              "additionalProperties": false,
+              "properties": { "message": { "$ref": "#/$defs/nonEmpty" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
