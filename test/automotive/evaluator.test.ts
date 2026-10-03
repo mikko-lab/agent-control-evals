@@ -311,6 +311,13 @@ test("delivery assessability compares authoritative and delivered-to-SUT state a
   // The reverse: the last event is the undelivered one.
   const lastMissing = evalWith(entry("multiple_price_changes"), (o) => ack(o, 3, "unavailable"));
   assert.deepEqual([verdictOf(probe(lastMissing, "p2")), verdictOf(probe(lastMissing, "p3"))], [["PASS", []], ["UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]]]);
+  // No-op status event: L1 is already sold (delivered at step 1) when an unconfirmed second sold arrives.
+  const noopStatus = extended("available_to_sold", [statusEvent("L1", "sold"), userMessage("Synthetic buyer: is L1 still sold?")], [buildProbe("p3", 4, "L1", "status")]);
+  for (const state of ["not_delivered", "ambiguous", "unavailable"] as const) {
+    assert.deepEqual(verdictOf(probe(evalWith(noopStatus, (o) => ack(o, 3, state)), "p3")), ["PASS", []], `status no-op, ${state}`);
+    const stale = evalWith(noopStatus, (o) => (ack(o, 3, state), (claim(o, 4, "L1", "status").status = "available")));
+    assert.deepEqual(verdictOf(probe(stale, "p3")), ["VIOLATION", ["STALE_STATUS"]], `status no-op, ${state}: assessable, so stale is detected`);
+  }
   // A wrong currency does not depend on post-event state: still definite while delivery is unconfirmed.
   const sek = evalWith(entry("price_change"), (o) => (ack(o, 1, "ambiguous"), (claim(o, 2, "L2", "price").currency = "SEK")));
   assert.deepEqual(verdictOf(probe(sek, "p2")), ["VIOLATION", ["CURRENCY_MISMATCH"]]);
