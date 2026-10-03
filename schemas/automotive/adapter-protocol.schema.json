@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/adapter-protocol.schema.json",
-  "title": "Automotive Agent Assurance adapter protocol, auto-adapter-0.1.0 (one JSON object per line)",
-  "description": "Structure only. Turn completeness and event-acknowledgement binding to the sent case cannot be expressed here and are enforced by src/adapter/automotive/protocol.ts. Observations are evidence: wrong values, stale prices and unknown listing ids are valid here.",
+  "title": "Automotive Agent Assurance adapter protocol, auto-adapter-0.2.0 (one JSON object per line)",
+  "description": "Structure only. Turn completeness and event-acknowledgement binding to the sent case cannot be expressed here and are enforced by src/adapter/automotive/protocol.ts. Observations are evidence: wrong values, stale prices and unknown listing ids are valid here. The recommendation channel/outcome/item consistency of spec 7.4.7 is expressed here; duplicate items and repeated or gapped ranks and slots are valid evidence.",
   "$defs": {
-    "protocolVersion": { "const": "auto-adapter-0.1.0" },
+    "protocolVersion": { "const": "auto-adapter-0.2.0" },
     "nonEmpty": { "type": "string", "minLength": 1 },
     "nonEmptyOrNull": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
     "count": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
@@ -21,7 +21,8 @@
     "eventDeliveryState": { "enum": ["delivered", "not_delivered", "ambiguous", "unavailable"] },
     "eventDeliverySource": { "enum": ["push_ack", "pull_data_source_updated", "none"] },
     "inventoryStatus": { "enum": ["available", "reserved", "sold"] },
-
+    "recommendationOutcome": { "enum": ["recommendations", "no_match", "clarify"] },
+    "recommendationPresentation": { "enum": ["match", "alternative"] },
     "harnessToAdapter": {
       "oneOf": [
         {
@@ -48,7 +49,6 @@
         }
       ]
     },
-
     "helloResponse": {
       "type": "object",
       "required": ["type", "protocol_version", "adapter", "adapter_version", "sut"],
@@ -70,36 +70,24 @@
         }
       }
     },
-
     "channel": {
       "type": "object",
       "required": ["state", "source", "detail"],
       "additionalProperties": false,
-      "properties": {
-        "state": { "$ref": "#/$defs/observationState" },
-        "source": { "$ref": "#/$defs/observationSource" },
-        "detail": { "$ref": "#/$defs/nonEmptyOrNull" }
-      },
+      "properties": { "state": { "$ref": "#/$defs/observationState" }, "source": { "$ref": "#/$defs/observationSource" }, "detail": { "$ref": "#/$defs/nonEmptyOrNull" } },
       "oneOf": [
         { "properties": { "state": { "const": "unavailable" }, "source": { "const": "none" } } },
         { "properties": { "state": { "enum": ["observed", "not_observed", "ambiguous"] }, "source": { "enum": ["sut_structured_output", "adapter_structured_mapping"] } } }
       ]
     },
-
     "attribution": {
       "oneOf": [
         { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "trusted_fact" } } },
-        {
-          "type": "object",
-          "required": ["kind", "content_id"],
-          "additionalProperties": false,
-          "properties": { "kind": { "const": "quoted_untrusted" }, "content_id": { "$ref": "#/$defs/nonEmpty" } }
-        },
+        { "type": "object", "required": ["kind", "content_id"], "additionalProperties": false, "properties": { "kind": { "const": "quoted_untrusted" }, "content_id": { "$ref": "#/$defs/nonEmpty" } } },
         { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "approximate" } } },
         { "type": "object", "required": ["kind"], "additionalProperties": false, "properties": { "kind": { "const": "unknown" } } }
       ]
     },
-
     "factClaim": {
       "type": "object",
       "required": ["kind", "listing_id", "field", "value", "unit", "attribution"],
@@ -149,7 +137,6 @@
       }
     },
     "claim": { "oneOf": [{ "$ref": "#/$defs/factClaim" }, { "$ref": "#/$defs/priceClaim" }, { "$ref": "#/$defs/statusClaim" }] },
-
     "unverifiableClaim": {
       "type": "object",
       "required": ["listing_id", "field", "classification", "text"],
@@ -173,10 +160,30 @@
       "additionalProperties": false,
       "properties": { "listing_id": { "$ref": "#/$defs/nonEmpty" }, "status": { "$ref": "#/$defs/observedStatus" } }
     },
-
+    "recommendationItem": {
+      "type": "object",
+      "required": ["listing_id", "rank", "slot", "presentation"],
+      "additionalProperties": false,
+      "properties": {
+        "listing_id": { "$ref": "#/$defs/nonEmpty" },
+        "rank": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "slot": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "presentation": { "$ref": "#/$defs/recommendationPresentation" }
+      }
+    },
+    "recommendation": {
+      "description": "Spec 7.4.7: recommendations carries at least one item; no_match and clarify carry none.",
+      "type": "object",
+      "required": ["outcome", "items"],
+      "additionalProperties": false,
+      "properties": { "outcome": { "$ref": "#/$defs/recommendationOutcome" }, "items": { "type": "array", "items": { "$ref": "#/$defs/recommendationItem" } } },
+      "if": { "properties": { "outcome": { "const": "recommendations" } } },
+      "then": { "properties": { "items": { "minItems": 1 } } },
+      "else": { "properties": { "items": { "maxItems": 0 } } }
+    },
     "turn": {
       "type": "object",
-      "required": ["step", "claim_channel", "claims", "unverifiable_claims", "reference_channel", "references", "status_channel", "status_presentations"],
+      "required": ["step", "claim_channel", "claims", "unverifiable_claims", "reference_channel", "references", "status_channel", "status_presentations", "recommendation_channel", "recommendation"],
       "additionalProperties": false,
       "properties": {
         "step": { "$ref": "#/$defs/count" },
@@ -186,7 +193,9 @@
         "reference_channel": { "$ref": "#/$defs/channel" },
         "references": { "type": "array", "items": { "$ref": "#/$defs/reference" } },
         "status_channel": { "$ref": "#/$defs/channel" },
-        "status_presentations": { "type": "array", "items": { "$ref": "#/$defs/statusPresentation" } }
+        "status_presentations": { "type": "array", "items": { "$ref": "#/$defs/statusPresentation" } },
+        "recommendation_channel": { "$ref": "#/$defs/channel" },
+        "recommendation": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/recommendation" }] }
       },
       "allOf": [
         {
@@ -204,24 +213,19 @@
           "if": { "properties": { "status_channel": { "properties": { "state": { "const": "observed" } } } } },
           "then": { "properties": { "status_presentations": { "minItems": 1 } } },
           "else": { "properties": { "status_presentations": { "maxItems": 0 } } }
+        },
+        {
+          "description": "Only an observed recommendation channel carries a recommendation, and it always does.",
+          "if": { "properties": { "recommendation_channel": { "properties": { "state": { "const": "observed" } } } } },
+          "then": { "properties": { "recommendation": { "type": "object" } } },
+          "else": { "properties": { "recommendation": { "type": "null" } } }
         }
       ]
     },
-
     "inventoryChange": {
       "oneOf": [
-        {
-          "type": "object",
-          "required": ["kind", "status"],
-          "additionalProperties": false,
-          "properties": { "kind": { "const": "status" }, "status": { "$ref": "#/$defs/inventoryStatus" } }
-        },
-        {
-          "type": "object",
-          "required": ["kind", "price_minor"],
-          "additionalProperties": false,
-          "properties": { "kind": { "const": "price" }, "price_minor": { "$ref": "#/$defs/count" } }
-        }
+        { "type": "object", "required": ["kind", "status"], "additionalProperties": false, "properties": { "kind": { "const": "status" }, "status": { "$ref": "#/$defs/inventoryStatus" } } },
+        { "type": "object", "required": ["kind", "price_minor"], "additionalProperties": false, "properties": { "kind": { "const": "price" }, "price_minor": { "$ref": "#/$defs/count" } } }
       ]
     },
     "eventAcknowledgement": {
@@ -236,11 +240,7 @@
           "type": "object",
           "required": ["state", "source", "detail"],
           "additionalProperties": false,
-          "properties": {
-            "state": { "$ref": "#/$defs/eventDeliveryState" },
-            "source": { "$ref": "#/$defs/eventDeliverySource" },
-            "detail": { "$ref": "#/$defs/nonEmptyOrNull" }
-          },
+          "properties": { "state": { "$ref": "#/$defs/eventDeliveryState" }, "source": { "$ref": "#/$defs/eventDeliverySource" }, "detail": { "$ref": "#/$defs/nonEmptyOrNull" } },
           "oneOf": [
             { "properties": { "state": { "const": "unavailable" }, "source": { "const": "none" } } },
             { "properties": { "state": { "enum": ["delivered", "not_delivered", "ambiguous"] }, "source": { "enum": ["push_ack", "pull_data_source_updated"] } } }
@@ -248,17 +248,12 @@
         }
       }
     },
-
     "observations": {
       "type": "object",
       "required": ["turns", "event_acknowledgements"],
       "additionalProperties": false,
-      "properties": {
-        "turns": { "type": "array", "items": { "$ref": "#/$defs/turn" } },
-        "event_acknowledgements": { "type": "array", "items": { "$ref": "#/$defs/eventAcknowledgement" } }
-      }
+      "properties": { "turns": { "type": "array", "items": { "$ref": "#/$defs/turn" } }, "event_acknowledgements": { "type": "array", "items": { "$ref": "#/$defs/eventAcknowledgement" } } }
     },
-
     "caseResult": {
       "type": "object",
       "required": ["type", "protocol_version", "case_id", "status", "observations", "raw_sut_evidence", "error"],
@@ -273,23 +268,12 @@
         "error": {}
       },
       "oneOf": [
-        {
-          "properties": {
-            "status": { "const": "ok" },
-            "observations": { "$ref": "#/$defs/observations" },
-            "error": { "type": "null" }
-          }
-        },
+        { "properties": { "status": { "const": "ok" }, "observations": { "$ref": "#/$defs/observations" }, "error": { "type": "null" } } },
         {
           "properties": {
             "status": { "const": "adapter_error" },
             "observations": { "type": "null" },
-            "error": {
-              "type": "object",
-              "required": ["message"],
-              "additionalProperties": false,
-              "properties": { "message": { "$ref": "#/$defs/nonEmpty" } }
-            }
+            "error": { "type": "object", "required": ["message"], "additionalProperties": false, "properties": { "message": { "$ref": "#/$defs/nonEmpty" } } }
           }
         }
       ]

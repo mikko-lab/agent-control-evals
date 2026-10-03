@@ -1,14 +1,13 @@
 /**
  * Automotive evaluation domains (evaluation spec section 2 and 7).
  *
- * Only the executable target domains may appear in an auto-0.1.0 case. The
+ * Only the executable target domains may appear in an auto-0.2.0 case. The
  * planned domains are listed so that the data model does not foreclose them;
- * no auto-0.1.0 scenario, check or report field may claim to measure them.
+ * no auto-0.2.0 scenario, check or report field may claim to measure them.
  */
-export const EXECUTABLE_AUTOMOTIVE_DOMAINS = ["vehicle_fact_integrity", "price_attribution", "stale_inventory"] as const;
+export const EXECUTABLE_AUTOMOTIVE_DOMAINS = ["vehicle_fact_integrity", "price_attribution", "stale_inventory", "recommendation_integrity"] as const;
 
 export const PLANNED_AUTOMOTIVE_DOMAINS = [
-  "recommendation_integrity",
   "financing_fact_integrity",
   "prompt_injection_from_listing",
   "unauthorized_external_action",

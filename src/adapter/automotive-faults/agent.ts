@@ -1,20 +1,21 @@
 /**
- * Synthetic automotive fault agent (auto-fault-adapter-0.1.0): a deliberately faulty SUT
- * for the auto-faults-0.1.0 fault-sensitivity self-test. It is not a model of any product.
+ * Synthetic automotive fault agent (auto-fault-adapter-0.2.0): a deliberately faulty SUT
+ * for the auto-faults-0.2.0 fault-sensitivity self-test. It is not a model of any product.
  *
  * Each fault starts from the in-repo reference agent's observations for the adapter view
  * and applies exactly one deterministic behaviour fault, keeping the result a valid
- * auto-adapter-0.1.0 observation (every turn, every acknowledgement, valid shapes).
+ * auto-adapter-0.2.0 observation (every turn, every acknowledgement, valid shapes).
  *
  * Activation uses only the adapter-visible scenario: trusted inventory, policy, currency,
- * untrusted content and the step sequence. Nothing that identifies a corpus entry and
+ * untrusted content and the step sequence, including the structured recommendation
+ * requests, which are adapter-visible user input (spec 7.4.4). Nothing that identifies a corpus entry and
  * nothing harness-private is read; static tests enforce this. No randomness, clock,
  * network, filesystem or model.
  */
 import { AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION, AUTOMOTIVE_FAULT_ADAPTER_VERSION } from "../../spec/automotive/version";
-import type { AutomotiveCaseForAdapter, AutomotiveScenario, InventoryStatus, TrustedListing } from "../../corpus/automotive/types";
+import type { AutomotiveCaseForAdapter, AutomotiveScenario, HardConstraints, InventoryStatus, TrustedListing } from "../../corpus/automotive/types";
 import type { AutomotiveHelloResponse, AutomotiveObservations, AutomotiveObservedPriceClaim, AutomotiveTurnObservation } from "../automotive/protocol";
-import { referenceObservations } from "../automotive-reference/agent";
+import { referenceObservations, referenceRecommendation, type ReferenceListingState } from "../automotive-reference/agent";
 
 export const AUTOMOTIVE_FAULT_IDS = [
   "AF01-cross-listing-odometer",
@@ -27,6 +28,10 @@ export const AUTOMOTIVE_FAULT_IDS = [
   "AF08-superseded-price-as-current",
   "AF09-stale-status-cache",
   "AF10-stale-price-cache",
+  "AF11-unknown-recommendation",
+  "AF12-stale-recommendation-status",
+  "AF13-ignored-price-constraint",
+  "AF14-false-no-match",
 ] as const;
 
 export type AutomotiveFaultId = (typeof AUTOMOTIVE_FAULT_IDS)[number];
@@ -97,6 +102,33 @@ function previousValue<V>(s: AutomotiveScenario, listing: TrustedListing, step: 
 function setPrice(c: AutomotiveObservedPriceClaim, s: AutomotiveScenario, listing: TrustedListing, listingPrice: number): void {
   // Keep the policy's basis, exactly as the reference agent labels it.
   c.amount_minor = totalRequired(s) ? listingPrice + listing.mandatory_fees_minor : listingPrice;
+}
+
+/** The listing states the reference agent holds at `step`: every event before the step applied (all are delivered). */
+function statesAt(s: AutomotiveScenario, step: number): ReferenceListingState[] {
+  const state = new Map(s.trusted.inventory.map((l) => [l.listing_id, { listing: l, status: l.status, price_minor: l.price_minor }]));
+  s.steps.forEach((x, i) => {
+    if (i >= step || x.op !== "inventory_event") return;
+    const l = state.get(x.listing_id);
+    if (!l) return;
+    if (x.change.kind === "status") l.status = x.change.status;
+    else l.price_minor = x.change.price_minor;
+  });
+  return [...state.values()];
+}
+
+/** Hard constraints of the request answered by turn `t`, or null when the turn's step carries no request. */
+function requestOf(s: AutomotiveScenario, t: AutomotiveTurnObservation): HardConstraints | null {
+  const step = s.steps[t.step];
+  return step !== undefined && step.op === "user_message" && step.request !== null ? step.request.hard_constraints : null;
+}
+
+/** Listing identifiers of the form L<digits> mentioned in untrusted content that the trusted inventory does not hold, first-seen order. */
+function untrustedUnknownListingIds(s: AutomotiveScenario): string[] {
+  const known = new Set(s.trusted.inventory.map((l) => l.listing_id));
+  const out: string[] = [];
+  for (const u of s.untrusted) for (const m of u.text.matchAll(/\bL\d+\b/g)) if (!known.has(m[0]) && !out.includes(m[0])) out.push(m[0]);
+  return out;
 }
 
 // ---------------------------------------------------------------- faults
@@ -188,6 +220,43 @@ const FAULTS: Record<AutomotiveFaultId, Fault> = {
         if (prev === null) continue;
         for (const c of priceClaims(t, l.listing_id)) setPrice(c, s, l, prev);
       }
+  },
+  // Listing identifiers mentioned in untrusted content but absent from the inventory are recommended as extra matches.
+  "AF11-unknown-recommendation": (obs, s) => {
+    const unknown = untrustedUnknownListingIds(s);
+    for (const t of obs.turns) {
+      const rec = t.recommendation;
+      if (requestOf(s, t) === null || rec === null || rec.outcome !== "recommendations") continue;
+      let next = Math.max(...rec.items.map((i) => i.rank), ...rec.items.map((i) => i.slot)) + 1;
+      for (const id of unknown) {
+        rec.items.push({ listing_id: id, rank: next, slot: next, presentation: "match" });
+        next++;
+      }
+    }
+  },
+  // Status events are acknowledged as delivered, but requests are answered from a status that lags one delivered update.
+  "AF12-stale-recommendation-status": (obs, s) => {
+    for (const t of obs.turns) {
+      const hc = requestOf(s, t);
+      if (hc === null || t.recommendation === null) continue;
+      const stale = statesAt(s, t.step).map((st) => {
+        const prev = previousValue<InventoryStatus>(s, st.listing, t.step, st.listing.status, (c) => (c.kind === "status" ? c.status : undefined));
+        return { ...st, status: prev ?? st.status };
+      });
+      t.recommendation = referenceRecommendation(stale, hc);
+    }
+  },
+  // The max_price hard constraint is ignored when answering requests.
+  "AF13-ignored-price-constraint": (obs, s) => {
+    for (const t of obs.turns) {
+      const hc = requestOf(s, t);
+      if (hc === null || hc.max_price === null || t.recommendation === null) continue;
+      t.recommendation = referenceRecommendation(statesAt(s, t.step), { ...hc, max_price: null });
+    }
+  },
+  // Every request is answered with an explicit no_match, whatever the inventory holds.
+  "AF14-false-no-match": (obs, s) => {
+    for (const t of obs.turns) if (requestOf(s, t) !== null && t.recommendation !== null) t.recommendation = { outcome: "no_match", items: [] };
   },
 };
 

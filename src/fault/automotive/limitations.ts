@@ -1,6 +1,6 @@
 /** Limitations embedded in every fault-sensitivity report. The fault summary renders the report's own copy. */
 export const AUTOMOTIVE_FAULT_REPORT_LIMITATIONS: readonly string[] = [
-  "The faults are deliberately planted synthetic behaviours declared in advance in auto-faults-0.1.0.",
+  "The faults are deliberately planted synthetic behaviours declared in advance in auto-faults-0.2.0.",
   "The synthetic fault agent is derived from the in-repo deterministic reference agent.",
   "Detecting the declared faults does not imply that every realistic automotive agent fault is detectable.",
   "The fault set and the corpus are not sampled production traffic.",

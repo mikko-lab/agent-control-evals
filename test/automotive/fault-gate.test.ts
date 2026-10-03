@@ -61,7 +61,7 @@ async function fullReport(override?: (id: string, r: AutomotiveReport) => Automo
 
 test("every declared fault is killed from its own run's evaluator findings", async () => {
   const r = await fullReport();
-  assert.deepEqual(r.gate, { passed: true, fault_count: 10, killed: 10, survived: 0, invalid: 0 });
+  assert.deepEqual(r.gate, { passed: true, fault_count: 14, killed: 14, survived: 0, invalid: 0 });
   assert.deepEqual(r.faults.map((f) => f.fault_id), [...AUTOMOTIVE_FAULT_IDS], "manifest order");
   for (const f of r.faults) {
     assert.equal(f.status, "killed", f.fault_id);
@@ -137,18 +137,54 @@ test("negative control: HARNESS_ERROR, an invalid or incomplete run, a build fai
   assert.equal((await judge(f, forged)).status, "invalid");
 });
 
+test("recommendation faults: killed only by a matching witness VIOLATION with field null; masked, wrong-field, non-VIOLATION -> SURVIVED; HARNESS_ERROR -> INVALID", async () => {
+  const expected: Record<string, { witnesses: string[]; reasons: string[] }> = {
+    "AF11-unknown-recommendation": { witnesses: ["auto-case-000022"], reasons: ["RECOMMENDATION_UNKNOWN_LISTING"] },
+    "AF12-stale-recommendation-status": { witnesses: ["auto-case-000023"], reasons: ["RECOMMENDATION_UNAVAILABLE"] },
+    "AF13-ignored-price-constraint": { witnesses: ["auto-case-000024"], reasons: ["RECOMMENDATION_CONSTRAINT_MISMATCH"] },
+    "AF14-false-no-match": { witnesses: ["auto-case-000019", "auto-case-000020"], reasons: ["RECOMMENDATION_FALSE_NO_MATCH"] },
+  };
+  for (const [id, want] of Object.entries(expected)) {
+    const f = faultOf(id);
+    assert.deepEqual([f.domain, f.expected_field, f.expected_reasons], ["recommendation_integrity", null, want.reasons], id);
+    const r = await reportOf(id);
+    const killed = await judge(f, r);
+    assert.deepEqual([killed.status, killed.witness_case_ids, killed.matched_witness_case_ids], ["killed", want.witnesses, want.witnesses], id);
+    const witness = r.findings.filter((x) => x.verdict === "VIOLATION" && want.witnesses.includes(x.case_id));
+    assert.ok(witness.every((x) => x.kind === "recommendation" && x.field === null && x.diagnostics !== null && x.diagnostics.decision_row <= 4), id);
+    // Masked: the witness recommendation findings removed.
+    const masked = await reportOf(id);
+    masked.findings = masked.findings.filter((x) => !(x.kind === "recommendation" && want.witnesses.includes(x.case_id)));
+    assert.equal((await judge(f, masked)).status, "survived", `${id} masked`);
+    // A finding with the right reasons but a field: not the declared witness rule.
+    const wrongField = await reportOf(id);
+    for (const x of wrongField.findings) if (want.witnesses.includes(x.case_id)) x.field = "price";
+    assert.equal((await judge(f, wrongField)).status, "survived", `${id} wrong field`);
+    // The same check UNASSESSABLE instead of VIOLATION never kills.
+    const unassessable = await reportOf(id);
+    for (const x of unassessable.findings) if (want.witnesses.includes(x.case_id)) Object.assign(x, { verdict: "UNASSESSABLE", reasons: ["EVENT_DELIVERY_UNCONFIRMED"] });
+    assert.equal((await judge(f, unassessable)).status, "survived", `${id} not a VIOLATION`);
+    // A harness failure never kills, whatever it contains.
+    const harness = await judge(f, await reportOf("fake:adapter_error"));
+    assert.equal(harness.status, "invalid", `${id} harness error`);
+    const forged = await reportOf(id);
+    forged.scenario_summary.verdict_counts.HARNESS_ERROR = 1;
+    assert.equal((await judge(f, forged)).status, "invalid", `${id} HARNESS_ERROR in the run`);
+  }
+});
+
 test("gate: any survived or invalid fault fails the gate; counts only", async () => {
   const survived = await fullReport((id, r) => (id === "AF05-total-required-basis-bypass" ? { ...r, findings: [] } : r));
-  assert.deepEqual(survived.gate, { passed: false, fault_count: 10, killed: 9, survived: 1, invalid: 0 });
+  assert.deepEqual(survived.gate, { passed: false, fault_count: 14, killed: 13, survived: 1, invalid: 0 });
   const invalid = await fullReport((id, r) => (id === "AF09-stale-status-cache" ? null : r));
-  assert.deepEqual(invalid.gate, { passed: false, fault_count: 10, killed: 9, survived: 0, invalid: 1 });
+  assert.deepEqual(invalid.gate, { passed: false, fault_count: 14, killed: 13, survived: 0, invalid: 1 });
   assert.equal(invalid.faults[8].invalid_reason, "synthetic build failure");
   for (const r of [survived, invalid]) assert.deepEqual(validateAutomotiveFaultReport(r), { ok: true, errors: [] });
 });
 
 // ------------------------------------------------------------ baseline
 
-test("baseline must be a clean 18/18 PASS reference run, and every witness must PASS in it", async () => {
+test("baseline must be a clean 24/24 PASS reference run, and every witness must PASS in it", async () => {
   assert.deepEqual(automotiveBaselineProblems(await reportOf("reference")), []);
   for (const bad of ["fake:cross_listing_value", "fake:silent_claim_channel", "fake:adapter_error", "fake:missing_turn"]) {
     const b = await reportOf(bad);
@@ -164,9 +200,9 @@ test("baseline must be a clean 18/18 PASS reference run, and every witness must 
   assert.throws(() => witnessCaseIds({ ...faultOf("AF10-stale-price-cache"), witness_variants: ["odometer_and_power"] }, clean), /belongs to vehicle_fact_integrity/);
 });
 
-test("baseline identity: a clean 18/18 PASS from any adapter other than the exact reference agent is refused (harness failure)", async () => {
+test("baseline identity: a clean 24/24 PASS from any adapter other than the exact reference agent is refused (harness failure)", async () => {
   const foreign = await reportOf("float");
-  assert.deepEqual([foreign.scenario_summary.verdict_counts.PASS, foreign.run_valid, foreign.all_required_assessed], [18, true, true], "technically a perfect run");
+  assert.deepEqual([foreign.scenario_summary.verdict_counts.PASS, foreign.run_valid, foreign.all_required_assessed], [24, true, true], "technically a perfect run");
   assert.deepEqual(automotiveBaselineProblems(foreign), ["baseline identity is not the in-repo reference agent (adapter float-evidence-fixture-adapter 0.1.0, SUT synthetic-float-evidence-sut 0.1.0 revision null)"]);
   const outcomes = FAULT_SET.faults.map(() => outcome(null, "x"));
   assert.throws(() => buildAutomotiveFaultReport({ faultSet: FAULT_SET, faultSetSha256: SHA, baseline: foreign, baselineReportPath: "baseline/report.json", outcomes, harnessIdentity: ID }), (e: unknown) => e instanceof AutomotiveFaultGateError && /identity is not the in-repo reference agent/.test(e.message));
@@ -241,6 +277,8 @@ test("fault-set validation fails closed on every malformed declaration", () => {
   bad("empty description", /empty description/, (d) => (d.faults[0].description = "  "));
   bad("empty target behaviour", /empty target_behavior/, (d) => (d.faults[0].target_behavior = ""));
   bad("invalid field", /invalid expected_field/, (d) => (d.faults[0].expected_field = "colour"));
+  bad("null field outside recommendation_integrity", /invalid expected_field null/, (d) => (d.faults[0].expected_field = null));
+  bad("field on a recommendation fault", /must declare expected_field null/, (d) => (d.faults[13].expected_field = "price"));
   bad("empty reasons", /non-empty array/, (d) => (d.faults[0].expected_reasons = []));
   bad("non-VIOLATION reason", /not a VIOLATION reason/, (d) => (d.faults[0].expected_reasons = ["PROBE_UNANSWERED"]));
   bad("duplicate reason", /duplicate expected reason/, (d) => (d.faults[0].expected_reasons = ["FACT_VALUE_MISMATCH", "FACT_VALUE_MISMATCH"]));
@@ -271,14 +309,14 @@ test("the fault report carries the complete limitations and no score, rate, perc
     return out;
   };
   for (const k of keys(r, [])) assert.ok(!forbidden.test(k), k);
-  assert.deepEqual([r.harness, r.fault_set_sha256, r.corpus_sha256], [ID, SHA, "49c50fae1deeb1bd6f5a608ea0d9a2d5ebfd252e8df3ad59dc02b7cceb421a54"]);
+  assert.deepEqual([r.harness, r.fault_set_sha256, r.corpus_sha256], [ID, SHA, "beb5b3eccc034d50489c13f39905e3ee94d7ae53d25c8504e54e5d8cd97e0399"]);
   assert.equal(r.baseline.report_path, "baseline/report.json");
 });
 
 test("fault summary: factual headline and self-test notice, rendered from the report alone", async () => {
   const r = await fullReport();
   const s = renderAutomotiveFaultSummary(r);
-  assert.ok(s.startsWith(`# Automotive fault sensitivity auto-faults-0.1.0\n\n${AUTOMOTIVE_FAULT_SELF_TEST_NOTICE}\n\n- Baseline reference run: PASS 18 / 18\n- Declared faults: 10\n- Killed: 10\n- Survived: 0\n- Invalid: 0\n- Gate passed: yes\n`));
+  assert.ok(s.startsWith(`# Automotive fault sensitivity auto-faults-0.2.0\n\n${AUTOMOTIVE_FAULT_SELF_TEST_NOTICE}\n\n- Baseline reference run: PASS 24 / 24\n- Declared faults: 14\n- Killed: 14\n- Survived: 0\n- Invalid: 0\n- Gate passed: yes\n`));
   assert.ok(s.endsWith(`10. ${AUTOMOTIVE_FAULT_REPORT_LIMITATIONS[9]}\n`));
   for (const w of [/score/i, /kill rate/i, /%/, /certif/i, /\bsafe\b/i]) assert.ok(!w.test(s.slice(0, s.indexOf("## Limitations"))), String(w));
   assert.equal(renderAutomotiveFaultSummary(JSON.parse(JSON.stringify(r))), s);

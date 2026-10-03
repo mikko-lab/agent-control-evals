@@ -1,15 +1,17 @@
 /**
- * Expected-truth model of the automotive oracle (auto-oracle-0.1.0).
+ * Expected-truth model of the automotive oracle (auto-oracle-0.2.0).
  *
  * The oracle states what exact structured claim would be authoritative for each
  * probe at the probe's step, plus deterministic diagnostic candidates that a later
- * evaluator can consult without re-simulating scenario state. It contains no
+ * evaluator can consult without re-simulating scenario state. For each
+ * recommendation request it states the step-aware eligible set and the
+ * per-listing hard-constraint results (spec section 7.4.8). It contains no
  * verdict, reason class, severity or score: those need observed SUT evidence
  * (PR C/D). Optional data is an empty array or `null`, never an absent member.
  */
 import type { ExecutableAutomotiveDomain } from "../../spec/automotive/domains";
 import type { AUTOMOTIVE_ORACLE_VERSION } from "../../spec/automotive/version";
-import type { MandatoryFeePolicy, PriceBasis, VehicleFactField } from "../../corpus/automotive/types";
+import type { HardConstraintField, HardConstraints, InventoryStatus, MandatoryFeePolicy, PriceBasis, VehicleFactField } from "../../corpus/automotive/types";
 
 /** Canonical unit of an integer-valued vehicle fact. String-valued facts have no unit. */
 export type FactUnit = "km" | "year" | "kW";
@@ -85,10 +87,39 @@ export interface PriceProbeExpectation {
 
 export type ProbeExpectation = VehicleFactProbeExpectation | PriceProbeExpectation;
 
+/** Result of one hard-constraint field for one listing at the request step (spec 7.4.8). */
+export type ConstraintResult = "pass" | "fail" | "inactive";
+
+export interface RecommendationListingEvaluation {
+  listing_id: string;
+  /** Authoritative status at the request step (every inventory event strictly before it applied). */
+  status: InventoryStatus;
+  /** Every hard-constraint field: pass or fail when active, inactive otherwise. */
+  constraint_results: Record<HardConstraintField, ConstraintResult>;
+}
+
+/**
+ * Expected truth for one recommendation request (spec 7.4.8). A listing is eligible exactly when its
+ * authoritative status is available and every active constraint passes. No ranking, winner or score.
+ */
+export interface RecommendationExpectation {
+  kind: "recommendation";
+  /** The request's user_message step. */
+  step: number;
+  /** A copy of the request's hard constraints. */
+  hard_constraints: HardConstraints;
+  /** In trusted inventory order. */
+  eligible_listing_ids: string[];
+  /** One per trusted listing, in inventory order. */
+  listing_evaluations: RecommendationListingEvaluation[];
+}
+
 export interface AutomotiveExpected {
   oracle_version: typeof AUTOMOTIVE_ORACLE_VERSION;
   case_id: string;
   domain: ExecutableAutomotiveDomain;
   /** One expectation per declared probe, in declaration order. */
   probe_expectations: ProbeExpectation[];
+  /** One expectation per recommendation request, in step order (empty outside recommendation_integrity). */
+  recommendation_expectations: RecommendationExpectation[];
 }

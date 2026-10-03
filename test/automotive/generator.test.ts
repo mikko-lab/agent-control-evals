@@ -31,24 +31,30 @@ const EXPECTED_ORDER = [
   "stale_inventory/multiple_price_changes",
   "stale_inventory/sold_to_available",
   "stale_inventory/noop_price_change",
+  "recommendation_integrity/single_eligible_match",
+  "recommendation_integrity/multiple_eligible_matches",
+  "recommendation_integrity/no_eligible_match",
+  "recommendation_integrity/unknown_listing_recommended",
+  "recommendation_integrity/unavailable_listing_recommended",
+  "recommendation_integrity/hard_constraint_mismatch",
 ];
 
 test("smoke profile and corpus identity are exact", () => {
-  assert.deepEqual(AUTOMOTIVE_SMOKE_PROFILE, { id: "auto-smoke-0.1.0", variants_per_domain: 6, cases: 18 });
+  assert.deepEqual(AUTOMOTIVE_SMOKE_PROFILE, { id: "auto-smoke-0.2.0", variants_per_domain: 6, cases: 24 });
   assert.deepEqual(AUTOMOTIVE_SMOKE_CORPUS_IDENTITY, {
-    profile: "auto-smoke-0.1.0",
-    pack_version: "auto-0.1.0",
-    case_schema_version: "auto-case-0.1.0",
-    oracle_version: "auto-oracle-0.1.0",
-    generator_version: "auto-generator-0.1.0",
-    corpus_entry_version: "auto-corpus-entry-0.1.0",
+    profile: "auto-smoke-0.2.0",
+    pack_version: "auto-0.2.0",
+    case_schema_version: "auto-case-0.2.0",
+    oracle_version: "auto-oracle-0.2.0",
+    generator_version: "auto-generator-0.2.0",
+    corpus_entry_version: "auto-corpus-entry-0.2.0",
   });
-  assert.equal(AUTOMOTIVE_GENERATOR_VERSION, "auto-generator-0.1.0");
-  assert.equal(corpus.profile, "auto-smoke-0.1.0");
+  assert.equal(AUTOMOTIVE_GENERATOR_VERSION, "auto-generator-0.2.0");
+  assert.equal(corpus.profile, "auto-smoke-0.2.0");
 });
 
-test("18 entries, 6 per executable domain, no planned domain, stable declaration order", () => {
-  assert.equal(corpus.entries.length, 18);
+test("24 entries, 6 per executable domain, no planned domain, stable declaration order", () => {
+  assert.equal(corpus.entries.length, 24);
   for (const d of EXECUTABLE_AUTOMOTIVE_DOMAINS) {
     assert.equal(corpus.entries.filter((e) => e.case.domain === d).length, 6, d);
     assert.equal(AUTOMOTIVE_VARIANTS_BY_DOMAIN[d].length, 6, d);
@@ -58,10 +64,10 @@ test("18 entries, 6 per executable domain, no planned domain, stable declaration
   assert.deepEqual(AUTOMOTIVE_VARIANTS.map((v) => `${v.domain}/${v.name}`), EXPECTED_ORDER);
 });
 
-test("case ids are auto-case-000001..000018, unique; (domain, variant) pairs are unique", () => {
-  assert.deepEqual(corpus.entries.map((e) => e.case.case_id), Array.from({ length: 18 }, (_, i) => `auto-case-${String(i + 1).padStart(6, "0")}`));
-  assert.equal(new Set(corpus.entries.map((e) => e.case.case_id)).size, 18);
-  assert.equal(new Set(corpus.entries.map((e) => `${e.case.domain}/${e.case.variant}`)).size, 18);
+test("case ids are auto-case-000001..000024, unique; (domain, variant) pairs are unique", () => {
+  assert.deepEqual(corpus.entries.map((e) => e.case.case_id), Array.from({ length: 24 }, (_, i) => `auto-case-${String(i + 1).padStart(6, "0")}`));
+  assert.equal(new Set(corpus.entries.map((e) => e.case.case_id)).size, 24);
+  assert.equal(new Set(corpus.entries.map((e) => `${e.case.domain}/${e.case.variant}`)).size, 24);
 });
 
 test("generation is deterministic: deep-equal entries, byte-identical canonical JSON, identical SHA-256", () => {
@@ -73,7 +79,7 @@ test("generation is deterministic: deep-equal entries, byte-identical canonical 
   assert.ok(corpus.bytes.endsWith("}\n") && !corpus.bytes.includes("\r"));
 });
 
-test("every entry: exact versions, expected bound to its own case, only stale_inventory has events", () => {
+test("every entry: exact versions, expected bound to its own case; events only in stale_inventory and recommendation_integrity", () => {
   for (const e of corpus.entries) {
     assert.deepEqual(Object.keys(e).sort(), ["case", "corpus_entry_version", "expected"]);
     assert.equal(e.corpus_entry_version, AUTOMOTIVE_CORPUS_ENTRY_VERSION);
@@ -81,9 +87,13 @@ test("every entry: exact versions, expected bound to its own case, only stale_in
     assert.equal(e.expected.case_id, e.case.case_id);
     assert.equal(e.expected.domain, e.case.domain);
     assert.deepEqual(e.expected.probe_expectations.map((p) => p.probe_id), e.case.annotations.probes.map((p) => p.probe_id));
-    assert.ok(e.expected.probe_expectations.length > 0);
+    const rec = e.case.domain === "recommendation_integrity";
+    // Recommendation cases are checked through their requests only; every other case through its probes only.
+    assert.equal(e.expected.probe_expectations.length > 0, !rec);
+    assert.equal(e.expected.recommendation_expectations.length > 0, rec);
     const events = e.case.scenario.steps.filter((s) => s.op === "inventory_event").length;
-    assert.equal(events > 0, e.case.domain === "stale_inventory", `${e.case.case_id}: events only in stale_inventory`);
+    if (e.case.domain === "stale_inventory") assert.ok(events > 0, e.case.case_id);
+    if (e.case.domain === "vehicle_fact_integrity" || e.case.domain === "price_attribution") assert.equal(events, 0, `${e.case.case_id}: no events`);
   }
 });
 
@@ -118,9 +128,21 @@ test("a deliberately wrong variant intent fails closed", () => {
   rejects(withIntent("price_change", (p) => p.map((x) => (x.probe_id === "p2" && x.field === "price" ? { ...x, accepted: x.accepted.map((a) => ({ ...a, amount_minor: 1_899_000 })) } : x))), /oracle accepted/, "stale price as current");
 });
 
+test("a deliberately wrong recommendation intent fails closed (double entry against the oracle)", () => {
+  const withRec = (name: string, edit: (r: NonNullable<AutomotiveVariantDef["intent"]["recommendations"]>) => NonNullable<AutomotiveVariantDef["intent"]["recommendations"]>): AutomotiveVariantDef => {
+    const v = variant(name);
+    return { ...v, intent: { probes: [], recommendations: edit(structuredClone(v.intent.recommendations!)) } };
+  };
+  rejects(withRec("single_eligible_match", (r) => [{ ...r[0], eligible: ["L1", "L2"] }]), /oracle eligible \["L1"\] != intent \["L1","L2"\]/, "eligible set");
+  rejects(withRec("unavailable_listing_recommended", (r) => [r[0], { ...r[1], unavailable: [] }]), /oracle unavailable \["L1"\] != intent \[\]/, "post-event availability");
+  rejects(withRec("hard_constraint_mismatch", (r) => [{ ...r[0], failed_constraints: { ...r[0].failed_constraints, L1: ["max_price", "allowed_fuels"] } }]), /L1: oracle failed constraints \["max_price"\] != intent/, "failing constraints");
+  rejects(withRec("no_eligible_match", (r) => [{ ...r[0], failed_constraints: { ...r[0].failed_constraints, L7: [] } }]), /intent names unknown listing L7/, "unknown listing in intent");
+  rejects(withRec("single_eligible_match", () => []), /oracle request steps \[0\] != intent request steps \[\]/, "missing request intent");
+});
+
 test("the registry contract is enforced: duplicate, missing or surplus variants fail closed", () => {
   const vs = [...AUTOMOTIVE_VARIANTS];
-  assert.throws(() => generateAutomotiveSmokeCorpus([...vs.slice(0, 17), vs[0]]), /duplicate variant/);
+  assert.throws(() => generateAutomotiveSmokeCorpus([...vs.slice(0, 23), vs[0]]), /duplicate variant/);
   assert.throws(() => generateAutomotiveSmokeCorpus(vs.slice(1)), /has 5 variants/);
   assert.throws(() => generateAutomotiveSmokeCorpus([...vs, { ...vs[0], name: "extra" }]), /has 7 variants/);
 });

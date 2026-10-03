@@ -2,7 +2,7 @@ import type { ExecutableAutomotiveDomain } from "../../spec/automotive/domains";
 import type { AUTOMOTIVE_CASE_SCHEMA_VERSION } from "../../spec/automotive/version";
 
 /**
- * Automotive case model (evaluation INPUT contract), auto-0.1.0.
+ * Automotive case model (evaluation INPUT contract), auto-case-0.2.0.
  *
  * This is the harness-owned description of a scenario, separate from the ACS
  * case model in ../types.ts. Trust is structural (spec section 3): everything
@@ -30,7 +30,7 @@ export const MANDATORY_FEE_POLICIES = ["either_basis_if_labelled", "total_requir
 export const UNTRUSTED_SOURCES = ["listing_description", "seller_message", "dealer_feed_note", "user_review", "image_alt_text"] as const;
 export const UNTRUSTED_AUTHOR_ROLES = ["dealer", "private_seller", "third_party"] as const;
 
-/** auto-0.1.0 steps: only what the three executable domains need. */
+/** Step operations: user turns and authoritative inventory events. */
 export const STEP_OPS = ["user_message", "inventory_event"] as const;
 export const INVENTORY_CHANGE_KINDS = ["status", "price"] as const;
 
@@ -42,6 +42,15 @@ export const PROBE_FIELDS = [...VEHICLE_FACT_FIELDS, "price"] as const;
 export const INTEGER_VALUED_FIELDS = ["odometer", "model_year", "power", "price"] as const;
 /** Probe fields whose canonical value is a string (YYYY-MM or a declared vocabulary). */
 export const STRING_VALUED_FIELDS = ["first_registration", "fuel", "transmission", "status"] as const;
+
+/** Request kinds a user_message step can carry (spec section 7.4.4). */
+export const REQUEST_KINDS = ["recommendation"] as const;
+/**
+ * Hard-constraint fields of a recommendation request, in the fixed order used for rendering, oracle
+ * evaluations and reports (spec section 7.4.5). Every field is always present; a field is active when it
+ * is non-null or, for a list, non-empty.
+ */
+export const HARD_CONSTRAINT_FIELDS = ["max_price", "max_odometer_km", "min_model_year", "allowed_fuels", "allowed_transmissions", "allowed_bodies", "min_seats"] as const;
 
 export type InventoryStatus = (typeof INVENTORY_STATUSES)[number];
 export type Fuel = (typeof FUELS)[number];
@@ -56,6 +65,8 @@ export type VehicleFactField = (typeof VEHICLE_FACT_FIELDS)[number];
 export type ProbeField = (typeof PROBE_FIELDS)[number];
 export type IntegerValuedField = (typeof INTEGER_VALUED_FIELDS)[number];
 export type StringValuedField = (typeof STRING_VALUED_FIELDS)[number];
+export type RequestKind = (typeof REQUEST_KINDS)[number];
+export type HardConstraintField = (typeof HARD_CONSTRAINT_FIELDS)[number];
 
 /** Price bases accepted for a current-price presentation under each declared policy (spec section 7.2.3). */
 export const ACCEPTED_PRICE_BASES: Readonly<Record<MandatoryFeePolicy, readonly PriceBasis[]>> = {
@@ -131,9 +142,38 @@ export interface UntrustedContent {
 
 // ---------------------------------------------------------------- steps
 
+/**
+ * Structured hard constraints of a recommendation request (spec section 7.4.5). Every comparison is exact and
+ * every bound inclusive. Bodies are exact, case-sensitive strings (no frozen body vocabulary in auto-case-0.2.0).
+ */
+export interface HardConstraints {
+  /** Authoritative price at the request step on the declared basis must be <= amount_minor (scenario currency). */
+  max_price: { amount_minor: number; basis: PriceBasis } | null;
+  max_odometer_km: number | null;
+  min_model_year: number | null;
+  /** [] = unconstrained. */
+  allowed_fuels: Fuel[];
+  /** [] = unconstrained. */
+  allowed_transmissions: Transmission[];
+  /** [] = unconstrained. */
+  allowed_bodies: string[];
+  min_seats: number | null;
+}
+
+/**
+ * A structured recommendation request (spec section 7.4.4). It is the buyer's declared requirement, user input
+ * rather than expected truth, so it is adapter-visible. The step text is its deterministic rendering.
+ */
+export interface RecommendationRequest {
+  kind: "recommendation";
+  hard_constraints: HardConstraints;
+}
+
 export interface UserMessageStep {
   op: "user_message";
   text: string;
+  /** null = the turn makes no request. Non-null only in recommendation_integrity cases. */
+  request: RecommendationRequest | null;
 }
 
 export type InventoryChange = { kind: "status"; status: InventoryStatus } | { kind: "price"; price_minor: number };

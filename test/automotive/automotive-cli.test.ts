@@ -41,7 +41,7 @@ function referenceBundle(): string {
 
 // ------------------------------------------------------------ reference acceptance
 
-test("reference-agent acceptance: the CLI writes a valid 18/18 PASS bundle and exits 0", () => {
+test("reference-agent acceptance: the CLI writes a valid 24/24 PASS bundle and exits 0", () => {
   const out = outDir();
   const r = cli("evaluate", "--profile", "smoke", "--reference-agent", "--out", out);
   assert.equal(r.code, 0, r.stderr);
@@ -51,13 +51,13 @@ test("reference-agent acceptance: the CLI writes a valid 18/18 PASS bundle and e
     [r.json.report_schema_valid, r.json.manifest_schema_valid, r.json.run_valid, r.json.complete_execution, r.json.all_required_assessed, r.json.not_run, r.json.exit_code],
     [true, true, true, true, true, 0, 0],
   );
-  assert.deepEqual(r.json.scenario_verdicts, { PASS: 18, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 });
+  assert.deepEqual(r.json.scenario_verdicts, { PASS: 24, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 });
   assert.equal(r.stdout.trim().split("\n").length, 1, "one concise JSON object on stdout");
 
   assert.deepEqual(readdirSync(out).sort(), [...AUTOMOTIVE_BUNDLE_FILES].sort());
   const rep = reportOf(out);
-  assert.deepEqual([rep.scenario_summary.planned_scenarios, rep.scenario_summary.not_run_scenarios], [18, 0]);
-  assert.deepEqual(rep.check_summary.required, { total: 32, PASS: 32, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0, assessed: 32 });
+  assert.deepEqual([rep.scenario_summary.planned_scenarios, rep.scenario_summary.not_run_scenarios], [24, 0]);
+  assert.deepEqual(rep.check_summary.required, { total: 39, PASS: 39, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0, assessed: 39 });
   assert.equal(rep.check_summary.optional.PASS, rep.check_summary.optional.total);
   assert.deepEqual([rep.observation_evidence.quoted_claims.total, rep.observation_evidence.unverifiable_claims.total], [0, 0]);
 });
@@ -119,7 +119,7 @@ test("UNASSESSABLE only: exit 0, but all_required_assessed is false and nothing 
   const out = outDir();
   const r = cli("evaluate", "--profile", "smoke", ...fakeArgs("silent_claim_channel"), "--out", out);
   assert.equal(r.code, 0, r.stdout);
-  assert.deepEqual(r.json.scenario_verdicts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 18, HARNESS_ERROR: 0 });
+  assert.deepEqual(r.json.scenario_verdicts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 24, HARNESS_ERROR: 0 });
   assert.deepEqual([r.json.run_valid, r.json.complete_execution, r.json.all_required_assessed], [true, true, false]);
   const rep = reportOf(out);
   assert.deepEqual([rep.scenario_summary.assessed_scenarios, rep.check_summary.required.assessed], [0, 0]);
@@ -132,7 +132,7 @@ test("HARNESS_ERROR: exit 2, run_valid false, never counted as VIOLATION; a prot
   const r = cli("evaluate", "--profile", "smoke", ...fakeArgs("adapter_error"), "--out", out);
   assert.equal(r.code, 2, r.stdout);
   assert.equal(r.json.run_valid, false);
-  assert.deepEqual(r.json.scenario_verdicts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 18 });
+  assert.deepEqual(r.json.scenario_verdicts, { PASS: 0, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 24 });
   const rep = reportOf(out);
   assert.equal(rep.scenario_summary.violation_count, 0);
   assert.equal(cli("validate-report", "--file", join(out, "report.json")).code, 0, "the bundle of an invalid run is itself a valid report");
@@ -141,7 +141,7 @@ test("HARNESS_ERROR: exit 2, run_valid false, never counted as VIOLATION; a prot
   const out2 = outDir();
   const p = cli("evaluate", "--profile", "smoke", ...fakeArgs("missing_turn"), "--out", out2);
   assert.equal(p.code, 2);
-  assert.deepEqual([p.json.not_run, p.json.complete_execution, p.json.scenario_verdicts.HARNESS_ERROR], [17, false, 1]);
+  assert.deepEqual([p.json.not_run, p.json.complete_execution, p.json.scenario_verdicts.HARNESS_ERROR], [23, false, 1]);
   const ev = evidenceOf(out2);
   assert.deepEqual([ev[0].status, ev[0].adapter_result], ["harness_error", null]);
   assert.ok(ev.slice(1).every((e) => e.status === "not_run" && e.adapter_result === null && e.evaluation === null));
@@ -156,13 +156,13 @@ test("float raw evidence end to end: valid bundle, exact round-trip through evid
   const rb = cli(...args, "--out", b);
   assert.equal(ra.code, 0, ra.stdout + ra.stderr);
   assert.deepEqual([ra.json.report_schema_valid, ra.json.manifest_schema_valid, ra.json.run_valid, ra.json.all_required_assessed], [true, true, true, true]);
-  assert.deepEqual(ra.json.scenario_verdicts, { PASS: 18, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 });
+  assert.deepEqual(ra.json.scenario_verdicts, { PASS: 24, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 });
   assert.equal(ra.json.evidence_sha256, rb.json.evidence_sha256, "deterministic evidence SHA");
   for (const f of AUTOMOTIVE_BUNDLE_FILES) assert.ok(readFileSync(join(a, f)).equals(readFileSync(join(b, f))), f);
   const evidence = readFileSync(join(a, "evidence.jsonl"));
   assert.equal(sha256Hex(evidence), ra.json.evidence_sha256);
   const records = evidenceOf(a);
-  assert.equal(records.length, 18);
+  assert.equal(records.length, 24);
   records.forEach((r, i) => assert.deepEqual(r.adapter_result?.raw_sut_evidence, { big: 1e21, confidence: 0.73, latency_ms: 12.5 + i + 1, ratio: 1 / 3, tiny: 1e-7 }, r.case_id));
   assert.ok(read(a, "evidence.jsonl").includes('"raw_sut_evidence":{"big":1e+21,"confidence":0.73,"latency_ms":13.5,"ratio":0.3333333333333333,"tiny":1e-7}'));
   assert.ok(!read(a, "summary.md").includes("Reference-agent self-test"), "a different self-declared identity gets no self-test notice");
@@ -244,6 +244,6 @@ test("summary / validate commands refuse invalid input with exit 2 and regenerat
   assert.equal(cli("validate-manifest", "--file", join(out, "report.json")).code, 2, "a report is not a manifest");
   assert.equal(cli("validate-report", "--file", join(TMP, "missing.json")).code, 2);
   const future = join(TMP, "future-report.json");
-  writeFileSync(future, JSON.stringify({ ...reportOf(out), report_schema_version: "auto-report-0.2.0" }));
+  writeFileSync(future, JSON.stringify({ ...reportOf(out), report_schema_version: "auto-report-0.3.0" }));
   assert.match(cli("validate-report", "--file", future).json.errors[0], /unsupported report_schema_version/);
 });

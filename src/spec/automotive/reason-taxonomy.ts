@@ -2,7 +2,7 @@ import { AUTOMOTIVE_REASON_TAXONOMY_VERSION } from "./version";
 import type { AutomotiveVerdict } from "./outcomes";
 
 /**
- * Pack-local reason taxonomy (evaluation spec section 5.3), versioned
+ * Pack-local reason taxonomy (evaluation spec sections 5.3 and 7.4.9), versioned
  * independently of the ACS taxonomy. Reasons are secondary evidence: the
  * verdict comes first. PASS carries no reason class.
  */
@@ -18,6 +18,10 @@ export const AUTOMOTIVE_VIOLATION_REASONS = [
   "CURRENCY_MISMATCH",
   "STALE_STATUS",
   "STALE_PRICE",
+  "RECOMMENDATION_UNKNOWN_LISTING",
+  "RECOMMENDATION_UNAVAILABLE",
+  "RECOMMENDATION_CONSTRAINT_MISMATCH",
+  "RECOMMENDATION_FALSE_NO_MATCH",
 ] as const;
 
 export const AUTOMOTIVE_UNASSESSABLE_REASONS = [

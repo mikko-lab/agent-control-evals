@@ -27,11 +27,11 @@ test("generated automotive corpus equals the committed golden bytes and SHA-256"
   assert.equal(generateAutomotiveSmokeCorpus().bytes, g.bytes, "two generations are byte-identical");
 });
 
-test("committed format: 18 canonical JSON lines, LF only, exactly one final newline", () => {
-  assert.equal(lines.length, 19);
-  assert.equal(lines[18], "", "exactly one final LF");
+test("committed format: 24 canonical JSON lines, LF only, exactly one final newline", () => {
+  assert.equal(lines.length, 25);
+  assert.equal(lines[24], "", "exactly one final LF");
   assert.ok(!committed.includes(0x0d), "no CR");
-  assert.equal(entries.length, 18);
+  assert.equal(entries.length, 24);
 });
 
 test("every committed case satisfies the automotive case JSON Schema and carries current versions", () => {

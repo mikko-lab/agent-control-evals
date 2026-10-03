@@ -15,33 +15,34 @@ const REFERENCE = { command: process.execPath, args: [join(ROOT, "dist", "src", 
 const corpus = generateAutomotiveSmokeCorpus().entries;
 
 test("versions and the reference agent's self-declared, unpinned identity", () => {
-  assert.equal(AUTOMOTIVE_EVALUATOR_VERSION, "auto-evaluator-0.1.0");
-  assert.equal(AUTOMOTIVE_REFERENCE_AGENT_VERSION, "auto-reference-agent-0.1.0");
+  assert.equal(AUTOMOTIVE_EVALUATOR_VERSION, "auto-evaluator-0.2.0");
+  assert.equal(AUTOMOTIVE_REFERENCE_AGENT_VERSION, "auto-reference-agent-0.2.0");
   assert.deepEqual(referenceHello(), {
     type: "hello",
-    protocol_version: "auto-adapter-0.1.0",
+    protocol_version: "auto-adapter-0.2.0",
     adapter: "automotive-reference-adapter",
-    adapter_version: "auto-reference-agent-0.1.0",
-    sut: { name: "automotive-reference-agent", version: "auto-reference-agent-0.1.0", revision: null },
+    adapter_version: "auto-reference-agent-0.2.0",
+    sut: { name: "automotive-reference-agent", version: "auto-reference-agent-0.2.0", revision: null },
   });
 });
 
-test("end to end: the full 18-case smoke corpus PASSes against the unfaulted reference agent", async () => {
+test("end to end: the full 24-case smoke corpus PASSes against the unfaulted reference agent", async () => {
   const r = await runAutomotiveCorpus(corpus, REFERENCE);
   assert.equal(r.run_valid, true);
   assert.deepEqual(r.hello, referenceHello());
   assert.deepEqual([r.harness_errors, r.adapter_errors, r.not_run_case_ids], [[], [], []]);
-  assert.equal(r.case_evaluations.length, 18);
-  assert.equal(r.case_results.length, 18);
+  assert.equal(r.case_evaluations.length, 24);
+  assert.equal(r.case_results.length, 24);
   const verdicts = r.case_evaluations.map((e) => e.verdict);
-  assert.deepEqual(verdicts, Array(18).fill("PASS"));
+  assert.deepEqual(verdicts, Array(24).fill("PASS"));
   assert.deepEqual(r.case_evaluations.map((e) => e.case_id), corpus.map((e) => e.case.case_id));
   const required = r.case_evaluations.flatMap((e) => e.checks.filter((c) => c.required));
   const optional = r.case_evaluations.flatMap((e) => e.checks.filter((c) => !c.required));
-  assert.equal(required.length, 32, "one required check per declared probe");
+  assert.equal(required.length, 39, "one required check per declared probe (32) and per recommendation request (7)");
+  assert.equal(required.filter((c) => c.kind === "recommendation").length, 7);
   assert.ok(required.every((c) => c.verdict === "PASS" && c.reasons.length === 0));
   assert.ok(optional.length > 100 && optional.every((c) => c.verdict === "PASS"), `optional checks: ${optional.length}`);
-  for (const d of ["vehicle_fact_integrity", "price_attribution", "stale_inventory"]) {
+  for (const d of ["vehicle_fact_integrity", "price_attribution", "stale_inventory", "recommendation_integrity"]) {
     assert.equal(r.case_evaluations.filter((e) => e.domain === d && e.verdict === "PASS").length, 6, d);
   }
   assert.ok(r.case_evaluations.every((e) => e.quoted_claims.count === 0 && e.unverifiable_claims.count === 0));

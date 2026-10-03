@@ -46,7 +46,7 @@ function gate(): string {
   return out;
 }
 
-test("faults CLI: baseline 18/18 PASS, 10 declared faults all killed, exit 0, one compact JSON object", () => {
+test("faults CLI: baseline 24/24 PASS, 14 declared faults all killed, exit 0, one compact JSON object", () => {
   const out = outDir();
   const r = cli("faults", "--profile", "smoke", "--out", out);
   assert.equal(r.code, 0, r.stdout + r.stderr);
@@ -55,9 +55,9 @@ test("faults CLI: baseline 18/18 PASS, 10 declared faults all killed, exit 0, on
   assert.deepEqual(Object.keys(r.json).sort(), ["baseline_valid", "corpus_sha256", "exit_code", "fault_count", "fault_report_schema_valid", "fault_set_sha256", "fault_set_version", "gate_passed", "invalid", "killed", "out", "survived"]);
   assert.deepEqual(
     [r.json.fault_set_version, r.json.fault_report_schema_valid, r.json.baseline_valid, r.json.gate_passed, r.json.fault_count, r.json.killed, r.json.survived, r.json.invalid, r.json.exit_code],
-    ["auto-faults-0.1.0", true, true, true, 10, 10, 0, 0, 0],
+    ["auto-faults-0.2.0", true, true, true, 14, 14, 0, 0, 0],
   );
-  assert.equal(r.json.corpus_sha256, "49c50fae1deeb1bd6f5a608ea0d9a2d5ebfd252e8df3ad59dc02b7cceb421a54");
+  assert.equal(r.json.corpus_sha256, "beb5b3eccc034d50489c13f39905e3ee94d7ae53d25c8504e54e5d8cd97e0399");
 });
 
 test("fault output layout, schema validity, hash binding and no absolute paths or timestamps", () => {
@@ -89,7 +89,7 @@ test("fault output layout, schema validity, hash binding and no absolute paths o
     assert.ok(text.endsWith("\n") && !text.endsWith("\n\n"), `${relative(out, f)} ends with one LF`);
   }
   const summary = readFileSync(join(out, "fault-summary.md"), "utf8");
-  assert.match(summary, /^# Automotive fault sensitivity auto-faults-0\.1\.0\n\nThis measures detection of the declared deliberately planted synthetic faults\. It is not an assessment of an external automotive AI product\.\n/);
+  assert.match(summary, /^# Automotive fault sensitivity auto-faults-0\.2\.0\n\nThis measures detection of the declared deliberately planted synthetic faults\. It is not an assessment of an external automotive AI product\.\n/);
 });
 
 test("the gate's baseline bundle is byte-identical to a normal evaluate --reference-agent bundle", () => {
@@ -130,7 +130,7 @@ test("a surviving declared fault fails the gate with exit 3", async () => {
   const out = outDir();
   const r = await faultsAutomotive({ root: ROOT, out, harnessIdentity: ID, faultSetFile });
   assert.equal(r.exitCode, 3);
-  assert.deepEqual([(r.stdout as any).gate_passed, (r.stdout as any).killed, (r.stdout as any).survived, (r.stdout as any).invalid], [false, 9, 1, 0]);
+  assert.deepEqual([(r.stdout as any).gate_passed, (r.stdout as any).killed, (r.stdout as any).survived, (r.stdout as any).invalid], [false, 13, 1, 0]);
   const rep = reportOf(out);
   assert.equal(rep.faults.find((f) => f.fault_id === "AF06-current-price-currency")!.status, "survived");
   assert.ok(readFileSync(join(out, "fault-set.json")).equals(readFileSync(faultSetFile)), "the fault set actually used is the one recorded");
@@ -146,7 +146,7 @@ test("an invalid fault run (HARNESS_ERROR) fails the gate with exit 3 and never 
     faultAdapter: (id) => (id === "AF09-stale-status-cache" ? { command: process.execPath, args: [FAKE, "adapter_error"] } : { command: process.execPath, args: [join(ROOT, "dist", "src", "adapter", "automotive-faults", "main.js"), id] }),
   });
   assert.equal(r.exitCode, 3);
-  assert.deepEqual([(r.stdout as any).killed, (r.stdout as any).survived, (r.stdout as any).invalid], [9, 0, 1]);
+  assert.deepEqual([(r.stdout as any).killed, (r.stdout as any).survived, (r.stdout as any).invalid], [13, 0, 1]);
   const f = reportOf(out).faults.find((x) => x.fault_id === "AF09-stale-status-cache")!;
   assert.equal(f.status, "invalid");
   assert.match(f.invalid_reason ?? "", /run_valid false|HARNESS_ERROR/);
@@ -170,7 +170,7 @@ test("an invalid baseline is a harness failure (exit 2): no fault is run and no 
   }
 });
 
-test("a foreign adapter with a perfect 18/18 PASS is not a reference baseline: exit 2, no fault is run", async () => {
+test("a foreign adapter with a perfect 24/24 PASS is not a reference baseline: exit 2, no fault is run", async () => {
   const out = outDir();
   let faultRuns = 0;
   const r = await faultsAutomotive({
@@ -185,7 +185,7 @@ test("a foreign adapter with a perfect 18/18 PASS is not a reference baseline: e
   assert.equal(faultRuns, 0);
   assert.ok(!existsSync(join(out, "fault-sensitivity.json")) && !existsSync(join(out, "faults")));
   const baselineReport = JSON.parse(readFileSync(join(out, "baseline", "report.json"), "utf8"));
-  assert.equal(baselineReport.scenario_summary.verdict_counts.PASS, 18, "the refused baseline really was a technically perfect run");
+  assert.equal(baselineReport.scenario_summary.verdict_counts.PASS, 24, "the refused baseline really was a technically perfect run");
 });
 
 test("an invalid fault set or a golden mismatch is a harness failure (exit 2); stale output is removed first", async () => {
@@ -193,7 +193,7 @@ test("an invalid fault set or a golden mismatch is a harness failure (exit 2); s
   mkdirSync(join(out, "faults", "stale"), { recursive: true });
   writeFileSync(join(out, "fault-sensitivity.json"), "{}\n");
   const bad = join(TMP, "bad-manifest.json");
-  writeFileSync(bad, JSON.stringify({ fault_set_version: "auto-faults-0.1.0", faults: [] }));
+  writeFileSync(bad, JSON.stringify({ fault_set_version: "auto-faults-0.2.0", faults: [] }));
   const r = await faultsAutomotive({ root: ROOT, out, harnessIdentity: ID, faultSetFile: bad });
   assert.equal(r.exitCode, 2);
   assert.match((r.stdout as any).error, /invalid fault set/);
@@ -216,7 +216,7 @@ test("validate-fault-report refuses invalid, unreadable and future-version repor
   writeFileSync(f, JSON.stringify(doc));
   assert.equal(cli("validate-fault-report", "--file", f).code, 2);
   const future = join(TMP, "future-fault-report.json");
-  writeFileSync(future, JSON.stringify({ ...reportOf(out), fault_report_version: "auto-fault-report-0.2.0" }));
+  writeFileSync(future, JSON.stringify({ ...reportOf(out), fault_report_version: "auto-fault-report-0.3.0" }));
   const r = cli("validate-fault-report", "--file", future);
   assert.equal(r.code, 2);
   assert.match(r.json.errors[0], /unsupported fault_report_version/);

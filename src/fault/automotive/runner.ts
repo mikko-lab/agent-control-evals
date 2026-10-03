@@ -1,7 +1,7 @@
 /**
  * Automotive fault-sensitivity runner: owns I/O and process execution for the fault gate.
  *
- *   validated fault set -> baseline reference run (must be a clean 18/18 PASS) ->
+ *   validated fault set -> baseline reference run (must be a clean full PASS) ->
  *   every declared fault against the full corpus, through the normal adapter protocol, D1
  *   evaluator and D2 bundle -> pure judge -> fault report -> schema validation -> files.
  *

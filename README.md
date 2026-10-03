@@ -5,7 +5,7 @@ Deterministic, reproducible evaluation harnesses for AI agent systems. The repos
 | Track | What it evaluates | Sensitivity self-test | Statistics |
 |---|---|---|---|
 | **[ACS runtime-control evaluation](#acs-runtime-control-evaluation)** (v0.1) | One pinned open-source SUT, its runtime and component control boundaries | Source-patch mutation of the pinned SUT | Declared statistical model with conditional confidence bounds |
-| **[Automotive Agent Assurance](#automotive-agent-assurance)** (auto-0.1.0) | Vendor-neutral automotive agent behaviour through an adapter protocol: structured observations first, deterministic oracle, no LLM judge, 3 executable domains, evidence bundle | Synthetic behaviour faults (`auto-faults-0.1.0`) | None: counts and designed coverage only |
+| **[Automotive Agent Assurance](#automotive-agent-assurance)** (auto-0.2.0) | Vendor-neutral automotive agent behaviour through an adapter protocol: structured observations first, deterministic oracle, no LLM judge, 4 executable domains, evidence bundle | Synthetic behaviour faults (`auto-faults-0.2.0`) | None: counts and designed coverage only |
 
 Neither track shows that any system is secure, safe, certified, compliant or production-ready.
 
@@ -130,19 +130,20 @@ There is no OpenShell adapter or other SUT, no LLM oracle and no LLM case genera
 
 # Automotive Agent Assurance
 
-A vendor-neutral evaluation pack for automotive marketplace and dealership agents: does an agent state vehicle facts, prices and inventory status in line with the trusted data it was given? The specification is [`docs/automotive/evaluation-spec.md`](docs/automotive/evaluation-spec.md).
+A vendor-neutral evaluation pack for automotive marketplace and dealership agents: does an agent state vehicle facts, prices and inventory status in line with the trusted data it was given, and are the vehicles it recommends as matches real, available and within the buyer's declared hard constraints? The specification is [`docs/automotive/evaluation-spec.md`](docs/automotive/evaluation-spec.md).
 
-- **Adapter protocol.** Any SUT is reached through a JSON Lines process adapter (`auto-adapter-0.1.0`). Expected truth is never sent to the adapter.
-- **Structured observation first.** The adapter reports structured claims (listing, field, value, unit, attribution), status presentations, references and event-delivery acknowledgements. The evaluator never parses free text and never uses a model judge.
+- **Adapter protocol.** Any SUT is reached through a JSON Lines process adapter (`auto-adapter-0.2.0`). Expected truth is never sent to the adapter.
+- **Structured observation first.** The adapter reports structured claims (listing, field, value, unit, attribution), status presentations, references, event-delivery acknowledgements and, per turn, a dedicated recommendation observation (outcome, plus items with rank, slot and match/alternative presentation). The evaluator never parses free text and never uses a model judge.
 - **Deterministic oracle.** Expected truth is derived from the synthetic scenario before any SUT call, and the committed corpus is golden-checked.
-- **Three executable domains** in auto-0.1.0:
+- **Four executable domains** in auto-0.2.0:
   - `vehicle_fact_integrity`
   - `price_attribution`
   - `stale_inventory`
+  - `recommendation_integrity`: every listing presented as a match must be known, available at that turn and satisfy every declared hard constraint (price on an explicit basis, odometer, model year, fuel, transmission, body, seats); an alternative must be known and available; an explicit `no_match` is a violation while an eligible listing exists. Ranking quality, relevance and "best car" are not judged, and no recall is measured.
 
-  The other domains in the specification (recommendation integrity, financing facts, prompt injection from listings, unauthorised external actions, confirmation before action, sponsored-ranking separation, human handoff) are **planned and not evaluated**.
+  The other domains in the specification (financing facts, prompt injection from listings, unauthorised external actions, confirmation before action, sponsored-ranking separation, human handoff) are **planned and not evaluated**.
 - **Evidence bundle.** Every run writes `corpus.jsonl`, `evidence.jsonl`, `manifest.json`, `report.json` and `summary.md`, bound together by SHA-256.
-- **Synthetic self-tests.** A deterministic in-repo reference agent exercises the harness path, and ten synthetic behaviour faults check that the harness detects declared faults.
+- **Synthetic self-tests.** A deterministic in-repo reference agent exercises the harness path, and fourteen synthetic behaviour faults check that the harness detects declared faults.
 
 ### Automotive evidence chain
 
@@ -180,7 +181,7 @@ npm run ace:auto -- faults \
   --out out/automotive-faults
 ```
 
-- The reference run is a **harness self-test**: its 18/18 PASS validates the harness path.
+- The reference run is a **harness self-test**: its 24/24 PASS validates the harness path.
 - The fault run checks that the harness **detects the declared synthetic faults**.
 - Neither run assesses an external automotive product.
 
@@ -197,7 +198,7 @@ npm run ace:auto -- evaluate \
 ```
 
 - The adapter is started **without a shell**, with the command and each `--adapter-arg` passed separately.
-- It receives only the adapter view of each case. Expectations, probes and planted values are never sent.
+- It receives only the adapter view of each case. Expectations, probes, planted values and eligible sets are never sent. A structured recommendation request is user input and is part of the adapter view.
 - Adapter and SUT identity are **self-declared** through the adapter hello and labelled as such in every manifest and summary.
 - The evaluator checks the structured observation the adapter reports. Whether that matches the UI or text an end user sees is the adapter's responsibility and is not verified (a fidelity limitation stated in every report).
 - No production integration ships with this repository.
@@ -212,7 +213,7 @@ npm run ace:auto -- evaluate \
 
 ### Automotive fault sensitivity
 
-`auto-faults-0.1.0` ([`faults/automotive/manifest.json`](faults/automotive/manifest.json)) is a set of ten deliberately planted synthetic behaviours:
+`auto-faults-0.2.0` ([`faults/automotive/manifest.json`](faults/automotive/manifest.json)) is a set of fourteen deliberately planted synthetic behaviours:
 - cross-listing odometer;
 - untrusted odometer promotion;
 - unknown-listing fact;
@@ -222,7 +223,11 @@ npm run ace:auto -- evaluate \
 - untrusted price promotion;
 - superseded price shown as current;
 - stale status cache;
-- stale price cache.
+- stale price cache;
+- unknown recommended listing;
+- stale status cache in recommendations (a sold listing keeps being recommended);
+- ignored price constraint (a listing over the buyer's price bound presented as a match);
+- false no-match.
 
 The synthetic fault agent (`src/adapter/automotive-faults/`) derives its behaviour from the reference agent's observations. It activates only from adapter-visible scenario data and speaks the normal adapter protocol. These are **behaviour faults, not source mutants**: unlike the ACS track, there is no pinned automotive SUT source tree to patch.
 
@@ -230,7 +235,7 @@ The gate passes only when all three conditions hold:
 
 1. the baseline reference agent PASSes every scenario;
 2. every fault run remains technically valid over the whole corpus;
-3. every declared fault produces a VIOLATION finding on one of its declared witness variants, for its declared field, carrying all of its declared reasons.
+3. every declared fault produces a VIOLATION finding on one of its declared witness variants, for its declared field (none for recommendation faults), carrying all of its declared reasons.
 
 A harness or protocol failure never kills a fault. VIOLATIONs outside the witnesses are recorded as descriptive collateral findings only. The output (`fault-sensitivity.json`, `fault-summary.md`, plus a normal evidence bundle for the baseline and for every fault) contains counts and a gate boolean only.
 
@@ -256,7 +261,8 @@ A harness or protocol failure never kills a fault. VIOLATIONs outside the witnes
 - Adapter structured-observation fidelity is not UI fidelity.
 - The corpus is synthetic and stratified by designed variants.
 - The fault set is human-authored. The evaluator, oracle and fault set may share conceptual blind spots.
-- External effects and actions are not executable domains in auto-0.1.0.
+- External effects and actions are not executable domains in auto-0.2.0.
+- Recommendation integrity checks match precision against declared hard constraints only; soft preferences, ranking and recall are out of scope.
 
 The full list of limitations is emitted into every automotive report and fault report.
 

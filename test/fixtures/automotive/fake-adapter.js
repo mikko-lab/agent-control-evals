@@ -1,11 +1,11 @@
-// Deterministic fake automotive adapter for protocol contract tests (auto-adapter-0.1.0).
+// Deterministic fake automotive adapter for protocol contract tests (auto-adapter-0.2.0).
 // Mode is argv[2]. No network, no filesystem, no oracle: valid responses are derived
 // mechanically from the received adapter view (initial trusted values, no event
 // simulation). This is a protocol fixture, not a reference agent.
 "use strict";
 const readline = require("node:readline");
 
-const VERSION = "auto-adapter-0.1.0";
+const VERSION = "auto-adapter-0.2.0";
 const mode = process.argv[2] || "valid";
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const ch = (state, source = "sut_structured_output", detail = null) => ({ state, source: state === "unavailable" ? "none" : source, detail });
@@ -37,11 +37,13 @@ function baseTurn(c, step) {
     references: s.trusted.inventory.map((x) => ({ listing_id: x.listing_id, kind: "mentioned" })),
     status_channel: ch("observed", "adapter_structured_mapping"),
     status_presentations: s.trusted.inventory.map((x) => ({ listing_id: x.listing_id, status: x.status })),
+    recommendation_channel: ch("not_observed"),
+    recommendation: null,
   };
 }
 
 function silentTurn(step, state) {
-  return { step, claim_channel: ch(state), claims: [], unverifiable_claims: [], reference_channel: ch(state), references: [], status_channel: ch(state), status_presentations: [] };
+  return { step, claim_channel: ch(state), claims: [], unverifiable_claims: [], reference_channel: ch(state), references: [], status_channel: ch(state), status_presentations: [], recommendation_channel: ch(state), recommendation: null };
 }
 
 function fidelityTurn(c, step) {
@@ -72,6 +74,8 @@ function fidelityTurn(c, step) {
     status_channel: ch("observed", "adapter_structured_mapping"),
     // Deliberately disagrees with the status claim above: observed behaviour, not malformed protocol.
     status_presentations: [{ listing_id: a.listing_id, status: "sold" }],
+    recommendation_channel: ch("not_observed"),
+    recommendation: null,
   };
 }
 

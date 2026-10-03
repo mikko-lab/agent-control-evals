@@ -151,7 +151,7 @@ test("structural and referential fixture problems fail closed at construction", 
     ["probe step out of range", (c) => (c.annotations.probes[0].step = 7), /is not a user_message step/],
     ["planted on unknown content", (c) => c.annotations.planted.push({ content_id: "content-9", listing_id: "L1", field: "odometer", value: 1 }), /unknown content_id/],
     ["event in non-stale domain", (c) => c.scenario.steps.push(statusEvent("L1", "sold")), /transitions belong to stale_inventory/],
-    ["planned domain", (c) => (c.domain = "human_ai_handoff"), /not an executable auto-0.1.0 domain/],
+    ["planned domain", (c) => (c.domain = "human_ai_handoff"), /not an executable automotive domain/],
     ["ACS-style id", (c) => (c.case_id = "case-000001"), /case_id case-000001/],
   ];
   for (const [name, change, expected] of cases) {

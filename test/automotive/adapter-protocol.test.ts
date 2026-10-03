@@ -55,9 +55,22 @@ const turnAt = (step: number, o: Record<string, unknown> = {}) => ({
   references: [{ listing_id: "L1", kind: "mentioned" }],
   status_channel: ch("observed", "adapter_structured_mapping"),
   status_presentations: [{ listing_id: "L1", status: "available" }],
+  recommendation_channel: ch("not_observed"),
+  recommendation: null,
   ...o,
 });
-const silent = (step: number, state = "not_observed") => ({ step, claim_channel: ch(state), claims: [], unverifiable_claims: [], reference_channel: ch(state), references: [], status_channel: ch(state), status_presentations: [] });
+const silent = (step: number, state = "not_observed") => ({
+  step,
+  claim_channel: ch(state),
+  claims: [],
+  unverifiable_claims: [],
+  reference_channel: ch(state),
+  references: [],
+  status_channel: ch(state),
+  status_presentations: [],
+  recommendation_channel: ch(state),
+  recommendation: null,
+});
 
 /** A well-formed result for a view: one turn per user step, one delivered acknowledgement per event. */
 function okResult(v: AutomotiveCaseForAdapter, turnFor: (step: number) => unknown = (s) => turnAt(s)): any {

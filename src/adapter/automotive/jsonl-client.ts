@@ -1,5 +1,5 @@
 /**
- * Harness side of the automotive adapter protocol (auto-adapter-0.1.0): spawns
+ * Harness side of the automotive adapter protocol (auto-adapter-0.2.0): spawns
  * the adapter process (no shell) and exchanges JSON Lines over stdin/stdout,
  * one request in flight at a time.
  *

@@ -1,5 +1,5 @@
 /**
- * Deterministic automotive smoke corpus generator (auto-generator-0.1.0).
+ * Deterministic automotive smoke corpus generator (auto-generator-0.2.0).
  *
  * One case per registered variant, in declaration order, numbered
  * auto-case-000001.. . For each case the oracle runs once and its output is
@@ -18,11 +18,12 @@ import { sha256Hex } from "../../util/hash";
 import { EXECUTABLE_AUTOMOTIVE_DOMAINS } from "../../spec/automotive/domains";
 import { AUTOMOTIVE_CORPUS_ENTRY_VERSION, AUTOMOTIVE_ORACLE_VERSION } from "../../spec/automotive/version";
 import { deriveAutomotiveExpected } from "../../oracle/automotive/expected";
-import type { AutomotiveExpected, ProbeExpectation } from "../../oracle/automotive/types";
+import type { AutomotiveExpected, ProbeExpectation, RecommendationExpectation } from "../../oracle/automotive/types";
+import { HARD_CONSTRAINT_FIELDS } from "../automotive/types";
 import { buildAutomotiveCase } from "../automotive/builders";
 import { AUTOMOTIVE_SMOKE_PROFILE } from "../automotive/profiles";
 import { AUTOMOTIVE_VARIANTS } from "../automotive/registry";
-import type { AutomotiveVariantDef, ProbeIntent } from "../automotive/variant";
+import type { AutomotiveVariantDef, ProbeIntent, RecommendationIntent } from "../automotive/variant";
 import type { AutomotiveCorpusEntry } from "./corpus-entry";
 
 export class AutomotiveGeneratorError extends Error {
@@ -64,6 +65,21 @@ function checkProbe(where: string, intent: ProbeIntent, e: ProbeExpectation, cur
   return p;
 }
 
+function checkRecommendation(where: string, intent: RecommendationIntent, e: RecommendationExpectation): string[] {
+  const p: string[] = [];
+  if (!sameJson(e.eligible_listing_ids, intent.eligible)) p.push(`${where}: oracle eligible ${JSON.stringify(e.eligible_listing_ids)} != intent ${JSON.stringify(intent.eligible)}`);
+  const unavailable = e.listing_evaluations.filter((l) => l.status !== "available").map((l) => l.listing_id);
+  if (!sameJson(unavailable, intent.unavailable)) p.push(`${where}: oracle unavailable ${JSON.stringify(unavailable)} != intent ${JSON.stringify(intent.unavailable)}`);
+  const known = new Set(e.listing_evaluations.map((l) => l.listing_id));
+  for (const id of Object.keys(intent.failed_constraints)) if (!known.has(id)) p.push(`${where}: intent names unknown listing ${id}`);
+  for (const l of e.listing_evaluations) {
+    const failed = HARD_CONSTRAINT_FIELDS.filter((f) => l.constraint_results[f] === "fail");
+    const want = intent.failed_constraints[l.listing_id] ?? [];
+    if (!sameJson(failed, want)) p.push(`${where}/${l.listing_id}: oracle failed constraints ${JSON.stringify(failed)} != intent ${JSON.stringify(want)}`);
+  }
+  return p;
+}
+
 /** Problems between a variant's intent and the oracle output (empty = they agree). */
 export function variantIntentProblems(def: AutomotiveVariantDef, expected: AutomotiveExpected, currency: string): string[] {
   const where = `${def.domain}/${def.name}`;
@@ -71,8 +87,14 @@ export function variantIntentProblems(def: AutomotiveVariantDef, expected: Autom
   if (intents.size !== def.intent.probes.length) return [`${where}: duplicate probe_id in intent`];
   const got = expected.probe_expectations.map((e) => e.probe_id);
   if (!sameJson([...got].sort(), [...intents.keys()].sort())) return [`${where}: oracle probes ${JSON.stringify(got)} != intent probes ${JSON.stringify([...intents.keys()])}`];
-  if (got.length === 0) return [`${where}: a variant must declare at least one probe`];
-  return expected.probe_expectations.flatMap((e) => checkProbe(`${where}/${e.probe_id}`, intents.get(e.probe_id)!, e, currency));
+  const recIntents = def.intent.recommendations ?? [];
+  const recSteps = expected.recommendation_expectations.map((e) => e.step);
+  if (!sameJson(recSteps, recIntents.map((r) => r.step))) return [`${where}: oracle request steps ${JSON.stringify(recSteps)} != intent request steps ${JSON.stringify(recIntents.map((r) => r.step))}`];
+  if (got.length === 0 && recSteps.length === 0) return [`${where}: a variant must declare at least one probe or recommendation request`];
+  return [
+    ...expected.probe_expectations.flatMap((e) => checkProbe(`${where}/${e.probe_id}`, intents.get(e.probe_id)!, e, currency)),
+    ...expected.recommendation_expectations.flatMap((e, k) => checkRecommendation(`${where}/request@${e.step}`, recIntents[k], e)),
+  ];
 }
 
 /** Builds one corpus entry: case, oracle output (once), double-entry check. */

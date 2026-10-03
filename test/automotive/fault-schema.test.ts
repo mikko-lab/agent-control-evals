@@ -27,7 +27,8 @@ test("schema/code parity: versions, domains, probe fields, VIOLATION reasons, fa
   assert.equal(rep.properties.profile.const, AUTOMOTIVE_SMOKE_CORPUS_IDENTITY.profile);
   for (const s of [set, rep]) {
     assert.deepEqual(s.$defs.domain.enum, [...EXECUTABLE_AUTOMOTIVE_DOMAINS]);
-    assert.deepEqual(s.$defs.field.enum, [...PROBE_FIELDS]);
+    assert.deepEqual(s.$defs.field, { oneOf: [{ type: "null" }, { enum: [...PROBE_FIELDS] }] });
+    assert.deepEqual(s.$defs.fieldForDomain.else.properties.expected_field.enum, [...PROBE_FIELDS]);
     assert.deepEqual(s.$defs.reasons.items.enum, [...AUTOMOTIVE_VIOLATION_REASONS]);
     assert.equal(s.$defs.variants.items.pattern, AUTOMOTIVE_VARIANT_PATTERN);
   }
@@ -61,7 +62,10 @@ test("the committed fault set validates; malformed fault sets and unsupported ve
     mutate(d);
     assert.equal(validateAutomotiveFaultSetSchema(d).ok, false, what);
   };
-  bad("future version", (d) => (d.fault_set_version = "auto-faults-0.2.0"));
+  bad("future version", (d) => (d.fault_set_version = "auto-faults-0.3.0"));
+  bad("previous version", (d) => (d.fault_set_version = "auto-faults-0.1.0"));
+  bad("null field outside recommendation_integrity", (d) => (d.faults[0].expected_field = null));
+  bad("field on a recommendation fault", (d) => (d.faults.at(-1).expected_field = "price"));
   bad("severity", (d) => (d.faults[0].severity = "high"));
   bad("bad fault id", (d) => (d.faults[0].fault_id = "fault one"));
   bad("non-VIOLATION reason", (d) => (d.faults[0].expected_reasons = ["TIMEOUT"]));
@@ -71,17 +75,17 @@ test("the committed fault set validates; malformed fault sets and unsupported ve
 });
 
 function sampleReport(): any {
-  const counts = { PASS: 17, VIOLATION: 1, UNASSESSABLE: 0, HARNESS_ERROR: 0 };
+  const counts = { PASS: 23, VIOLATION: 1, UNASSESSABLE: 0, HARNESS_ERROR: 0 };
   return {
     fault_report_version: AUTOMOTIVE_FAULT_REPORT_VERSION,
     fault_set_version: AUTOMOTIVE_FAULT_SET_VERSION,
     fault_set_sha256: "b".repeat(64),
     fault_adapter_version: AUTOMOTIVE_FAULT_ADAPTER_VERSION,
     pack_version: AUTOMOTIVE_PACK_VERSION,
-    profile: "auto-smoke-0.1.0",
+    profile: "auto-smoke-0.2.0",
     corpus_sha256: "c".repeat(64),
     harness: { commit: "unknown", worktree_clean: false },
-    baseline: { report_path: "baseline/report.json", evidence_sha256: "d".repeat(64), run_valid: true, complete_execution: true, all_required_assessed: true, verdict_counts: { PASS: 18, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 } },
+    baseline: { report_path: "baseline/report.json", evidence_sha256: "d".repeat(64), run_valid: true, complete_execution: true, all_required_assessed: true, verdict_counts: { PASS: 24, VIOLATION: 0, UNASSESSABLE: 0, HARNESS_ERROR: 0 } },
     gate: { passed: false, fault_count: 2, killed: 1, survived: 0, invalid: 1 },
     faults: [
       {
@@ -145,5 +149,9 @@ test("fault report schema: a valid report passes; malformed reports and unsuppor
   bad("bad case id", (d) => (d.faults[0].witness_case_ids = ["case-9"]));
   bad("too few limitations", (d) => d.limitations.pop());
   bad("severity on a fault", (d) => (d.faults[0].severity = "high"));
-  for (const v of ["auto-fault-report-0.2.0", undefined, null]) assert.match(validateAutomotiveFaultReport({ ...sampleReport(), fault_report_version: v }).errors[0], /unsupported fault_report_version/);
+  bad("recommendation fault with a field", (d) => ((d.faults[1].domain = "recommendation_integrity"), (d.faults[1].expected_reasons = ["RECOMMENDATION_FALSE_NO_MATCH"])));
+  const rec = sampleReport();
+  Object.assign(rec.faults[1], { domain: "recommendation_integrity", expected_field: null, expected_reasons: ["RECOMMENDATION_FALSE_NO_MATCH"], witness_variants: ["single_eligible_match"] });
+  assert.deepEqual(validateAutomotiveFaultReport(rec), { ok: true, errors: [] });
+  for (const v of ["auto-fault-report-0.1.0", "auto-fault-report-0.3.0", undefined, null]) assert.match(validateAutomotiveFaultReport({ ...sampleReport(), fault_report_version: v }).errors[0], /unsupported fault_report_version/);
 });

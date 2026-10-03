@@ -1,5 +1,5 @@
 /**
- * Fault-set manifest validation (auto-faults-0.1.0). Pure: the caller supplies the parsed
+ * Fault-set manifest validation (auto-faults-0.2.0). Pure: the caller supplies the parsed
  * document, the corpus entries and the implemented fault ids. Fails closed on any problem.
  */
 import { AUTOMOTIVE_VIOLATION_REASONS } from "../../spec/automotive/reason-taxonomy";
@@ -33,7 +33,10 @@ export function automotiveFaultSetProblems(doc: unknown, entries: readonly Autom
     if (!has(EXECUTABLE_AUTOMOTIVE_DOMAINS, f.domain)) p.push(`${at}: unknown domain ${JSON.stringify(f.domain)}`);
     if (blank(f.description)) p.push(`${at}: empty description`);
     if (blank(f.target_behavior)) p.push(`${at}: empty target_behavior`);
-    if (!has(PROBE_FIELDS, f.expected_field)) p.push(`${at}: invalid expected_field ${JSON.stringify(f.expected_field)}`);
+    // Recommendation checks carry no field (spec 7.4.9), so their witness rule matches on field null.
+    if (f.domain === "recommendation_integrity") {
+      if (f.expected_field !== null) p.push(`${at}: a recommendation_integrity fault must declare expected_field null, got ${JSON.stringify(f.expected_field)}`);
+    } else if (!has(PROBE_FIELDS, f.expected_field)) p.push(`${at}: invalid expected_field ${JSON.stringify(f.expected_field)}`);
     const reasons = Array.isArray(f.expected_reasons) ? f.expected_reasons : [];
     if (reasons.length === 0) p.push(`${at}: expected_reasons must be a non-empty array`);
     for (const r of reasons) if (!has(AUTOMOTIVE_VIOLATION_REASONS, r)) p.push(`${at}: ${JSON.stringify(r)} is not a VIOLATION reason`);

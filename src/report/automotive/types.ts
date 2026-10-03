@@ -1,6 +1,6 @@
 /**
- * Automotive evidence bundle contracts (auto-evidence-0.1.0, auto-manifest-0.1.0,
- * auto-report-0.1.0).
+ * Automotive evidence bundle contracts (auto-evidence-0.2.0, auto-manifest-0.2.0,
+ * auto-report-0.2.0).
  *
  * This is a presentation and evidence layer over the D1 evaluator output: it adds
  * identity, hashes and counts, never verdicts. Nothing here is a score, grade,
@@ -147,7 +147,9 @@ export interface AutomotiveObservationEvidence {
   unverifiable_claims: { total: number; by_classification: Record<string, number> };
   attribution_counts: Record<string, number>;
   /** Per channel: observation state -> number of turns. */
-  channel_states: { claim: Record<string, number>; reference: Record<string, number>; status: Record<string, number> };
+  channel_states: { claim: Record<string, number>; reference: Record<string, number>; status: Record<string, number>; recommendation: Record<string, number> };
+  /** Observed recommendation outcome -> number of turns. */
+  recommendation_outcomes: Record<string, number>;
   event_delivery_states: Record<string, number>;
   unknown_reference_listing_ids: string[];
 }
@@ -169,6 +171,8 @@ export interface AutomotiveReportFinding {
   reasons: AutomotiveReasonClass[];
   expected: unknown | null;
   observed: unknown | null;
+  /** Required recommendation checks: decision row and per-item evidence (spec 7.4.9). null otherwise. */
+  diagnostics: AutomotiveCheckResult["diagnostics"];
 }
 
 export interface AutomotiveReport {

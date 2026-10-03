@@ -96,7 +96,7 @@ test("synthetic truth never touches the case or its stored expectation", () => {
 });
 
 test("scenario verdict precedence is exactly HARNESS_ERROR > VIOLATION > required UNASSESSABLE > PASS (needs an assessed required check)", () => {
-  const c = (verdict: AutomotiveCheckResult["verdict"], required: boolean): AutomotiveCheckResult => ({ check_id: "x", kind: "probe", required, step: 0, listing_id: null, field: null, verdict, reasons: [], expected: null, observed: null });
+  const c = (verdict: AutomotiveCheckResult["verdict"], required: boolean): AutomotiveCheckResult => ({ check_id: "x", kind: "probe", required, step: 0, listing_id: null, field: null, verdict, reasons: [], expected: null, observed: null, diagnostics: null });
   assert.equal(scenarioVerdict([c("PASS", true), c("PASS", false)]), "PASS");
   assert.equal(scenarioVerdict([c("UNASSESSABLE", true), c("PASS", false)]), "UNASSESSABLE");
   assert.equal(scenarioVerdict([c("PASS", true), c("VIOLATION", false)]), "VIOLATION", "an optional definite violation makes the scenario a violation");
@@ -498,6 +498,12 @@ test("every VIOLATION and UNASSESSABLE reason class is produced by some evaluato
   add(evalWith(entry("status_available"), (o) => ((claim(o, 0, "L1", "status").status = "unknown"), (presentation(o, 0, "L1").status = "unknown"))));
   add(evalWith(entry("available_to_sold"), (o) => (o.event_acknowledgements[0].delivery = { state: "not_delivered", source: "push_ack", detail: null })));
   add(evalWith(entry("odometer_and_power"), (o) => (claim(o, 0, "L1", "odometer").attribution = { kind: "approximate" })));
+  const recommend = (variant: string, step: number, recommendation: NonNullable<AutomotiveObservations["turns"][number]["recommendation"]>) =>
+    evalWith(entry(variant), (o) => ((turn(o, step).recommendation_channel = { state: "observed", source: "sut_structured_output", detail: null }), (turn(o, step).recommendation = recommendation)));
+  add(recommend("unknown_listing_recommended", 0, { outcome: "recommendations", items: [{ listing_id: "L9", rank: 1, slot: 1, presentation: "match" }] }));
+  add(recommend("unavailable_listing_recommended", 2, { outcome: "recommendations", items: [{ listing_id: "L1", rank: 1, slot: 1, presentation: "match" }] }));
+  add(recommend("hard_constraint_mismatch", 0, { outcome: "recommendations", items: [{ listing_id: "L1", rank: 1, slot: 1, presentation: "match" }] }));
+  add(recommend("single_eligible_match", 0, { outcome: "no_match", items: [] }));
   for (const r of [...AUTOMOTIVE_VIOLATION_REASONS, ...AUTOMOTIVE_UNASSESSABLE_REASONS]) assert.ok(seen.has(r), `reason ${r} not produced`);
 });
 

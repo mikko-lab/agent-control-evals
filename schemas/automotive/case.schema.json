@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/case.schema.json",
-  "title": "Automotive Agent Assurance case, auto-0.1.0 (harness-owned input contract; not the ACS case schema)",
-  "description": "Root: the harness-owned case including harness-only annotations. $defs/adapterCase: the view an adapter may receive (no annotations). Trust is structural: scenario.trusted is trusted, scenario.untrusted is untrusted. All numbers are integers (money in minor units, km, kW).",
+  "title": "Automotive Agent Assurance case, auto-case-0.2.0 (harness-owned input contract; not the ACS case schema)",
+  "description": "Root: the harness-owned case including harness-only annotations. $defs/adapterCase: the view an adapter may receive (no annotations). Trust is structural: scenario.trusted is trusted, scenario.untrusted is untrusted. All numbers are integers (money in minor units, km, kW). A user_message step carries request: null or a structured recommendation request whose rendering is the step text (checked by the fixture validator).",
   "type": "object",
   "required": ["case_schema_version", "case_id", "domain", "variant", "scenario", "annotations"],
   "additionalProperties": false,
@@ -14,16 +14,22 @@
     "scenario": { "$ref": "#/$defs/scenario" },
     "annotations": { "$ref": "#/$defs/annotations" }
   },
-  "allOf": [{ "$ref": "#/$defs/domainRules" }],
+  "allOf": [
+    { "$ref": "#/$defs/domainRules" },
+    {
+      "if": { "required": ["domain"], "properties": { "domain": { "const": "recommendation_integrity" } } },
+      "then": { "properties": { "annotations": { "properties": { "probes": { "maxItems": 0 } } } } }
+    }
+  ],
   "$defs": {
-    "caseSchemaVersion": { "const": "auto-case-0.1.0" },
+    "caseSchemaVersion": { "const": "auto-case-0.2.0" },
     "caseId": { "type": "string", "pattern": "^auto-case-[0-9]{6}$" },
     "label": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$" },
     "variant": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,63}$" },
     "text": { "type": "string", "minLength": 1 },
     "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
     "minorAmount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-    "domain": { "enum": ["vehicle_fact_integrity", "price_attribution", "stale_inventory"] },
+    "domain": { "enum": ["vehicle_fact_integrity", "price_attribution", "stale_inventory", "recommendation_integrity"] },
     "status": { "enum": ["available", "reserved", "sold"] },
     "fuel": { "enum": ["petrol", "diesel", "hybrid", "plug_in_hybrid", "electric"] },
     "transmission": { "enum": ["manual", "automatic"] },
@@ -34,27 +40,66 @@
     "integerValuedField": { "enum": ["odometer", "model_year", "power", "price"] },
     "stringValuedField": { "enum": ["first_registration", "fuel", "transmission", "status"] },
     "firstRegistration": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
-
+    "priceBasis": { "enum": ["listing_price", "total_with_mandatory_fees"] },
+    "hardConstraints": {
+      "description": "Spec 7.4.5. Every field is present; a field is active when non-null or a non-empty list. Bounds are inclusive; bodies are exact strings.",
+      "type": "object",
+      "required": ["max_price", "max_odometer_km", "min_model_year", "allowed_fuels", "allowed_transmissions", "allowed_bodies", "min_seats"],
+      "additionalProperties": false,
+      "properties": {
+        "max_price": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["amount_minor", "basis"],
+              "additionalProperties": false,
+              "properties": { "amount_minor": { "$ref": "#/$defs/minorAmount" }, "basis": { "$ref": "#/$defs/priceBasis" } }
+            }
+          ]
+        },
+        "max_odometer_km": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }] },
+        "min_model_year": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }] },
+        "allowed_fuels": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/fuel" } },
+        "allowed_transmissions": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/transmission" } },
+        "allowed_bodies": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
+        "min_seats": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }] }
+      }
+    },
+    "recommendationRequest": {
+      "description": "Spec 7.4.4. User input, adapter-visible; never oracle output.",
+      "type": "object",
+      "required": ["kind", "hard_constraints"],
+      "additionalProperties": false,
+      "properties": { "kind": { "const": "recommendation" }, "hard_constraints": { "$ref": "#/$defs/hardConstraints" } }
+    },
     "dealer": {
       "type": "object",
       "required": ["dealer_id", "display_name"],
       "additionalProperties": false,
-      "properties": {
-        "dealer_id": { "$ref": "#/$defs/label" },
-        "display_name": { "$ref": "#/$defs/text" }
-      }
+      "properties": { "dealer_id": { "$ref": "#/$defs/label" }, "display_name": { "$ref": "#/$defs/text" } }
     },
-    "supersededPrice": {
-      "type": "object",
-      "required": ["price_minor"],
-      "additionalProperties": false,
-      "properties": { "price_minor": { "$ref": "#/$defs/minorAmount" } }
-    },
+    "supersededPrice": { "type": "object", "required": ["price_minor"], "additionalProperties": false, "properties": { "price_minor": { "$ref": "#/$defs/minorAmount" } } },
     "listing": {
       "type": "object",
       "required": [
-        "listing_id", "dealer_id", "status", "make", "model", "model_year", "first_registration", "odometer_km",
-        "fuel", "transmission", "power_kw", "body", "seats", "price_minor", "mandatory_fees_minor", "currency", "price_history"
+        "listing_id",
+        "dealer_id",
+        "status",
+        "make",
+        "model",
+        "model_year",
+        "first_registration",
+        "odometer_km",
+        "fuel",
+        "transmission",
+        "power_kw",
+        "body",
+        "seats",
+        "price_minor",
+        "mandatory_fees_minor",
+        "currency",
+        "price_history"
       ],
       "additionalProperties": false,
       "properties": {
@@ -81,17 +126,9 @@
       "type": "object",
       "required": ["dealers", "inventory"],
       "additionalProperties": false,
-      "properties": {
-        "dealers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/dealer" } },
-        "inventory": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/listing" } }
-      }
+      "properties": { "dealers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/dealer" } }, "inventory": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/listing" } } }
     },
-    "policy": {
-      "type": "object",
-      "required": ["mandatory_fee_policy"],
-      "additionalProperties": false,
-      "properties": { "mandatory_fee_policy": { "$ref": "#/$defs/mandatoryFeePolicy" } }
-    },
+    "policy": { "type": "object", "required": ["mandatory_fee_policy"], "additionalProperties": false, "properties": { "mandatory_fee_policy": { "$ref": "#/$defs/mandatoryFeePolicy" } } },
     "untrustedContent": {
       "type": "object",
       "required": ["content_id", "source", "attached_to", "author_role", "text"],
@@ -108,9 +145,9 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["op", "text"],
+          "required": ["op", "text", "request"],
           "additionalProperties": false,
-          "properties": { "op": { "const": "user_message" }, "text": { "$ref": "#/$defs/text" } }
+          "properties": { "op": { "const": "user_message" }, "text": { "$ref": "#/$defs/text" }, "request": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/recommendationRequest" }] } }
         },
         {
           "type": "object",
@@ -121,12 +158,7 @@
             "listing_id": { "$ref": "#/$defs/label" },
             "change": {
               "oneOf": [
-                {
-                  "type": "object",
-                  "required": ["kind", "status"],
-                  "additionalProperties": false,
-                  "properties": { "kind": { "const": "status" }, "status": { "$ref": "#/$defs/status" } }
-                },
+                { "type": "object", "required": ["kind", "status"], "additionalProperties": false, "properties": { "kind": { "const": "status" }, "status": { "$ref": "#/$defs/status" } } },
                 {
                   "type": "object",
                   "required": ["kind", "price_minor"],
@@ -148,24 +180,14 @@
         "policy": { "$ref": "#/$defs/policy" },
         "trusted": { "$ref": "#/$defs/trusted" },
         "untrusted": { "type": "array", "items": { "$ref": "#/$defs/untrustedContent" } },
-        "steps": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/$defs/step" },
-          "contains": { "type": "object", "required": ["op"], "properties": { "op": { "const": "user_message" } } }
-        }
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" }, "contains": { "type": "object", "required": ["op"], "properties": { "op": { "const": "user_message" } } } }
       }
     },
     "probe": {
       "type": "object",
       "required": ["probe_id", "step", "listing_id", "field"],
       "additionalProperties": false,
-      "properties": {
-        "probe_id": { "$ref": "#/$defs/label" },
-        "step": { "type": "integer", "minimum": 0 },
-        "listing_id": { "$ref": "#/$defs/label" },
-        "field": { "$ref": "#/$defs/probeField" }
-      }
+      "properties": { "probe_id": { "$ref": "#/$defs/label" }, "step": { "type": "integer", "minimum": 0 }, "listing_id": { "$ref": "#/$defs/label" }, "field": { "$ref": "#/$defs/probeField" } }
     },
     "planted": {
       "oneOf": [
@@ -184,12 +206,7 @@
           "type": "object",
           "required": ["content_id", "listing_id", "field", "value"],
           "additionalProperties": false,
-          "properties": {
-            "content_id": { "$ref": "#/$defs/label" },
-            "listing_id": { "$ref": "#/$defs/label" },
-            "field": { "$ref": "#/$defs/stringValuedField" },
-            "value": { "$ref": "#/$defs/text" }
-          }
+          "properties": { "content_id": { "$ref": "#/$defs/label" }, "listing_id": { "$ref": "#/$defs/label" }, "field": { "$ref": "#/$defs/stringValuedField" }, "value": { "$ref": "#/$defs/text" } }
         }
       ]
     },
@@ -198,22 +215,27 @@
       "type": "object",
       "required": ["probes", "planted"],
       "additionalProperties": false,
-      "properties": {
-        "probes": { "type": "array", "items": { "$ref": "#/$defs/probe" } },
-        "planted": { "type": "array", "items": { "$ref": "#/$defs/planted" } }
-      }
+      "properties": { "probes": { "type": "array", "items": { "$ref": "#/$defs/probe" } }, "planted": { "type": "array", "items": { "$ref": "#/$defs/planted" } } }
     },
     "domainRules": {
-      "description": "Spec 7.1.2, 7.2 and 7.3: inventory transitions during the conversation belong to stale_inventory only.",
+      "description": "Spec 7.1.2, 7.2, 7.3, 7.4.4 and 7.4.9: inventory transitions belong to stale_inventory (required) and recommendation_integrity (optional); recommendation requests belong to recommendation_integrity only (at least one), whose cases declare no probes.",
       "allOf": [
         {
           "if": { "required": ["domain"], "properties": { "domain": { "const": "stale_inventory" } } },
+          "then": { "properties": { "scenario": { "properties": { "steps": { "contains": { "type": "object", "required": ["op"], "properties": { "op": { "const": "inventory_event" } } } } } } } }
+        },
+        {
+          "if": { "required": ["domain"], "properties": { "domain": { "enum": ["vehicle_fact_integrity", "price_attribution"] } } },
+          "then": {
+            "properties": { "scenario": { "properties": { "steps": { "items": { "not": { "type": "object", "required": ["op"], "properties": { "op": { "const": "inventory_event" } } } } } } } }
+          }
+        },
+        {
+          "if": { "required": ["domain"], "properties": { "domain": { "const": "recommendation_integrity" } } },
           "then": {
             "properties": {
               "scenario": {
-                "properties": {
-                  "steps": { "contains": { "type": "object", "required": ["op"], "properties": { "op": { "const": "inventory_event" } } } }
-                }
+                "properties": { "steps": { "contains": { "type": "object", "required": ["op", "request"], "properties": { "op": { "const": "user_message" }, "request": { "type": "object" } } } } }
               }
             }
           },
@@ -221,7 +243,7 @@
             "properties": {
               "scenario": {
                 "properties": {
-                  "steps": { "items": { "not": { "type": "object", "required": ["op"], "properties": { "op": { "const": "inventory_event" } } } } }
+                  "steps": { "items": { "not": { "type": "object", "required": ["op", "request"], "properties": { "op": { "const": "user_message" }, "request": { "type": "object" } } } } }
                 }
               }
             }

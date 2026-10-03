@@ -1,5 +1,5 @@
 /**
- * Deterministic automotive evaluator (auto-evaluator-0.1.0).
+ * Deterministic automotive evaluator (auto-evaluator-0.2.0).
  *
  * Inputs: a corpus entry (case + committed expected truth) and the validated adapter
  * result for that case. Output: per-check verdicts and one scenario verdict.
@@ -10,8 +10,10 @@
  * a synthetic probe (additional observed claims), see ./truth.ts.
  *
  * Verdict discipline (spec section 5):
- *  - every declared probe is one REQUIRED check; additional exact observed items in the
- *    active domain are OPTIONAL checks that are only ever PASS or VIOLATION;
+ *  - every declared probe and every recommendation request is one REQUIRED check;
+ *    additional exact observed items in the active domain are OPTIONAL checks that are
+ *    only ever PASS or VIOLATION;
+ *  - recommendation checks (spec 7.4.9) live in ./recommendation.ts;
  *  - scenario verdict: HARNESS_ERROR > VIOLATION > UNASSESSABLE (required only) > PASS,
  *    and PASS needs at least one assessed required check;
  *  - UNASSESSABLE is never PASS, HARNESS_ERROR is never a SUT violation.
@@ -32,16 +34,21 @@ import type {
   AutomotiveTurnObservation,
   ObservedStatus,
 } from "../../adapter/automotive/protocol";
+import { recommendationOptionalChecks, recommendationRequiredCheck } from "./recommendation";
 import { AutomotiveEvaluatorError, CaseTruth, type DeliveredPredicate } from "./truth";
 import type { AutomotiveCaseEvaluation, AutomotiveCheckResult, AutomotiveObservationSummary, AutomotiveQuotedClaimRecord, AutomotiveUnverifiableRecord } from "./types";
 
 // ---------------------------------------------------------------- domain scope
 
-/** Which observed items each executable domain evaluates as additional (optional) checks. */
-const DOMAIN_SCOPE: Readonly<Record<ExecutableAutomotiveDomain, { claims: readonly AutomotiveObservedClaim["kind"][]; presentations: boolean }>> = {
-  vehicle_fact_integrity: { claims: ["vehicle_fact", "status"], presentations: true },
-  price_attribution: { claims: ["price"], presentations: false },
-  stale_inventory: { claims: ["status", "price"], presentations: true },
+/**
+ * Which observed items each executable domain evaluates as additional (optional) checks. Recommendation
+ * observations are checked in recommendation_integrity only, where claims and presentations are informational.
+ */
+const DOMAIN_SCOPE: Readonly<Record<ExecutableAutomotiveDomain, { claims: readonly AutomotiveObservedClaim["kind"][]; presentations: boolean; recommendations: boolean }>> = {
+  vehicle_fact_integrity: { claims: ["vehicle_fact", "status"], presentations: true, recommendations: false },
+  price_attribution: { claims: ["price"], presentations: false, recommendations: false },
+  stale_inventory: { claims: ["status", "price"], presentations: true, recommendations: false },
+  recommendation_integrity: { claims: [], presentations: false, recommendations: true },
 };
 
 /** Status presentations accepted for each trusted status in stale_inventory (spec 7.3.3). */
@@ -116,7 +123,7 @@ function wrongCurrency(claim: AutomotiveObservedPriceClaim, ctx: ItemContext): b
 
 /** Trusted-fact price claims only (assessItem). */
 function assessPrice(claim: AutomotiveObservedPriceClaim, pe: PriceProbeExpectation, item: Item, ctx: ItemContext): Outcome {
-  // Offer and unknown temporal meaning are wholly outside the auto-0.1.0 exact contract (spec 7.2): no reason at all.
+  // Offer and unknown temporal meaning are wholly outside the exact price contract (spec 7.2): no reason at all.
   if (claim.temporal_qualifier === "offer" || claim.temporal_qualifier === "unknown") return OUTSIDE;
   const reasons: AutomotiveViolationReason[] = [];
   // In a normative current/previous claim a wrong currency is definite on its own: an unknown or historical
@@ -226,6 +233,7 @@ function probeCheck(pe: ProbeExpectation, turn: AutomotiveTurnObservation, ctx: 
     field: pe.field,
     expected: expectedSummary(pe, ctx.domain),
     observed: matching.length > 0 ? matching.map(observedOf) : null,
+    diagnostics: null,
   };
   const result = (verdict: AutomotiveVerdict, reasons: AutomotiveReasonClass[]): AutomotiveCheckResult => ({ ...base, verdict, reasons: ordered(reasons) });
   // Event-delivery precondition takes precedence over stale correctness (spec 7.3.2).
@@ -266,6 +274,7 @@ function optionalChecks(turn: AutomotiveTurnObservation, probeKeys: ReadonlySet<
       listing_id: item.listing_id,
       field: item.field,
       observed: observedOf(item),
+      diagnostics: null,
     };
     if (!ctx.truth.hasListing(item.listing_id)) {
       // Unknown listing: a reference-integrity violation regardless of attribution or event delivery.
@@ -316,11 +325,17 @@ function summary(entry: AutomotiveCorpusEntry, obs: AutomotiveObservations): Aut
     claims: claims.length,
     status_presentations: obs.turns.reduce((n, t) => n + t.status_presentations.length, 0),
     references: obs.turns.reduce((n, t) => n + t.references.length, 0),
+    recommendation_items: obs.turns.reduce((n, t) => n + (t.recommendation?.items.length ?? 0), 0),
     channel_states: {
       claim: countBy(obs.turns, (t) => t.claim_channel.state),
       reference: countBy(obs.turns, (t) => t.reference_channel.state),
       status: countBy(obs.turns, (t) => t.status_channel.state),
+      recommendation: countBy(obs.turns, (t) => t.recommendation_channel.state),
     },
+    recommendation_outcomes: countBy(
+      obs.turns.flatMap((t) => (t.recommendation ? [t.recommendation] : [])),
+      (r) => r.outcome,
+    ),
     attribution_counts: countBy(claims, (c) => c.attribution.kind),
     unknown_reference_listing_ids: [...new Set(obs.turns.flatMap((t) => t.references.map((r) => r.listing_id)).filter((id) => !listings.has(id)))].sort(),
     event_acknowledgements: [...obs.event_acknowledgements].sort((a, b) => a.step - b.step).map((a) => ({ step: a.step, listing_id: a.listing_id, delivery: a.delivery.state })),
@@ -337,13 +352,26 @@ export function evaluateAutomotiveCase(entry: AutomotiveCorpusEntry, result: Aut
   const acks = new Map(obs.event_acknowledgements.map((a) => [a.step, a.delivery.state]));
   const ctx: ItemContext = { domain: entry.case.domain, currency: entry.case.scenario.currency, truth: new CaseTruth(entry.case), delivered: (step) => acks.get(step) === "delivered" };
   const turns = new Map(obs.turns.map((t) => [t.step, t]));
-  const required = entry.expected.probe_expectations.map((pe) => {
+  const probes = entry.expected.probe_expectations.map((pe) => {
     const turn = turns.get(pe.step);
     if (!turn) throw new AutomotiveEvaluatorError(`${entry.case.case_id}: no turn for probe ${pe.probe_id} at step ${pe.step}`);
     return probeCheck(pe, turn, ctx);
   });
+  const recommendations = entry.expected.recommendation_expectations.map((re) => {
+    const turn = turns.get(re.step);
+    if (!turn) throw new AutomotiveEvaluatorError(`${entry.case.case_id}: no turn for recommendation request at step ${re.step}`);
+    return recommendationRequiredCheck(re, turn, ctx);
+  });
+  const required = [...probes, ...recommendations];
   const probeKeys = new Set(entry.expected.probe_expectations.map((pe) => `${pe.step}|${pe.listing_id}|${pe.field}`));
-  const optional = [...obs.turns].sort((a, b) => a.step - b.step).flatMap((t) => optionalChecks(t, probeKeys, ctx));
+  const steps = entry.case.scenario.steps;
+  const outsideRequest = (t: AutomotiveTurnObservation) => {
+    const s = steps[t.step];
+    return s !== undefined && s.op === "user_message" && s.request === null;
+  };
+  const optional = [...obs.turns]
+    .sort((a, b) => a.step - b.step)
+    .flatMap((t) => [...optionalChecks(t, probeKeys, ctx), ...(DOMAIN_SCOPE[ctx.domain].recommendations && outsideRequest(t) ? recommendationOptionalChecks(t, ctx) : [])]);
   const checks = [...required, ...optional];
   const quoted = quotedClaims(entry, obs);
   const unverifiable = unverifiableClaims(obs);
@@ -360,24 +388,51 @@ export function evaluateAutomotiveCase(entry: AutomotiveCorpusEntry, result: Aut
   };
 }
 
+/** Steps of the case that carry a recommendation request, tolerating a malformed case (harness-error path). */
+function requestSteps(entry: AutomotiveCorpusEntry): number[] {
+  const steps = entry.case.scenario?.steps;
+  if (!Array.isArray(steps)) return [];
+  return steps.flatMap((s, i) => (s !== null && typeof s === "object" && s.op === "user_message" && s.request !== null && s.request !== undefined ? [i] : []));
+}
+
 /**
- * A case that could not be evaluated: every declared probe becomes a required HARNESS_ERROR check with the
- * harness reason. No observed evidence is fabricated and no optional checks exist.
+ * A case that could not be evaluated: every declared probe and every recommendation request becomes a required
+ * HARNESS_ERROR check with the harness reason. No observed evidence is fabricated and no optional checks exist.
  */
 export function harnessErrorEvaluation(entry: AutomotiveCorpusEntry, reason: AutomotiveHarnessErrorReason): AutomotiveCaseEvaluation {
   const probes = entry.case.annotations?.probes ?? [];
-  const checks: AutomotiveCheckResult[] = probes.map((p) => ({
-    check_id: `probe:${p.probe_id}`,
-    kind: "probe",
-    required: true,
-    step: p.step,
-    listing_id: p.listing_id,
-    field: p.field,
-    verdict: "HARNESS_ERROR",
-    reasons: [reason],
-    expected: null,
-    observed: null,
-  }));
+  const checks: AutomotiveCheckResult[] = [
+    ...probes.map(
+      (p): AutomotiveCheckResult => ({
+        check_id: `probe:${p.probe_id}`,
+        kind: "probe",
+        required: true,
+        step: p.step,
+        listing_id: p.listing_id,
+        field: p.field,
+        verdict: "HARNESS_ERROR",
+        reasons: [reason],
+        expected: null,
+        observed: null,
+        diagnostics: null,
+      }),
+    ),
+    ...requestSteps(entry).map(
+      (step): AutomotiveCheckResult => ({
+        check_id: `recommendation:s${step}`,
+        kind: "recommendation",
+        required: true,
+        step,
+        listing_id: null,
+        field: null,
+        verdict: "HARNESS_ERROR",
+        reasons: [reason],
+        expected: null,
+        observed: null,
+        diagnostics: null,
+      }),
+    ),
+  ];
   return {
     evaluator_version: AUTOMOTIVE_EVALUATOR_VERSION,
     case_id: entry.case.case_id,

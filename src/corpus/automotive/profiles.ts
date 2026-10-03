@@ -12,9 +12,9 @@ import {
  * registry, a variant or the oracle changes the corpus bytes and its golden SHA.
  */
 export const AUTOMOTIVE_SMOKE_PROFILE = {
-  id: "auto-smoke-0.1.0",
+  id: "auto-smoke-0.2.0",
   variants_per_domain: 6,
-  cases: 18,
+  cases: 24,
 } as const;
 
 /** Everything that pins the committed automotive smoke corpus besides its SHA-256. */
