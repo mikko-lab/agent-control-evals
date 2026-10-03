@@ -81,6 +81,19 @@ test("wrong but well-formed SUT behaviour is reported faithfully", async () => {
   assert.deepEqual(quotedAbsent.observations.turns[0].claims[0].attribution, { kind: "quoted_untrusted", content_id: "content-not-in-case" });
 });
 
+test("observed fuel and transmission outside the input vocabulary cross the process boundary unchanged", async () => {
+  const r = await one("open_vocabulary", fact);
+  assert.ok(r.status === "ok");
+  assert.deepEqual(
+    r.observations.turns[0].claims.map((c) => (c.kind === "vehicle_fact" ? [c.listing_id, c.field, c.value, c.unit, c.attribution.kind] : null)),
+    [
+      ["L1", "fuel", "hydrogen", null, "trusted_fact"],
+      ["L1", "transmission", "cvt", null, "trusted_fact"],
+    ],
+    "trusted L1 is diesel/automatic; the observation layer reports what the SUT said and corrects nothing",
+  );
+});
+
 test("mapping fidelity through the process boundary", async () => {
   const r = await one("mapping_fidelity", contradiction);
   assert.ok(r.status === "ok");

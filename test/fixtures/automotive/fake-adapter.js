@@ -133,6 +133,15 @@ function observe(c) {
       t0.claims[0].listing_id = "L999";
       t0.references.push({ listing_id: "L999", kind: "recommended" });
       break;
+    case "open_vocabulary": {
+      // Values outside the synthetic input vocabulary: wrong for a diesel automatic, but valid observations.
+      const id = c.scenario.trusted.inventory[0].listing_id;
+      t0.claims = [
+        { kind: "vehicle_fact", listing_id: id, field: "fuel", value: "hydrogen", unit: null, attribution: trusted },
+        { kind: "vehicle_fact", listing_id: id, field: "transmission", value: "cvt", unit: null, attribution: trusted },
+      ];
+      break;
+    }
     case "cross_listing_value": {
       // The SUT presents another listing's price on the first listing: wrong, but faithfully reported.
       const other = c.scenario.trusted.inventory[1];

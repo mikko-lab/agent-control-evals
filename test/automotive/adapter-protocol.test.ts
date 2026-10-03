@@ -176,7 +176,9 @@ test("vehicle-fact claims: canonical claim fields, units and vocabularies", () =
   bad({ ...odo(), field: "status", value: "sold", unit: null }, /field: must be one of/, "status as a vehicle_fact");
   bad(odo("L1", 187_400.5), /value: must be a non-negative integer/, "float odometer");
   bad(odo("L1", "187400"), /value: must be a non-negative integer/, "string odometer");
-  bad({ ...odo(), field: "fuel", value: "steam", unit: null }, /value: must be one of/, "fuel outside the vocabulary");
+  bad({ ...odo(), field: "fuel", value: "", unit: null }, /value: must be a non-empty string/, "empty fuel");
+  bad({ ...odo(), field: "transmission", value: 6, unit: null }, /value: must be a non-empty string/, "numeric transmission");
+  bad({ ...odo(), field: "fuel", value: "hydrogen", unit: "kW" }, /fuel requires unit null/, "fuel with a unit");
   bad({ ...odo(), field: "first_registration", value: "11/2018", unit: null }, /YYYY-MM/, "malformed first_registration");
   bad(odo(""), /listing_id: must be a non-empty string/, "empty listing id");
   bad({ ...odo(), extra: 1 }, /unexpected property extra/, "extra claim property");
@@ -232,6 +234,26 @@ test("status claims, status presentations and references: own vocabularies; disa
   reject(withTurn0(fact, (t) => (t.claims = [claim("pending")])), fact, /status: must be one of/, "unknown status word");
   reject(withTurn0(fact, (t) => (t.status_presentations = [{ listing_id: "L1", status: "for_sale" }])), fact, /status: must be one of/, "unknown presentation status");
   reject(withTurn0(fact, (t) => (t.references = [{ listing_id: "L1", kind: "liked" }])), fact, /kind: must be one of/, "unknown reference kind");
+});
+
+test("observed fuel and transmission are open: values outside the synthetic input vocabulary are evidence", () => {
+  // The case vocabularies describe trusted synthetic input only. A SUT that presents "hydrogen" for a diesel car or "cvt"
+  // for an automatic is wrong, and that is for the evaluator to say (FACT_VALUE_MISMATCH), not for the protocol to refuse.
+  for (const [field, value, vocab] of [["fuel", "hydrogen", FUELS], ["fuel", "steam", FUELS], ["transmission", "cvt", TRANSMISSIONS], ["transmission", "dual-clutch 7-speed", TRANSMISSIONS]] as const) {
+    assert.ok(!(vocab as readonly string[]).includes(value), `${value} is outside the trusted input vocabulary`);
+    const claim = { kind: "vehicle_fact", listing_id: "L1", field, value, unit: null, attribution: { kind: "trusted_fact" } };
+    const r = withTurn0(fact, (t) => (t.claims = [claim]));
+    accept(r, fact, `${field}=${value}`);
+    const v = validateAutomotiveCaseResult(r, fact);
+    assert.ok(v.status === "ok");
+    assert.deepEqual(v.observations.turns[0].claims[0], claim, "the observed value is returned unchanged");
+  }
+  // The input contract is unchanged: trusted listings still use the synthetic vocabularies.
+  assert.deepEqual([...FUELS], ["petrol", "diesel", "hybrid", "plug_in_hybrid", "electric"]);
+  assert.deepEqual([...TRANSMISSIONS], ["manual", "automatic"]);
+  const open = defs.factClaim.oneOf.filter((b: any) => ["fuel", "transmission"].includes(b.properties.field.const));
+  assert.deepEqual(open.map((b: any) => b.properties.value), [{ $ref: "#/$defs/nonEmpty" }, { $ref: "#/$defs/nonEmpty" }], "schema keeps the observation vocabulary open");
+  assert.ok(!("fuel" in defs) && !("transmission" in defs), "no closed fuel/transmission enum in the protocol schema");
 });
 
 test("wrong but well-formed observations are accepted unchanged as evidence", () => {
@@ -431,8 +453,6 @@ test("every runtime vocabulary equals the schema enum for the same field", () =>
     ["case result status", CASE_RESULT_STATUSES, defs.caseResult.properties.status.enum],
     ["inventory status", INVENTORY_STATUSES, defs.inventoryStatus.enum],
     ["inventory change kind", INVENTORY_CHANGE_KINDS, defs.inventoryChange.oneOf.map((b: any) => b.properties.kind.const)],
-    ["fuel", FUELS, defs.fuel.enum],
-    ["transmission", TRANSMISSIONS, defs.transmission.enum],
   ];
   for (const [name, ts, json] of pairs) assert.deepEqual(json, [...ts], `${name}: runtime and schema vocabularies differ`);
   assert.equal(defs.protocolVersion.const, V);

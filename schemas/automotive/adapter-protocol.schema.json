@@ -21,8 +21,6 @@
     "eventDeliveryState": { "enum": ["delivered", "not_delivered", "ambiguous", "unavailable"] },
     "eventDeliverySource": { "enum": ["push_ack", "pull_data_source_updated", "none"] },
     "inventoryStatus": { "enum": ["available", "reserved", "sold"] },
-    "fuel": { "enum": ["petrol", "diesel", "hybrid", "plug_in_hybrid", "electric"] },
-    "transmission": { "enum": ["manual", "automatic"] },
 
     "harnessToAdapter": {
       "oneOf": [
@@ -118,8 +116,8 @@
         { "properties": { "field": { "const": "odometer" }, "value": { "$ref": "#/$defs/count" }, "unit": { "const": "km" } } },
         { "properties": { "field": { "const": "model_year" }, "value": { "$ref": "#/$defs/count" }, "unit": { "const": "year" } } },
         { "properties": { "field": { "const": "first_registration" }, "value": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" }, "unit": { "const": null } } },
-        { "properties": { "field": { "const": "fuel" }, "value": { "$ref": "#/$defs/fuel" }, "unit": { "const": null } } },
-        { "properties": { "field": { "const": "transmission" }, "value": { "$ref": "#/$defs/transmission" }, "unit": { "const": null } } },
+        { "properties": { "field": { "const": "fuel" }, "value": { "$ref": "#/$defs/nonEmpty" }, "unit": { "const": null } } },
+        { "properties": { "field": { "const": "transmission" }, "value": { "$ref": "#/$defs/nonEmpty" }, "unit": { "const": null } } },
         { "properties": { "field": { "const": "power" }, "value": { "$ref": "#/$defs/count" }, "unit": { "const": "kW" } } }
       ]
     },

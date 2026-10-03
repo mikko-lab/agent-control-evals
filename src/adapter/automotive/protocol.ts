@@ -19,10 +19,8 @@ import { AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION } from "../../spec/automotive/versi
 import {
   CURRENCY_CODE_PATTERN,
   FIRST_REGISTRATION_PATTERN,
-  FUELS,
   INVENTORY_STATUSES,
   PROBE_FIELDS,
-  TRANSMISSIONS,
   type AutomotiveCaseForAdapter,
   type InventoryChange,
   type ProbeField,
@@ -42,7 +40,11 @@ export const AUTOMOTIVE_OBSERVATION_STATES = ["observed", "not_observed", "ambig
 /** Where a channel's observations come from. Free-text extraction is not a source in auto-0.1.0. */
 export const AUTOMOTIVE_OBSERVATION_SOURCES = ["sut_structured_output", "adapter_structured_mapping", "none"] as const;
 export const CLAIM_ATTRIBUTION_KINDS = ["trusted_fact", "quoted_untrusted", "approximate", "unknown"] as const;
-/** Vehicle-fact claim fields (canonical claim names, never storage names). Status is a separate claim kind. */
+/**
+ * Vehicle-fact claim fields (canonical claim names, never storage names). Status is a separate claim kind.
+ * Observed fuel and transmission values are open (any non-empty string): the case vocabularies describe
+ * synthetic trusted input, not every value a SUT may present.
+ */
 export const OBSERVED_FACT_FIELDS = ["odometer", "model_year", "first_registration", "fuel", "transmission", "power"] as const;
 export const OBSERVED_PRICE_BASES = ["listing_price", "total_with_mandatory_fees", "unknown"] as const;
 export const PRICE_TEMPORAL_QUALIFIERS = ["current", "previous", "offer", "unknown"] as const;
@@ -273,8 +275,11 @@ function claim(x: unknown, where: string): void {
     if (unit !== null) count(o.value, `${where}.value`);
     else if (field === "first_registration") {
       if (typeof o.value !== "string" || !new RegExp(FIRST_REGISTRATION_PATTERN).test(o.value)) fail(`${where}.value`, "first_registration must be YYYY-MM");
-    } else if (field === "fuel") oneOf(FUELS, o.value, `${where}.value`);
-    else oneOf(TRANSMISSIONS, o.value, `${where}.value`);
+    } else {
+      // Open observation vocabulary: any non-empty string. The synthetic FUELS / TRANSMISSIONS lists constrain
+      // trusted input only; an observed "hydrogen" or "cvt" is evidence for the evaluator, not a protocol error.
+      nonEmpty(o.value, `${where}.value`);
+    }
     attribution(o.attribution, `${where}.attribution`);
   } else if (kind === "price") {
     const o = obj(x, ["kind", "listing_id", "field", "amount_minor", "currency", "basis", "temporal_qualifier", "attribution"], where);
