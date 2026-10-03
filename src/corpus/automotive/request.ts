@@ -8,8 +8,6 @@
 import {
   FUELS,
   HARD_CONSTRAINT_FIELDS,
-  MODEL_YEAR_MAX,
-  MODEL_YEAR_MIN,
   PRICE_BASES,
   TRANSMISSIONS,
   type HardConstraintField,
@@ -94,7 +92,8 @@ export function recommendationRequestProblems(request: unknown, where: string): 
     }
   }
   if (hc.max_odometer_km !== null && !isInt(hc.max_odometer_km, 0)) p.push(`${at}.max_odometer_km ${JSON.stringify(hc.max_odometer_km)}`);
-  if (hc.min_model_year !== null && (!isInt(hc.min_model_year, MODEL_YEAR_MIN) || (hc.min_model_year as number) > MODEL_YEAR_MAX)) p.push(`${at}.min_model_year ${JSON.stringify(hc.min_model_year)}`);
+  // Any safe non-negative integer (spec 7.4.5): not limited to the trusted listings' model-year range.
+  if (hc.min_model_year !== null && !isInt(hc.min_model_year, 0)) p.push(`${at}.min_model_year ${JSON.stringify(hc.min_model_year)}`);
   if (hc.min_seats !== null && !isInt(hc.min_seats, 1)) p.push(`${at}.min_seats ${JSON.stringify(hc.min_seats)}`);
   p.push(...listProblems(hc.allowed_fuels, `${at}.allowed_fuels`, FUELS));
   p.push(...listProblems(hc.allowed_transmissions, `${at}.allowed_transmissions`, TRANSMISSIONS));

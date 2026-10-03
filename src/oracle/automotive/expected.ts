@@ -291,7 +291,7 @@ function checkHardConstraints(c: AutomotiveCase, step: number, hc: HardConstrain
     if (!isAmount(hc.max_price.amount_minor)) fail(`${at}: max_price.amount_minor is not a non-negative integer`);
     if (!isIn(PRICE_BASES, hc.max_price.basis)) fail(`${at}: unknown max_price basis ${String(hc.max_price.basis)}`);
   }
-  for (const f of ["max_odometer_km", "min_model_year", "min_seats"] as const) if (hc[f] !== null && !isAmount(hc[f])) fail(`${at}: ${f} is not a non-negative integer`);
+  for (const f of ["max_odometer_km", "min_model_year", "min_seats"] as const) if (hc[f] !== null && !isAmount(hc[f])) fail(`${at}: ${f} is not a safe non-negative integer`);
   const list = (xs: unknown, vocabulary: readonly string[] | null, what: string) => {
     if (!Array.isArray(xs)) fail(`${at}: ${what} is not an array`);
     for (const x of xs) if (typeof x !== "string" || x.length === 0 || (vocabulary !== null && !vocabulary.includes(x))) fail(`${at}: ${what} holds ${JSON.stringify(x)}`);

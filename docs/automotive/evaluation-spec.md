@@ -487,13 +487,14 @@ The first executable vocabulary uses only fields that already exist in the trust
 |---|---|---|
 | `max_price` | `null` or `{ amount_minor, basis }`, with basis `listing_price` or `total_with_mandatory_fees` | the authoritative price on the declared basis at the step ≤ `amount_minor` |
 | `max_odometer_km` | `null` or non-negative integer | `odometer_km` ≤ value |
-| `min_model_year` | `null` or integer | `model_year` ≥ value |
+| `min_model_year` | `null` or a safe non-negative integer (`0`…`9 007 199 254 740 991`, that is `Number.MAX_SAFE_INTEGER`) | `model_year` ≥ value |
 | `allowed_fuels` | list of fuel values, `[]` = unconstrained | `fuel` is in the list |
 | `allowed_transmissions` | list of transmission values, `[]` = unconstrained | `transmission` is in the list |
 | `allowed_bodies` | list of body strings, `[]` = unconstrained | `body` is in the list (exact, case-sensitive string equality) |
 | `min_seats` | `null` or positive integer | `seats` ≥ value |
 
 - All comparisons are exact integer or exact string comparisons. Every maximum and minimum is **inclusive**. There is no tolerance unless a later version declares one.
+- `min_model_year` is not limited to the model-year range of trusted listings (1900–2100). Any value in its accepted set is a valid request; a value above every listing, for example 2101, makes every listing fail the constraint. A negative, fractional or unsafe integer value makes the fixture invalid. The case schema, the request validator and the oracle accept exactly the same set.
 - Lists hold unique values. Fuel and transmission values come from the declared case vocabularies. Body values are compared as exact strings. The implementation MAY freeze a declared synthetic body vocabulary in the auto-0.2 case schema, as it did for fuel in auto-0.1.
 - A request with no active field is structurally valid: every known, available listing is then eligible. First-corpus fixtures SHOULD declare at least one active hard constraint per request.
 
@@ -663,14 +664,14 @@ Explicit decisions behind the table:
 
 **One correct match never erases a bad item.** Every structured item in the request turn is checked as part of the required check. An unknown recommended listing, an unavailable recommendation or a false match makes the check VIOLATION, whatever else the turn contains.
 
-**Recommendations outside a request turn.** Items observed in a turn whose user-message step has `request: null` are not part of any required check. Each such item becomes an **optional** recommendation check:
+**Recommendations outside a request turn.** In a `recommendation_integrity` case, items observed in a turn whose user-message step has `request: null` are not part of any required check. Each such item becomes an **optional** recommendation check:
 - `kind = recommendation`, with the item's `listing_id`;
 - only the known-listing and availability rules apply (no constraints are declared for that turn);
 - like every optional check, it is only PASS or VIOLATION: `RECOMMENDATION_UNKNOWN_LISTING` is always assessable, `RECOMMENDATION_UNAVAILABLE` needs the listing's status to be consistent, and an item whose availability is unresolved is omitted.
 
 `no_match` and `clarify` outside a request turn are informational. Hard constraints do not carry over to later turns in auto-0.2.
 
-**Domain scope.** In a `recommendation_integrity` case, only recommendation observations are checked. Fact, price and status claims in the same turns are recorded informationally, as for out-of-scope items in the auto-0.1 domains.
+**Domain scope.** In a `recommendation_integrity` case, only recommendation observations are checked. Fact, price and status claims in the same turns are recorded informationally, as for out-of-scope items in the auto-0.1 domains. Conversely, optional recommendation checks exist only in `recommendation_integrity` cases. In every other domain, recommendation observations (channel, outcome and items) are informational evidence: they create no required or optional check and never change a verdict.
 
 **Mismatch evidence.** A `RECOMMENDATION_CONSTRAINT_MISMATCH` finding reports, per offending item:
 - its `listing_id`, `presentation`, `rank` and `slot`;
@@ -805,6 +806,8 @@ PR I left four implementation details open. PR J decides them as follows; none c
 
 PR J also makes these choices, which follow from the contract:
 - A `recommendation_integrity` case carries at least one request and declares no probes, because only recommendation observations are checked there. It MAY contain inventory events, which section 7.4.11 needs for an availability change. Requests are invalid in every other domain.
+- Optional recommendation checks (section 7.4.9) are created only in `recommendation_integrity` cases. In `vehicle_fact_integrity`, `price_attribution` and `stale_inventory` cases, recommendation observations are informational evidence: they are counted in the observation summary, create no check and never change a verdict. This matches the auto-0.1 domain-scope rule and keeps the meaning of the 18 migrated scenarios unchanged.
+- `min_model_year` accepts `null` or any safe non-negative integer (`0`…`Number.MAX_SAFE_INTEGER`), independently of the trusted listing model-year range (section 7.4.5). The case schema, the request validator and the oracle enforce this same set.
 - The required check's identifier is `recommendation:s<step>`. Its record adds `diagnostics`: the decision-table row (1–12) that decided it, each item's state, availability and per-constraint results (with any `max_price` that is not assessable listed separately), duplicate listing ids, and the eligibility term of every listing. Optional checks are `recommendation:s<step>:<index>`. Every other check carries `diagnostics: null`.
 - The required-check expectation stays oracle truth (section 7.4.8). The evaluator reads the oracle's statuses and constraint results and applies only the per-finding delivery rules and the decision table. An optional check takes its authoritative status from the oracle through a synthetic status probe.
 

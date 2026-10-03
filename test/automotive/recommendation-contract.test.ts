@@ -24,7 +24,8 @@ import { AutomotiveOracleError, deriveAutomotiveExpected } from "../../src/oracl
 import { generateAutomotiveSmokeCorpus } from "../../src/corpus/automotive-generation/generate";
 import { AutomotiveProtocolError, validateAutomotiveCaseResult } from "../../src/adapter/automotive/protocol";
 import { referenceObservations } from "../../src/adapter/automotive-reference/agent";
-import { AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION } from "../../src/spec/automotive/version";
+import { AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION, AUTOMOTIVE_CORPUS_ENTRY_VERSION } from "../../src/spec/automotive/version";
+import { evaluateAutomotiveCase } from "../../src/eval/automotive/evaluate";
 
 const ROOT = join(__dirname, "..", "..", "..");
 const load = (f: string) => JSON.parse(readFileSync(join(ROOT, "schemas", "automotive", f), "utf8"));
@@ -131,6 +132,44 @@ test("oracle: a malformed request fails closed instead of producing a partial ex
   const wrongDomain = structuredClone(c) as any;
   wrongDomain.domain = "vehicle_fact_integrity";
   assert.throws(() => deriveAutomotiveExpected(wrongDomain), /recommendation request in a vehicle_fact_integrity case/);
+});
+
+// ------------------------------------------------------------ min_model_year accepted set (spec 7.4.5)
+
+test("min_model_year: any safe non-negative integer is accepted, also outside the listing model-year range 1900-2100", () => {
+  for (const year of [0, 1, 1899, 2101, 3000, Number.MAX_SAFE_INTEGER]) {
+    const c = recCase(L(), [recommendationRequestMessage({ min_model_year: year })]);
+    assert.deepEqual(automotiveFixtureProblems(c), [], `validator: ${year}`);
+    assert.ok(caseSchema(c), `schema: ${year}: ${JSON.stringify(caseSchema.errors)}`);
+    const e = deriveAutomotiveExpected(c).recommendation_expectations[0];
+    const expectedPass = (y: number) => (y >= year ? "pass" : "fail");
+    assert.deepEqual(e.listing_evaluations.map((l) => l.constraint_results.min_model_year), [expectedPass(2019), expectedPass(2021), expectedPass(2022)], `oracle: ${year}`);
+  }
+});
+
+test("min_model_year: 2101 gives an empty eligible set, and the reference agent's explicit no_match PASSes (row 5)", () => {
+  const c = recCase(L(), [recommendationRequestMessage({ min_model_year: 2101 })]);
+  const expected = deriveAutomotiveExpected(c);
+  assert.deepEqual(expected.recommendation_expectations[0].eligible_listing_ids, []);
+  const view = toAutomotiveAdapterView(c);
+  const obs = referenceObservations(view);
+  assert.deepEqual(obs.turns[0].recommendation, { outcome: "no_match", items: [] });
+  const result = validateAutomotiveCaseResult({ type: "case_result", protocol_version: AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION, case_id: c.case_id, status: "ok", observations: obs, raw_sut_evidence: null, error: null }, view);
+  const ev = evaluateAutomotiveCase({ corpus_entry_version: AUTOMOTIVE_CORPUS_ENTRY_VERSION, case: c, expected }, result);
+  assert.equal(ev.verdict, "PASS");
+  assert.deepEqual([ev.checks[0].verdict, ev.checks[0].diagnostics?.decision_row], ["PASS", 5]);
+});
+
+test("min_model_year: negative, fractional and unsafe values are rejected alike by the validator, the schema and the oracle", () => {
+  const valid = recCase(L(), [recommendationRequestMessage({ min_model_year: 2020 })]);
+  for (const bad of [-1, -2020, 2020.5, 0.1, Number.MAX_SAFE_INTEGER + 1, 2 ** 60]) {
+    const c = structuredClone(valid) as any;
+    c.scenario.steps[0].request.hard_constraints.min_model_year = bad;
+    assert.ok(automotiveFixtureProblems(c).some((p) => /min_model_year/.test(p)), `validator: ${bad}`);
+    assert.equal(caseSchema(c), false, `schema: ${bad}`);
+    assert.throws(() => deriveAutomotiveExpected(c), (e: unknown) => e instanceof AutomotiveOracleError && /min_model_year is not a safe non-negative integer/.test((e as Error).message), `oracle: ${bad}`);
+    assert.throws(() => recCase(L(), [recommendationRequestMessage({ min_model_year: bad })]), AutomotiveFixtureError, `builder: ${bad}`);
+  }
 });
 
 // ------------------------------------------------------------ smoke-corpus coverage controls (spec 7.4.11)

@@ -320,6 +320,49 @@ test("domain scope: fact, price and status claims in a recommendation case are i
   assert.deepEqual(ev.checks.map((c) => c.kind), ["recommendation"]);
 });
 
+// ------------------------------------------------------------ regression: delivery-dependent findings (review M1, M4)
+
+test("regression M1: a max_price failure whose price event is undelivered is never a CONSTRAINT_MISMATCH (row 8); delivered, it is (row 3)", () => {
+  // L1's price rises to 2 199 000 at step 0; the request caps the listing price at 2 150 000, so the oracle's authoritative
+  // max_price result for L1 is fail and every other constraint passes. The SUT may still know the old price 2 149 000.
+  const e = recEntry([L1(), L2()], [priceEvent("L1", 2_199_000), recommendationRequestMessage({ ...SHARED, max_price: { amount_minor: 2_150_000, basis: "listing_price" } })]);
+  const l1 = e.expected.recommendation_expectations[0].listing_evaluations.find((x) => x.listing_id === "L1")!;
+  assert.deepEqual([l1.status, l1.constraint_results.max_price, l1.constraint_results.max_odometer_km, l1.constraint_results.allowed_fuels, l1.constraint_results.allowed_transmissions], ["available", "fail", "pass", "pass", "pass"]);
+  const answer1 = answer(1, recs(item("L1", "match")));
+
+  const open = evalWith(e, all(ack(0, "not_delivered"), answer1));
+  expectRow(open, 1, 8, "UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]);
+  const it = required(open, 1).diagnostics!.items[0];
+  assert.deepEqual([it.state, it.reasons, it.unassessable_constraints, it.constraint_results?.max_price], ["unresolved", [], ["max_price"], "fail"]);
+  assert.ok(open.checks.every((c) => !c.reasons.includes("RECOMMENDATION_CONSTRAINT_MISMATCH")), "an unassessable max_price never counts as a failure");
+  assert.equal(open.verdict, "UNASSESSABLE");
+
+  const delivered = evalWith(e, answer1);
+  expectRow(delivered, 1, 3, "VIOLATION", ["RECOMMENDATION_CONSTRAINT_MISMATCH"]);
+  assert.deepEqual(required(delivered, 1).diagnostics!.items[0].unassessable_constraints, []);
+});
+
+test("regression M4: an alternative whose sale is undelivered is unresolved, so a valid match beside it cannot PASS (row 8)", () => {
+  // L2 is sold at step 0 (not delivered). L1 is a definitely eligible match; L2 is offered as an alternative.
+  const e = recEntry([L1(), L2()], [statusEvent("L2", "sold"), recommendationRequestMessage(SHARED)]);
+  const answer1 = answer(1, recs(item("L1", "match", 1), item("L2", "alternative", 2)));
+
+  const open = evalWith(e, all(ack(0, "not_delivered"), answer1));
+  expectRow(open, 1, 8, "UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]);
+  const items = required(open, 1).diagnostics!.items;
+  assert.deepEqual(
+    items.map((i) => [i.listing_id, i.presentation, i.availability, i.state]),
+    [
+      ["L1", "match", "available", "valid"],
+      ["L2", "alternative", "unresolved", "unresolved"],
+    ],
+  );
+  assert.notEqual(open.verdict, "PASS");
+
+  // Delivered, the same alternative is definitely unavailable: a definite VIOLATION.
+  expectRow(evalWith(e, answer1), 1, 3, "VIOLATION", ["RECOMMENDATION_UNAVAILABLE"]);
+});
+
 // ------------------------------------------------------------ optional checks outside request turns
 
 test("optional checks outside a request turn: unknown -> VIOLATION, delivered sale -> VIOLATION, available -> PASS, unresolved -> omitted", () => {

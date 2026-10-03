@@ -59,7 +59,7 @@
           ]
         },
         "max_odometer_km": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }] },
-        "min_model_year": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1900, "maximum": 2100 }] },
+        "min_model_year": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }] },
         "allowed_fuels": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/fuel" } },
         "allowed_transmissions": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/transmission" } },
         "allowed_bodies": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/text" } },
