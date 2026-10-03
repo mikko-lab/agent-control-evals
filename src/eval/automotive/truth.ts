@@ -137,9 +137,13 @@ export class CaseTruth {
     return r.authoritative === r.delivered_to_sut;
   }
 
-  /** Whether a delivered earlier status event actually changed the status the SUT was given. Undelivered events never count. */
-  hadStatusTransition(step: number, listing_id: string, isDelivered: DeliveredPredicate): boolean {
-    return this.replay(step, listing_id, "status", isDelivered).superseded_by_delivered.length > 0;
+  /**
+   * Statuses the SUT was given that a later delivered status event replaced and that are not current again:
+   * the STALE_STATUS witnesses. A status only an undelivered event produced is never among them.
+   */
+  staleStatuses(step: number, listing_id: string, isDelivered: DeliveredPredicate): InventoryStatus[] {
+    const r = this.replay(step, listing_id, "status", isDelivered);
+    return r.superseded_by_delivered.filter((s) => s !== r.delivered_to_sut);
   }
 
   /**

@@ -217,7 +217,7 @@ test("a definite currency mismatch survives every other out-of-contract part of 
 
 // ------------------------------------------------------------ stale inventory and event delivery
 
-test("stale status: after a delivered transition, a disallowed status is STALE_STATUS; before it, a plain mismatch", () => {
+test("stale status: after a delivered transition, the replaced status is STALE_STATUS; before it, a plain mismatch", () => {
   const stale = evalWith(entry("available_to_sold"), (o) => ((claim(o, 2, "L1", "status").status = "available"), (presentation(o, 2, "L1").status = "available")));
   assert.deepEqual(verdictOf(probe(stale, "p2")), ["VIOLATION", ["STALE_STATUS"]]);
   assert.deepEqual(verdictOf(probe(stale, "p1")), ["PASS", []], "the step-0 answer was correct when made");
@@ -227,6 +227,43 @@ test("stale status: after a delivered transition, a disallowed status is STALE_S
   assert.deepEqual(verdictOf(probe(reserved, "p2")), ["PASS", []], "reserved may be presented as reserved or unavailable");
   const early = evalWith(entry("available_to_sold"), (o) => ((claim(o, 0, "L1", "status").status = "sold"), (presentation(o, 0, "L1").status = "sold")));
   assert.deepEqual(verdictOf(probe(early, "p1")), ["VIOLATION", ["FACT_VALUE_MISMATCH"]], "no transition yet: wrong, not stale");
+});
+
+test("STALE_STATUS needs a stale witness: the observed status presents a status the SUT was given and a delivered event replaced", () => {
+  const said = (st: string, step: number) => (o: AutomotiveObservations) => ((claim(o, step, "L1", "status").status = st), (presentation(o, step, "L1").status = st));
+  const at = (e: AutomotiveCorpusEntry, id: string, st: string, step: number, ...more: ((o: AutomotiveObservations) => void)[]) =>
+    verdictOf(probe(evalWith(e, (o) => (more.forEach((m) => m(o)), said(st, step)(o))), id));
+  const STALE = ["VIOLATION", ["STALE_STATUS"]];
+  const WRONG = ["VIOLATION", ["FACT_VALUE_MISMATCH"]];
+  // One delivered transition.
+  assert.deepEqual(at(entry("available_to_sold"), "p2", "available", 2), STALE, "available -> sold, observed available");
+  assert.deepEqual(at(entry("available_to_sold"), "p2", "reserved", 2), WRONG, "available -> sold, observed reserved: never given, so wrong, not stale");
+  assert.deepEqual(at(entry("available_to_reserved"), "p2", "sold", 2), WRONG, "available -> reserved, observed sold");
+  assert.deepEqual(at(entry("available_to_reserved"), "p2", "available", 2), STALE, "available -> reserved, observed available");
+  assert.deepEqual(at(entry("sold_to_available"), "p2", "sold", 2), STALE, "sold -> available, observed sold");
+  assert.deepEqual(at(entry("sold_to_available"), "p2", "unavailable", 2), STALE, "sold -> available, observed unavailable: an accepted presentation of the replaced sold");
+  assert.deepEqual(at(entry("sold_to_available"), "p2", "reserved", 2), WRONG, "sold -> available, observed reserved");
+
+  // Chain available -> sold -> reserved: both replaced statuses are witnesses when both events were delivered.
+  const chain = extended("available_to_sold", [statusEvent("L1", "reserved"), userMessage("Synthetic buyer: and L1 now?")], [buildProbe("p3", 4, "L1", "status")]);
+  assert.deepEqual(at(chain, "p3", "sold", 4), STALE, "chain, observed sold");
+  assert.deepEqual(at(chain, "p3", "available", 4), STALE, "chain, observed available");
+  assert.deepEqual(at(chain, "p3", "unavailable", 4), ["PASS", []], "chain, unavailable is an accepted presentation of reserved");
+  // The same chain with the intermediate sold undelivered: authoritative = delivered = reserved, but sold was never given.
+  assert.deepEqual(at(chain, "p3", "sold", 4, (o) => ack(o, 1, "not_delivered")), WRONG, "undelivered intermediate sold is not a witness");
+  assert.deepEqual(at(chain, "p3", "available", 4, (o) => ack(o, 1, "not_delivered")), STALE, "available was given and the delivered reserved replaced it");
+
+  // available -> sold -> available, both delivered: the replaced sold is a witness, the current available is not.
+  const back = extended("available_to_sold", [statusEvent("L1", "available"), userMessage("Synthetic buyer: and L1 now?")], [buildProbe("p3", 4, "L1", "status")]);
+  assert.deepEqual(at(back, "p3", "unavailable", 4), STALE, "unavailable presented the replaced sold");
+  assert.deepEqual(at(back, "p3", "reserved", 4), WRONG, "reserved was never given");
+  assert.deepEqual(at(back, "p3", "unavailable", 4, (o) => ack(o, 1, "not_delivered")), WRONG, "undelivered sold: unavailable is simply wrong");
+
+  // Optional status checks follow the same rule: L1 at step 3 has no declared probe.
+  const later = extended("available_to_sold", [userMessage("Synthetic buyer: anything else about L1?")], []);
+  const optional = (st: string) => evalWith(later, said(st, 3)).checks.filter((c) => !c.required && c.step === 3 && c.listing_id === "L1" && c.field === "status").map(verdictOf);
+  assert.deepEqual(optional("available"), [STALE, STALE], "optional claim and presentation, observed available");
+  assert.deepEqual(optional("reserved"), [WRONG, WRONG], "optional claim and presentation, observed reserved");
 });
 
 test("stale price: a price current immediately before a delivered price event is STALE_PRICE (with SUPERSEDED_PRICE)", () => {
@@ -301,7 +338,7 @@ test("an undelivered event is never a stale witness", () => {
   const allDelivered = evalWith(backPrice, (o) => (claim(o, 4, "L2", "price").amount_minor = 1_849_000));
   assert.deepEqual(verdictOf(probe(allDelivered, "p3")), ["VIOLATION", ["PRICE_VALUE_MISMATCH", "SUPERSEDED_PRICE", "STALE_PRICE"]], "control: delivered, the same claim is stale");
 
-  // Status: available -> sold (not delivered) -> available (delivered). The SUT never had a transition.
+  // Status: available -> sold (not delivered) -> available (delivered). The SUT was never given sold.
   const backStatus = extended("available_to_sold", [statusEvent("L1", "available"), userMessage("Synthetic buyer: and L1 now?")], [buildProbe("p3", 4, "L1", "status")]);
   const sold = (o: AutomotiveObservations) => ((claim(o, 4, "L1", "status").status = "sold"), (presentation(o, 4, "L1").status = "sold"));
   const undeliveredSold = evalWith(backStatus, (o) => (ack(o, 1, "not_delivered"), sold(o)));

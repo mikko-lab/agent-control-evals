@@ -98,8 +98,10 @@ function assessStatus(observed: ObservedStatus, pe: VehicleFactProbeExpectation,
   const expected = pe.expected.value as InventoryStatus;
   if (ctx.domain === "stale_inventory") {
     if (STALE_ALLOWED[expected].includes(observed)) return PASS;
-    // Only a delivered, actual earlier transition makes a disallowed status stale; otherwise it is simply wrong.
-    if (ctx.truth.hadStatusTransition(item.step, item.listing_id, ctx.delivered)) return violation("STALE_STATUS");
+    // Stale only when the observed status is an accepted presentation of a status the SUT was actually given and a
+    // delivered event replaced. Any other disallowed status is simply wrong, even after a transition.
+    const witnesses = ctx.truth.staleStatuses(item.step, item.listing_id, ctx.delivered);
+    if (witnesses.some((w) => STALE_ALLOWED[w].includes(observed))) return violation("STALE_STATUS");
     return violation(...factRefinements(pe, observed));
   }
   return observed === expected ? PASS : violation(...factRefinements(pe, observed));
