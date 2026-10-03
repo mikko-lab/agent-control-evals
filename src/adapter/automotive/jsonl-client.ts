@@ -16,8 +16,20 @@ import { AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION } from "../../spec/automotive/versi
 import type { AutomotiveCaseForAdapter } from "../../corpus/automotive/types";
 import { AutomotiveProtocolError, automotiveCaseMessage, validateAutomotiveCaseResult, validateAutomotiveHello, type AutomotiveCaseResult, type AutomotiveHelloResponse } from "./protocol";
 
+/**
+ * Deterministic client error kinds, so a caller can classify a failure without parsing messages:
+ *  - timeout:      the adapter did not answer within the configured timeout;
+ *  - process_exit: the adapter process exited (or was not running) while the client still needed it;
+ *  - spawn:        the adapter process could not be started;
+ *  - client_state: the client was used out of order (no handshake, request in flight, repeated handshake).
+ */
+export type AutomotiveClientErrorKind = "timeout" | "process_exit" | "spawn" | "client_state";
+
 export class AutomotiveClientError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly kind: AutomotiveClientErrorKind,
+  ) {
     super(message);
     this.name = "AutomotiveClientError";
   }
@@ -68,9 +80,9 @@ export class AutomotiveAdapterClient {
     this.proc.on("exit", (code, signal) => {
       this.exited = true;
       this.exitCode = code;
-      if (!this.shuttingDown) this.poison(new AutomotiveClientError(`adapter exited prematurely (code ${code}, signal ${signal}); stderr tail: ${this.stderrTail}`));
+      if (!this.shuttingDown) this.poison(new AutomotiveClientError(`adapter exited prematurely (code ${code}, signal ${signal}); stderr tail: ${this.stderrTail}`, "process_exit"));
     });
-    this.proc.on("error", (e) => this.poison(new AutomotiveClientError(`failed to spawn adapter: ${e.message}`)));
+    this.proc.on("error", (e) => this.poison(new AutomotiveClientError(`failed to spawn adapter: ${e.message}`, "spawn")));
     // A closed stdin (adapter gone) must surface as the exit/poison error, not as an unhandled EPIPE.
     this.proc.stdin.on("error", () => undefined);
   }
@@ -93,11 +105,11 @@ export class AutomotiveAdapterClient {
 
   private request(msg: unknown): Promise<unknown> {
     if (this.failure) return Promise.reject(this.failure);
-    if (this.exited) return Promise.reject(new AutomotiveClientError("adapter process is not running"));
-    if (this.waiter) return Promise.reject(new AutomotiveClientError("a request is already in flight"));
+    if (this.exited) return Promise.reject(new AutomotiveClientError("adapter process is not running", "process_exit"));
+    if (this.waiter) return Promise.reject(new AutomotiveClientError("a request is already in flight", "client_state"));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.poison(new AutomotiveClientError(`adapter did not answer within ${this.timeoutMs} ms`));
+        this.poison(new AutomotiveClientError(`adapter did not answer within ${this.timeoutMs} ms`, "timeout"));
         this.proc.kill("SIGKILL");
       }, this.timeoutMs);
       this.waiter = {
@@ -125,7 +137,7 @@ export class AutomotiveAdapterClient {
   }
 
   async helloHandshake(): Promise<AutomotiveHelloResponse> {
-    if (this.handshake) throw new AutomotiveClientError("handshake already completed");
+    if (this.handshake) throw new AutomotiveClientError("handshake already completed", "client_state");
     const raw = await this.request({ type: "hello", protocol_version: AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION });
     this.handshake = this.checked(() => validateAutomotiveHello(raw));
     return this.handshake;
@@ -133,7 +145,7 @@ export class AutomotiveAdapterClient {
 
   /** Sends one adapter view and returns the validated result (status ok or adapter_error). */
   async runCase(view: AutomotiveCaseForAdapter): Promise<AutomotiveCaseResult> {
-    if (!this.handshake) throw new AutomotiveClientError("hello handshake required before cases");
+    if (!this.handshake) throw new AutomotiveClientError("hello handshake required before cases", "client_state");
     const msg = automotiveCaseMessage(view);
     const raw = await this.request(msg);
     return this.checked(() => validateAutomotiveCaseResult(raw, view));
