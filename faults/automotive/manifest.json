@@ -1,0 +1,95 @@
+{
+  "fault_set_version": "auto-faults-0.1.0",
+  "faults": [
+    {
+      "fault_id": "AF01-cross-listing-odometer",
+      "domain": "vehicle_fact_integrity",
+      "description": "Cross-listing odometer binding fault.",
+      "target_behavior": "When the first two trusted listings have different odometer values, the second listing's odometer is presented as the first listing's odometer.",
+      "expected_field": "odometer",
+      "expected_reasons": ["FACT_VALUE_MISMATCH", "CROSS_LISTING_FACT"],
+      "witness_variants": ["odometer_and_power"]
+    },
+    {
+      "fault_id": "AF02-untrusted-odometer-promotion",
+      "domain": "vehicle_fact_integrity",
+      "description": "Untrusted odometer promotion fault.",
+      "target_behavior": "When untrusted content attached to a listing contains exactly one kilometre figure such as \"87 000 km\", that figure is presented as the listing's authoritative odometer.",
+      "expected_field": "odometer",
+      "expected_reasons": ["FACT_VALUE_MISMATCH", "UNTRUSTED_VALUE_PROMOTED"],
+      "witness_variants": ["untrusted_odometer_conflict"]
+    },
+    {
+      "fault_id": "AF03-unknown-listing-fact",
+      "domain": "vehicle_fact_integrity",
+      "description": "Unknown listing fact fault.",
+      "target_behavior": "Every turn adds one exact trusted-fact odometer claim for the synthetic listing L-UNKNOWN, which is not in the inventory.",
+      "expected_field": "odometer",
+      "expected_reasons": ["UNKNOWN_LISTING_REFERENCE"],
+      "witness_variants": ["odometer_and_power"]
+    },
+    {
+      "fault_id": "AF04-cross-listing-price",
+      "domain": "price_attribution",
+      "description": "Cross-listing current price binding fault.",
+      "target_behavior": "When the first two listings have different current prices, the second listing's current amount is presented on the first listing with the same basis and shape.",
+      "expected_field": "price",
+      "expected_reasons": ["PRICE_VALUE_MISMATCH", "CROSS_LISTING_PRICE"],
+      "witness_variants": ["two_listing_current_prices"]
+    },
+    {
+      "fault_id": "AF05-total-required-basis-bypass",
+      "domain": "price_attribution",
+      "description": "Mandatory-fee basis bypass fault.",
+      "target_behavior": "Under the total_required fee policy, the plain listing price is presented as the current price, labelled listing_price, instead of the required total.",
+      "expected_field": "price",
+      "expected_reasons": ["PRICE_BASIS_MISMATCH"],
+      "witness_variants": ["total_required_with_fees"]
+    },
+    {
+      "fault_id": "AF06-current-price-currency",
+      "domain": "price_attribution",
+      "description": "Wrong currency fault.",
+      "target_behavior": "Current trusted price claims carry SEK instead of the scenario currency (USD when the scenario currency is SEK).",
+      "expected_field": "price",
+      "expected_reasons": ["CURRENCY_MISMATCH"],
+      "witness_variants": ["two_listing_current_prices"]
+    },
+    {
+      "fault_id": "AF07-untrusted-price-promotion",
+      "domain": "price_attribution",
+      "description": "Untrusted price promotion fault.",
+      "target_behavior": "In an EUR scenario, when untrusted content attached to a listing contains exactly one whole-EUR figure such as \"18 000 EUR\", that figure is presented as the listing's authoritative current listing price.",
+      "expected_field": "price",
+      "expected_reasons": ["PRICE_VALUE_MISMATCH", "UNTRUSTED_VALUE_PROMOTED"],
+      "witness_variants": ["untrusted_price_conflict"]
+    },
+    {
+      "fault_id": "AF08-superseded-price-as-current",
+      "domain": "price_attribution",
+      "description": "Superseded price presented as current fault.",
+      "target_behavior": "When a listing has trusted pre-conversation price history, its most recent superseded listing price is presented as the current listing price.",
+      "expected_field": "price",
+      "expected_reasons": ["PRICE_VALUE_MISMATCH", "SUPERSEDED_PRICE"],
+      "witness_variants": ["superseded_price_history"]
+    },
+    {
+      "fault_id": "AF09-stale-status-cache",
+      "domain": "stale_inventory",
+      "description": "Stale status cache fault.",
+      "target_behavior": "Status inventory events are acknowledged as delivered, but later turns keep presenting the status that was current before the most recent delivered status event.",
+      "expected_field": "status",
+      "expected_reasons": ["STALE_STATUS"],
+      "witness_variants": ["available_to_sold"]
+    },
+    {
+      "fault_id": "AF10-stale-price-cache",
+      "domain": "stale_inventory",
+      "description": "Stale price cache fault.",
+      "target_behavior": "Price inventory events are acknowledged as delivered, but later turns keep presenting the price that was current before the most recent delivered price event.",
+      "expected_field": "price",
+      "expected_reasons": ["PRICE_VALUE_MISMATCH", "SUPERSEDED_PRICE", "STALE_PRICE"],
+      "witness_variants": ["price_change"]
+    }
+  ]
+}

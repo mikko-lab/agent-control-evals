@@ -1,0 +1,435 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/fault-report.schema.json",
+  "title": "Automotive fault-sensitivity report (auto-fault-report-0.1.0)",
+  "description": "Detection of the declared synthetic behaviour faults by the deterministic automotive harness. Counts and a gate boolean only: no score, rate, percentage or severity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fault_report_version",
+    "fault_set_version",
+    "fault_set_sha256",
+    "fault_adapter_version",
+    "pack_version",
+    "profile",
+    "corpus_sha256",
+    "harness",
+    "baseline",
+    "gate",
+    "faults",
+    "limitations"
+  ],
+  "properties": {
+    "fault_report_version": {
+      "const": "auto-fault-report-0.1.0"
+    },
+    "fault_set_version": {
+      "const": "auto-faults-0.1.0"
+    },
+    "fault_set_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "fault_adapter_version": {
+      "const": "auto-fault-adapter-0.1.0"
+    },
+    "pack_version": {
+      "const": "auto-0.1.0"
+    },
+    "profile": {
+      "const": "auto-smoke-0.1.0"
+    },
+    "corpus_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "worktree_clean"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{40}|unknown)$"
+        },
+        "worktree_clean": {
+          "type": "boolean"
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_path",
+        "evidence_sha256",
+        "run_valid",
+        "complete_execution",
+        "all_required_assessed",
+        "verdict_counts"
+      ],
+      "properties": {
+        "report_path": {
+          "const": "baseline/report.json"
+        },
+        "evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "run_valid": {
+          "type": "boolean"
+        },
+        "complete_execution": {
+          "type": "boolean"
+        },
+        "all_required_assessed": {
+          "type": "boolean"
+        },
+        "verdict_counts": {
+          "$ref": "#/$defs/verdictCounts"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "fault_count",
+        "killed",
+        "survived",
+        "invalid"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "fault_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "killed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "survived": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "invalid": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "faults": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/faultResult"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "$ref": "#/$defs/nonEmpty"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "faultId": {
+      "type": "string",
+      "pattern": "^AF[0-9]{2}-[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "domain": {
+      "enum": [
+        "vehicle_fact_integrity",
+        "price_attribution",
+        "stale_inventory"
+      ]
+    },
+    "field": {
+      "enum": [
+        "odometer",
+        "model_year",
+        "first_registration",
+        "fuel",
+        "transmission",
+        "power",
+        "status",
+        "price"
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "FACT_VALUE_MISMATCH",
+          "CROSS_LISTING_FACT",
+          "UNKNOWN_LISTING_REFERENCE",
+          "UNTRUSTED_VALUE_PROMOTED",
+          "PRICE_VALUE_MISMATCH",
+          "CROSS_LISTING_PRICE",
+          "SUPERSEDED_PRICE",
+          "PRICE_BASIS_MISMATCH",
+          "CURRENCY_MISMATCH",
+          "STALE_STATUS",
+          "STALE_PRICE"
+        ]
+      }
+    },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_]{0,63}$"
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "caseId": {
+      "type": "string",
+      "pattern": "^auto-case-[0-9]{6}$"
+    },
+    "verdictCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "PASS",
+        "VIOLATION",
+        "UNASSESSABLE",
+        "HARNESS_ERROR"
+      ],
+      "properties": {
+        "PASS": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "VIOLATION": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "UNASSESSABLE": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "HARNESS_ERROR": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "relPath": {
+      "type": "string",
+      "pattern": "^(baseline|faults/AF[0-9]{2}-[a-z0-9]+(-[a-z0-9]+)*)/report\\.json$"
+    },
+    "faultResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fault_id",
+        "domain",
+        "description",
+        "expected_field",
+        "expected_reasons",
+        "witness_variants",
+        "status",
+        "invalid_reason",
+        "witness_case_ids",
+        "matched_witness_case_ids",
+        "collateral_violation_case_ids",
+        "run_valid",
+        "verdict_counts",
+        "report_path",
+        "evidence_sha256"
+      ],
+      "properties": {
+        "fault_id": {
+          "$ref": "#/$defs/faultId"
+        },
+        "domain": {
+          "$ref": "#/$defs/domain"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmpty"
+        },
+        "expected_field": {
+          "$ref": "#/$defs/field"
+        },
+        "expected_reasons": {
+          "$ref": "#/$defs/reasons"
+        },
+        "witness_variants": {
+          "$ref": "#/$defs/variants"
+        },
+        "status": {
+          "enum": [
+            "killed",
+            "survived",
+            "invalid"
+          ]
+        },
+        "invalid_reason": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/nonEmpty"
+            }
+          ]
+        },
+        "witness_case_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/caseId"
+          }
+        },
+        "matched_witness_case_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/caseId"
+          }
+        },
+        "collateral_violation_case_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/caseId"
+          }
+        },
+        "run_valid": {
+          "type": "boolean"
+        },
+        "verdict_counts": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/verdictCounts"
+            }
+          ]
+        },
+        "report_path": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/relPath"
+            }
+          ]
+        },
+        "evidence_sha256": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/sha256"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "killed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "invalid_reason": {
+                "type": "null"
+              },
+              "matched_witness_case_ids": {
+                "minItems": 1
+              },
+              "run_valid": {
+                "const": true
+              },
+              "verdict_counts": {
+                "type": "object"
+              },
+              "report_path": {
+                "type": "string"
+              },
+              "evidence_sha256": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "survived"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "invalid_reason": {
+                "type": "null"
+              },
+              "matched_witness_case_ids": {
+                "maxItems": 0
+              },
+              "run_valid": {
+                "const": true
+              },
+              "verdict_counts": {
+                "type": "object"
+              },
+              "report_path": {
+                "type": "string"
+              },
+              "evidence_sha256": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "invalid"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "invalid_reason": {
+                "type": "string"
+              },
+              "matched_witness_case_ids": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

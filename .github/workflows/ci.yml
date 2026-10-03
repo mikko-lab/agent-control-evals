@@ -79,3 +79,47 @@ jobs:
             out/**/corpus-manifest.json
             out/reachability.json
           if-no-files-found: warn
+
+  automotive:
+    name: automotive assurance (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: 1. install
+        run: npm ci
+      - name: 2. build
+        run: npm run build
+      - name: 3. automotive reference-agent evaluation (harness self-test, golden-checked corpus)
+        run: node dist/src/automotive-cli.js evaluate --profile smoke --reference-agent --out out/automotive/reference
+      - name: 4. automotive report and manifest schema validation
+        run: |
+          node dist/src/automotive-cli.js validate-report --file out/automotive/reference/report.json
+          node dist/src/automotive-cli.js validate-manifest --file out/automotive/reference/manifest.json
+      - name: 5. automotive synthetic fault sensitivity
+        run: node dist/src/automotive-cli.js faults --profile smoke --out out/automotive/faults-a
+      - name: 6. automotive fault report schema validation
+        run: node dist/src/automotive-cli.js validate-fault-report --file out/automotive/faults-a/fault-sensitivity.json
+      - name: 7. automotive synthetic fault sensitivity determinism (independent rerun, recursive byte comparison)
+        run: |
+          node dist/src/automotive-cli.js faults --profile smoke --out out/automotive/faults-b
+          diff -r out/automotive/faults-a out/automotive/faults-b
+          rm -rf out/automotive/faults-b
+      - name: upload automotive artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: automotive-reports-node${{ matrix.node }}
+          path: |
+            out/automotive/reference/**
+            out/automotive/faults-a/**
+          if-no-files-found: warn
