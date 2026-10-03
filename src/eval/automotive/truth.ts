@@ -138,7 +138,7 @@ export class CaseTruth {
   }
 
   /**
-   * Statuses the SUT was given that a later delivered status event replaced and that are not current again:
+   * Trusted statuses the SUT was given that a later delivered status event replaced and that are not current again:
    * the STALE_STATUS witnesses. A status only an undelivered event produced is never among them.
    */
   staleStatuses(step: number, listing_id: string, isDelivered: DeliveredPredicate): InventoryStatus[] {

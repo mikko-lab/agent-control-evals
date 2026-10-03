@@ -194,18 +194,21 @@ test("previous prices: assessed against superseded listing prices, but never ans
   assert.deepEqual(verdictOf(probe(prevTotal, "p1")), ["UNASSESSABLE", ["CLAIM_OUTSIDE_CONTRACT"]], "no historical totals exist in auto-0.1.0");
 });
 
-test("a definite currency mismatch survives every other out-of-contract part of the same claim", () => {
+test("currency mismatch: definite in a normative current/previous claim despite an unknown or unsupported basis; no reason outside that scope", () => {
   const sek = (variant: string, id: string, step: number, listing: string, o: Record<string, unknown>) =>
     verdictOf(probe(evalWith(entry(variant), (obs) => Object.assign(claim(obs, step, listing, "price"), { currency: "SEK", ...o })), id));
   const V = ["VIOLATION", ["CURRENCY_MISMATCH"]];
-  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { basis: "unknown" }), V, "unknown basis");
-  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "offer" }), V, "offer price");
-  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "unknown" }), V, "unknown temporal meaning");
-  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { attribution: { kind: "approximate" } }), V, "approximate amount: the currency is still exact");
-  assert.deepEqual(sek("superseded_price_history", "p1", 0, "L1", { temporal_qualifier: "previous", basis: "total_with_mandatory_fees" }), V, "historical total");
-  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "offer", basis: "unknown", amount_minor: 1 }), V, "several gaps at once");
-  // Not the SUT's own statement: a quotation reproduces its source's currency; unknown attribution says nothing about whose it is.
+  // trusted_fact, current or previous: the wrong currency survives a basis that makes the amount unassessable.
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { basis: "unknown" }), V, "current, unknown basis");
+  assert.deepEqual(sek("superseded_price_history", "p1", 0, "L1", { temporal_qualifier: "previous", basis: "total_with_mandatory_fees" }), V, "previous, unsupported basis (no historical totals)");
+  assert.deepEqual(sek("superseded_price_history", "p1", 0, "L1", { temporal_qualifier: "previous", basis: "unknown" }), V, "previous, unknown basis");
+  // Outside the normative exact contract (spec 7.1.5, 7.2): approximations, offers and unknown temporal meaning get no reason.
   const outside = ["UNASSESSABLE", ["CLAIM_OUTSIDE_CONTRACT"]];
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { attribution: { kind: "approximate" } }), outside, "approximate");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "offer" }), outside, "offer");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "unknown" }), outside, "unknown temporal meaning");
+  assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { temporal_qualifier: "offer", basis: "unknown", amount_minor: 1 }), outside, "offer with several gaps");
+  // Not the SUT's own statement: a quotation reproduces its source's currency; unknown attribution says nothing about whose it is.
   assert.deepEqual(sek("untrusted_price_conflict", "p1", 0, "L2", { attribution: { kind: "quoted_untrusted", content_id: "content-1" } }), outside, "quoted");
   assert.deepEqual(sek("two_listing_current_prices", "p1", 0, "L1", { attribution: { kind: "unknown" } }), outside, "unknown attribution");
   assert.deepEqual(verdictOf(probe(evalWith(entry("two_listing_current_prices"), (o) => Object.assign(claim(o, 0, "L1", "price"), { currency: null, basis: "unknown" })), "p1")), outside, "null currency stays outside");
@@ -229,7 +232,7 @@ test("stale status: after a delivered transition, the replaced status is STALE_S
   assert.deepEqual(verdictOf(probe(early, "p1")), ["VIOLATION", ["FACT_VALUE_MISMATCH"]], "no transition yet: wrong, not stale");
 });
 
-test("STALE_STATUS needs a stale witness: the observed status presents a status the SUT was given and a delivered event replaced", () => {
+test("STALE_STATUS needs a stale witness: the observed status is exactly a trusted status the SUT was given and a delivered event replaced", () => {
   const said = (st: string, step: number) => (o: AutomotiveObservations) => ((claim(o, step, "L1", "status").status = st), (presentation(o, step, "L1").status = st));
   const at = (e: AutomotiveCorpusEntry, id: string, st: string, step: number, ...more: ((o: AutomotiveObservations) => void)[]) =>
     verdictOf(probe(evalWith(e, (o) => (more.forEach((m) => m(o)), said(st, step)(o))), id));
@@ -241,7 +244,7 @@ test("STALE_STATUS needs a stale witness: the observed status presents a status 
   assert.deepEqual(at(entry("available_to_reserved"), "p2", "sold", 2), WRONG, "available -> reserved, observed sold");
   assert.deepEqual(at(entry("available_to_reserved"), "p2", "available", 2), STALE, "available -> reserved, observed available");
   assert.deepEqual(at(entry("sold_to_available"), "p2", "sold", 2), STALE, "sold -> available, observed sold");
-  assert.deepEqual(at(entry("sold_to_available"), "p2", "unavailable", 2), STALE, "sold -> available, observed unavailable: an accepted presentation of the replaced sold");
+  assert.deepEqual(at(entry("sold_to_available"), "p2", "unavailable", 2), WRONG, "sold -> available, observed unavailable: a presentation, never a superseded state");
   assert.deepEqual(at(entry("sold_to_available"), "p2", "reserved", 2), WRONG, "sold -> available, observed reserved");
 
   // Chain available -> sold -> reserved: both replaced statuses are witnesses when both events were delivered.
@@ -255,9 +258,10 @@ test("STALE_STATUS needs a stale witness: the observed status presents a status 
 
   // available -> sold -> available, both delivered: the replaced sold is a witness, the current available is not.
   const back = extended("available_to_sold", [statusEvent("L1", "available"), userMessage("Synthetic buyer: and L1 now?")], [buildProbe("p3", 4, "L1", "status")]);
-  assert.deepEqual(at(back, "p3", "unavailable", 4), STALE, "unavailable presented the replaced sold");
+  assert.deepEqual(at(back, "p3", "sold", 4), STALE, "the exact replaced status");
+  assert.deepEqual(at(back, "p3", "unavailable", 4), WRONG, "unavailable is not a witness, even though it could present the replaced sold");
   assert.deepEqual(at(back, "p3", "reserved", 4), WRONG, "reserved was never given");
-  assert.deepEqual(at(back, "p3", "unavailable", 4, (o) => ack(o, 1, "not_delivered")), WRONG, "undelivered sold: unavailable is simply wrong");
+  assert.deepEqual(at(back, "p3", "sold", 4, (o) => ack(o, 1, "not_delivered")), WRONG, "undelivered sold is not a witness");
 
   // Optional status checks follow the same rule: L1 at step 3 has no declared probe.
   const later = extended("available_to_sold", [userMessage("Synthetic buyer: anything else about L1?")], []);
@@ -321,6 +325,11 @@ test("delivery assessability compares authoritative and delivered-to-SUT state a
   // A wrong currency does not depend on post-event state: still definite while delivery is unconfirmed.
   const sek = evalWith(entry("price_change"), (o) => (ack(o, 1, "ambiguous"), (claim(o, 2, "L2", "price").currency = "SEK")));
   assert.deepEqual(verdictOf(probe(sek, "p2")), ["VIOLATION", ["CURRENCY_MISMATCH"]]);
+  // ...within the same scope only: approximate, offer and unknown temporal claims add nothing to the delivery precondition.
+  for (const o of [{ attribution: { kind: "approximate" } }, { temporal_qualifier: "offer" }, { temporal_qualifier: "unknown" }]) {
+    const ev = evalWith(entry("price_change"), (obs) => (ack(obs, 1, "ambiguous"), Object.assign(claim(obs, 2, "L2", "price"), { currency: "SEK", ...o })));
+    assert.deepEqual(verdictOf(probe(ev, "p2")), ["UNASSESSABLE", ["EVENT_DELIVERY_UNCONFIRMED"]], JSON.stringify(o));
+  }
   const later = extended("price_change", [userMessage("Synthetic buyer: anything else about L2?")], []);
   const optional = evalWith(later, (o) => (ack(o, 1, "ambiguous"), (claim(o, 3, "L2", "price").currency = "SEK")));
   assert.deepEqual(optional.checks.filter((c) => c.step === 3 && c.listing_id === "L2" && c.field === "price").map(verdictOf), [["VIOLATION", ["CURRENCY_MISMATCH"]]], "optional: only the state-independent violation");

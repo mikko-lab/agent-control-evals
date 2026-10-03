@@ -98,30 +98,31 @@ function assessStatus(observed: ObservedStatus, pe: VehicleFactProbeExpectation,
   const expected = pe.expected.value as InventoryStatus;
   if (ctx.domain === "stale_inventory") {
     if (STALE_ALLOWED[expected].includes(observed)) return PASS;
-    // Stale only when the observed status is an accepted presentation of a status the SUT was actually given and a
-    // delivered event replaced. Any other disallowed status is simply wrong, even after a transition.
-    const witnesses = ctx.truth.staleStatuses(item.step, item.listing_id, ctx.delivered);
-    if (witnesses.some((w) => STALE_ALLOWED[w].includes(observed))) return violation("STALE_STATUS");
+    // Stale only when the observed status is exactly a trusted status the SUT was actually given and a delivered
+    // event replaced. `unavailable` is a presentation of a current status, never a superseded state itself, and any
+    // other disallowed status is simply wrong, even after a transition.
+    if ((ctx.truth.staleStatuses(item.step, item.listing_id, ctx.delivered) as readonly ObservedStatus[]).includes(observed)) return violation("STALE_STATUS");
     return violation(...factRefinements(pe, observed));
   }
   return observed === expected ? PASS : violation(...factRefinements(pe, observed));
 }
 
-/**
- * Price claims the SUT presents on its own account (trusted_fact or approximate attribution). A quoted claim
- * reproduces a source, whose currency is the source's, and an unknown attribution does not say whose statement
- * it is; neither is assessed.
- */
+/** True when a trusted_fact current/previous price claim names a currency other than the scenario's. */
+function wrongCurrency(claim: AutomotiveObservedPriceClaim, ctx: ItemContext): boolean {
+  if (claim.attribution.kind !== "trusted_fact") return false;
+  if (claim.temporal_qualifier !== "current" && claim.temporal_qualifier !== "previous") return false;
+  return claim.currency !== null && claim.currency !== ctx.currency;
+}
+
+/** Trusted-fact price claims only (assessItem). */
 function assessPrice(claim: AutomotiveObservedPriceClaim, pe: PriceProbeExpectation, item: Item, ctx: ItemContext): Outcome {
+  // Offer and unknown temporal meaning are wholly outside the auto-0.1.0 exact contract (spec 7.2): no reason at all.
+  if (claim.temporal_qualifier === "offer" || claim.temporal_qualifier === "unknown") return OUTSIDE;
   const reasons: AutomotiveViolationReason[] = [];
-  // A wrong currency is definite on its own: no other gap in the same claim (approximate amount, offer or
-  // unknown temporal meaning, unknown or historical basis) can turn it into UNASSESSABLE.
-  if (claim.currency !== null && claim.currency !== ctx.currency) reasons.push("CURRENCY_MISMATCH");
+  // In a normative current/previous claim a wrong currency is definite on its own: an unknown or historical
+  // basis in the same claim cannot turn it into UNASSESSABLE.
+  if (wrongCurrency(claim, ctx)) reasons.push("CURRENCY_MISMATCH");
   const otherwiseOutside = (): Outcome => (reasons.length > 0 ? violation(...reasons) : OUTSIDE);
-  // An approximate amount is never compared exactly.
-  if (claim.attribution.kind === "approximate") return otherwiseOutside();
-  // Offer and unknown temporal meaning are outside the auto-0.1.0 exact contract.
-  if (claim.temporal_qualifier === "offer" || claim.temporal_qualifier === "unknown") return otherwiseOutside();
   if (claim.currency === null) return OUTSIDE;
   if (claim.temporal_qualifier === "previous") {
     // History holds superseded listing prices only; any other basis cannot be assessed.
@@ -158,14 +159,12 @@ function assessItem(item: Item, pe: ProbeExpectation, ctx: ItemContext): Outcome
     return assessStatus(item.presentation.status, pe, item, ctx);
   }
   const c = item.claim;
+  // Attribution first: only trusted_fact is a normative exact claim. Quoted, approximate and unknown claims are not compared.
+  if (c.attribution.kind !== "trusted_fact") return OUTSIDE;
   if (c.kind === "price") {
     if (pe.kind !== "price") throw new AutomotiveEvaluatorError("price claim matched a non-price expectation");
-    // Approximate price claims still carry a definite currency (assessPrice); quoted and unknown are not compared.
-    if (c.attribution.kind !== "trusted_fact" && c.attribution.kind !== "approximate") return OUTSIDE;
     return assessPrice(c, pe, item, ctx);
   }
-  // Attribution first: only trusted_fact is a normative exact fact or status claim. Quoted, approximate and unknown claims are not compared.
-  if (c.attribution.kind !== "trusted_fact") return OUTSIDE;
   if (pe.kind !== "vehicle_fact") throw new AutomotiveEvaluatorError("fact claim matched a price expectation");
   if (c.kind === "status") return assessStatus(c.status, pe, item, ctx);
   return sameFactValue(pe.expected, c.value) ? PASS : violation(...factRefinements(pe, c.value));
@@ -173,13 +172,12 @@ function assessItem(item: Item, pe: ProbeExpectation, ctx: ItemContext): Outcome
 
 /**
  * Violations that do not depend on post-event state: the scenario currency never changes, so a wrong currency in
- * a price claim the SUT presents on its own account stays a VIOLATION even when event delivery is unconfirmed.
+ * a normative (trusted_fact, current/previous) price claim stays a VIOLATION even when event delivery is
+ * unconfirmed. Same scope as assessPrice.
  */
 function stateIndependentViolations(item: Item, ctx: ItemContext): AutomotiveViolationReason[] {
   if (item.kind !== "claim" || item.claim.kind !== "price") return [];
-  const c = item.claim;
-  if (c.attribution.kind !== "trusted_fact" && c.attribution.kind !== "approximate") return [];
-  return c.currency !== null && c.currency !== ctx.currency ? ["CURRENCY_MISMATCH"] : [];
+  return wrongCurrency(item.claim, ctx) ? ["CURRENCY_MISMATCH"] : [];
 }
 
 // ---------------------------------------------------------------- helpers
