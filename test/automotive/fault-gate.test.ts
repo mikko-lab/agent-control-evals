@@ -25,13 +25,15 @@ const SHA = "a".repeat(64);
 const faultOf = (id: string) => FAULT_SET.faults.find((f) => f.fault_id === id)!;
 
 const runs = new Map<string, Promise<AutomotiveReport>>();
-/** D2 report for "reference", a fault id, or "fake:<mode>"; cached, returned as a fresh copy. */
+/** D2 report for "reference", "float" (a foreign adapter that PASSes everything), a fault id, or "fake:<mode>"; cached, fresh copy. */
 async function reportOf(who: string): Promise<AutomotiveReport> {
   if (!runs.has(who)) {
     const adapter =
       who === "reference"
         ? { command: process.execPath, args: [join(DIST, "automotive-reference", "main.js")] }
-        : who.startsWith("fake:")
+        : who === "float"
+          ? { command: process.execPath, args: [join(ROOT, "test", "fixtures", "automotive", "float-evidence-adapter.js")] }
+          : who.startsWith("fake:")
           ? { command: process.execPath, args: [join(ROOT, "test", "fixtures", "automotive", "fake-adapter.js"), who.slice(5)] }
           : { command: process.execPath, args: [join(DIST, "automotive-faults", "main.js"), who] };
     runs.set(
@@ -160,6 +162,61 @@ test("baseline must be a clean 18/18 PASS reference run, and every witness must 
   const clean = await reportOf("reference");
   assert.throws(() => witnessCaseIds({ ...faultOf("AF10-stale-price-cache"), witness_variants: ["no_such_variant"] }, clean), /no baseline case/);
   assert.throws(() => witnessCaseIds({ ...faultOf("AF10-stale-price-cache"), witness_variants: ["odometer_and_power"] }, clean), /belongs to vehicle_fact_integrity/);
+});
+
+test("baseline identity: a clean 18/18 PASS from any adapter other than the exact reference agent is refused (harness failure)", async () => {
+  const foreign = await reportOf("float");
+  assert.deepEqual([foreign.scenario_summary.verdict_counts.PASS, foreign.run_valid, foreign.all_required_assessed], [18, true, true], "technically a perfect run");
+  assert.deepEqual(automotiveBaselineProblems(foreign), ["baseline identity is not the in-repo reference agent (adapter float-evidence-fixture-adapter 0.1.0, SUT synthetic-float-evidence-sut 0.1.0 revision null)"]);
+  const outcomes = FAULT_SET.faults.map(() => outcome(null, "x"));
+  assert.throws(() => buildAutomotiveFaultReport({ faultSet: FAULT_SET, faultSetSha256: SHA, baseline: foreign, baselineReportPath: "baseline/report.json", outcomes, harnessIdentity: ID }), (e: unknown) => e instanceof AutomotiveFaultGateError && /identity is not the in-repo reference agent/.test(e.message));
+  // Every single identity field counts.
+  const variants: [string, (r: AutomotiveReport) => void][] = [
+    ["adapter name", (r) => (r.manifest.adapter!.name = "automotive-reference-adapter-x")],
+    ["adapter version", (r) => (r.manifest.adapter!.version = "auto-reference-agent-0.1.1")],
+    ["sut name", (r) => (r.manifest.sut!.name = "automotive-reference-agent-x")],
+    ["sut version", (r) => (r.manifest.sut!.version = "auto-reference-agent-0.1.1")],
+    ["sut revision", (r) => (r.manifest.sut!.revision = "deadbeef")],
+    ["no hello", (r) => ((r.manifest.adapter = null), (r.manifest.sut = null))],
+  ];
+  for (const [what, change] of variants) {
+    const r = await reportOf("reference");
+    change(r);
+    assert.equal(automotiveBaselineProblems(r).length, 1, what);
+  }
+  assert.deepEqual(automotiveBaselineProblems(await reportOf("reference")), []);
+});
+
+test("harness binding: baseline and every fault bundle must carry exactly the fault report's harness identity, else a harness failure", async () => {
+  const gateError = (re: RegExp) => (e: unknown) => e instanceof AutomotiveFaultGateError && re.test(e.message);
+  const build = async (opts: { injected?: typeof ID; baseline?: (r: AutomotiveReport) => void; fault?: [string, (r: AutomotiveReport) => void] }) => {
+    const baseline = await reportOf("reference");
+    opts.baseline?.(baseline);
+    const outcomes: AutomotiveFaultRunOutcome[] = [];
+    for (const f of FAULT_SET.faults) {
+      const r = await reportOf(f.fault_id);
+      if (opts.fault && opts.fault[0] === f.fault_id) opts.fault[1](r);
+      outcomes.push({ report: r, report_path: `faults/${f.fault_id}/report.json`, failure: null });
+    }
+    return buildAutomotiveFaultReport({ faultSet: FAULT_SET, faultSetSha256: SHA, baseline, baselineReportPath: "baseline/report.json", outcomes, harnessIdentity: opts.injected ?? ID });
+  };
+  assert.equal((await build({})).gate.passed, true, "control: one identity everywhere");
+  const otherCommit = "fedcba9876543210fedcba9876543210fedcba98";
+  // Fault bundle from another commit, or with another worktree state.
+  await assert.rejects(build({ fault: ["AF07-untrusted-price-promotion", (r) => (r.manifest.harness = { commit: otherCommit, worktree_clean: true })] }), gateError(/AF07-untrusted-price-promotion bundle harness fedcba98.* != baseline harness 01234567/));
+  await assert.rejects(build({ fault: ["AF01-cross-listing-odometer", (r) => (r.manifest.harness = { ...ID, worktree_clean: false })] }), gateError(/AF01-cross-listing-odometer bundle harness .*worktree clean: false.* != baseline harness .*worktree clean: true/));
+  // Baseline bundle that differs from the identity the fault report would record.
+  await assert.rejects(build({ baseline: (r) => (r.manifest.harness = { commit: otherCommit, worktree_clean: true }) }), gateError(/baseline bundle harness fedcba98.* != fault report harness 01234567/));
+  await assert.rejects(build({ injected: { ...ID, worktree_clean: false } }), gateError(/baseline bundle harness .*worktree clean: true.* != fault report harness .*worktree clean: false/));
+  await assert.rejects(build({ injected: { commit: "unknown", worktree_clean: false } }), gateError(/!= fault report harness unknown/));
+  // The mismatch is never turned into an INVALID fault or a kill: no report exists at all.
+  let report: unknown = null;
+  try {
+    report = await build({ fault: ["AF03-unknown-listing-fact", (r) => (r.manifest.harness = { ...ID, commit: otherCommit })] });
+  } catch {
+    /* expected */
+  }
+  assert.equal(report, null);
 });
 
 // ------------------------------------------------------------ fault-set manifest

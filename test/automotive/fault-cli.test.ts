@@ -170,6 +170,24 @@ test("an invalid baseline is a harness failure (exit 2): no fault is run and no 
   }
 });
 
+test("a foreign adapter with a perfect 18/18 PASS is not a reference baseline: exit 2, no fault is run", async () => {
+  const out = outDir();
+  let faultRuns = 0;
+  const r = await faultsAutomotive({
+    root: ROOT,
+    out,
+    harnessIdentity: ID,
+    referenceAdapter: { command: process.execPath, args: [join(ROOT, "test", "fixtures", "automotive", "float-evidence-adapter.js")] },
+    faultAdapter: (id) => (faultRuns++, { command: process.execPath, args: [join(ROOT, "dist", "src", "adapter", "automotive-faults", "main.js"), id] }),
+  });
+  assert.equal(r.exitCode, 2);
+  assert.match((r.stdout as any).error, /baseline is not a clean reference run: baseline identity is not the in-repo reference agent \(adapter float-evidence-fixture-adapter/);
+  assert.equal(faultRuns, 0);
+  assert.ok(!existsSync(join(out, "fault-sensitivity.json")) && !existsSync(join(out, "faults")));
+  const baselineReport = JSON.parse(readFileSync(join(out, "baseline", "report.json"), "utf8"));
+  assert.equal(baselineReport.scenario_summary.verdict_counts.PASS, 18, "the refused baseline really was a technically perfect run");
+});
+
 test("an invalid fault set or a golden mismatch is a harness failure (exit 2); stale output is removed first", async () => {
   const out = outDir();
   mkdirSync(join(out, "faults", "stale"), { recursive: true });

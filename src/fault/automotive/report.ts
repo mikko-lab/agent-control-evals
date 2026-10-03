@@ -7,14 +7,42 @@
  * A harness or protocol failure never kills a fault; the adapter's own `activated` flag is never
  * consulted. Counts and a gate boolean only: no score, rate or severity.
  */
-import { AUTOMOTIVE_FAULT_ADAPTER_VERSION, AUTOMOTIVE_FAULT_REPORT_VERSION, AUTOMOTIVE_FAULT_SET_VERSION } from "../../spec/automotive/version";
+import { AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION, AUTOMOTIVE_FAULT_ADAPTER_VERSION, AUTOMOTIVE_FAULT_REPORT_VERSION, AUTOMOTIVE_FAULT_SET_VERSION } from "../../spec/automotive/version";
+import { AUTOMOTIVE_REFERENCE_IDENTITY } from "../../report/automotive/summary";
 import type { AutomotiveHarnessIdentity, AutomotiveReport } from "../../report/automotive/types";
 import { AUTOMOTIVE_FAULT_REPORT_LIMITATIONS } from "./limitations";
 import { AutomotiveFaultGateError, type AutomotiveFaultDefinition, type AutomotiveFaultReport, type AutomotiveFaultResult, type AutomotiveFaultRunOutcome, type AutomotiveFaultSet } from "./types";
 
-/** Problems that make a baseline reference run unusable for the gate (empty = usable). */
+/** Whether a D2 report's self-declared hello identity is exactly the merged in-repo reference agent. */
+export function isReferenceAgentIdentity(r: AutomotiveReport): boolean {
+  const { adapter, sut } = r.manifest;
+  const ref = AUTOMOTIVE_REFERENCE_IDENTITY;
+  return (
+    adapter !== null &&
+    sut !== null &&
+    adapter.name === ref.adapter.name &&
+    adapter.version === ref.adapter.version &&
+    adapter.protocol_version === AUTOMOTIVE_ADAPTER_PROTOCOL_VERSION &&
+    sut.name === ref.sut.name &&
+    sut.version === ref.sut.version &&
+    sut.revision === ref.sut.revision
+  );
+}
+
+const sameHarness = (a: AutomotiveHarnessIdentity, b: AutomotiveHarnessIdentity) => a.commit === b.commit && a.worktree_clean === b.worktree_clean;
+const showHarness = (h: AutomotiveHarnessIdentity) => `${h.commit} (worktree clean: ${h.worktree_clean})`;
+
+/**
+ * Problems that make a baseline unusable for the gate (empty = usable): it must be the exact merged reference
+ * agent, by its hello identity, and a clean full PASS. A clean 18/18 PASS from any other adapter is not a baseline.
+ */
 export function automotiveBaselineProblems(r: AutomotiveReport): string[] {
   const p: string[] = [];
+  if (!isReferenceAgentIdentity(r)) {
+    const a = r.manifest.adapter;
+    const s = r.manifest.sut;
+    p.push(`baseline identity is not the in-repo reference agent (adapter ${a ? `${a.name} ${a.version}` : "none"}, SUT ${s ? `${s.name} ${s.version} revision ${String(s.revision)}` : "none"})`);
+  }
   const v = r.scenario_summary.verdict_counts;
   if (!r.run_valid) p.push("baseline run_valid is false");
   if (!r.complete_execution) p.push("baseline execution is incomplete");
@@ -104,9 +132,16 @@ export function buildAutomotiveFaultReport(i: AutomotiveFaultReportInput): Autom
   const problems = automotiveBaselineProblems(i.baseline);
   if (problems.length > 0) throw new AutomotiveFaultGateError(`baseline is not a clean reference run: ${problems.join("; ")}`);
   if (i.outcomes.length !== i.faultSet.faults.length) throw new AutomotiveFaultGateError(`${i.outcomes.length} fault outcomes for ${i.faultSet.faults.length} declared faults`);
-  for (const o of i.outcomes) {
-    if (o.report && o.report.manifest.corpus.sha256 !== i.baseline.manifest.corpus.sha256) throw new AutomotiveFaultGateError("a fault run used a different corpus than the baseline");
-  }
+  // One harness identity binds the whole fault report: the baseline and every fault bundle must carry exactly the
+  // injected identity, so bundles from different commits or worktree states can never be combined under one commit.
+  const baseHarness = i.baseline.manifest.harness;
+  if (!sameHarness(baseHarness, i.harnessIdentity)) throw new AutomotiveFaultGateError(`harness integrity: baseline bundle harness ${showHarness(baseHarness)} != fault report harness ${showHarness(i.harnessIdentity)}`);
+  i.outcomes.forEach((o, k) => {
+    if (!o.report) return;
+    const id = i.faultSet.faults[k].fault_id;
+    if (!sameHarness(o.report.manifest.harness, baseHarness)) throw new AutomotiveFaultGateError(`harness integrity: ${id} bundle harness ${showHarness(o.report.manifest.harness)} != baseline harness ${showHarness(baseHarness)}`);
+    if (o.report.manifest.corpus.sha256 !== i.baseline.manifest.corpus.sha256) throw new AutomotiveFaultGateError(`harness integrity: ${id} used a different corpus than the baseline`);
+  });
   const faults = i.faultSet.faults.map((f, k) => judgeAutomotiveFault(f, i.outcomes[k], witnessCaseIds(f, i.baseline)));
   const count = (s: AutomotiveFaultResult["status"]) => faults.filter((f) => f.status === s).length;
   const b = i.baseline;
