@@ -1,8 +1,17 @@
 # agent-control-evals
 
-A deterministic, reproducible evaluation harness for agent runtime control systems.
+Deterministic, reproducible evaluation harnesses for AI agent systems. The repository contains two independent tracks that share only generic utilities (canonical JSON, hashing):
 
-v0.1 has exactly one System Under Test (SUT):
+| Track | What it evaluates | Sensitivity self-test | Statistics |
+|---|---|---|---|
+| **[ACS runtime-control evaluation](#acs-runtime-control-evaluation)** (v0.1) | One pinned open-source SUT, its runtime and component control boundaries | Source-patch mutation of the pinned SUT | Declared statistical model with conditional confidence bounds |
+| **[Automotive Agent Assurance](#automotive-agent-assurance)** (auto-0.1.0) | Vendor-neutral automotive agent behaviour through an adapter protocol: structured observations first, deterministic oracle, no LLM judge, 3 executable domains, evidence bundle | Synthetic behaviour faults (`auto-faults-0.1.0`) | None: counts and designed coverage only |
+
+Neither track shows that any system is secure, safe, certified, compliant or production-ready.
+
+# ACS runtime-control evaluation
+
+The ACS track has exactly one System Under Test (SUT):
 [`mikko-lab/acs-guardrail-demo`](https://github.com/mikko-lab/acs-guardrail-demo) version `0.4.0` at commit
 `403d31593a0d57187df3f5e1ef3df6127baaefb9` (see [`sut.lock.json`](sut.lock.json)).
 
@@ -14,7 +23,7 @@ This harness does **not** show that the SUT is secure, safe, certified, proven o
 
 The exact sentences come from the report data (`summary.md` is rendered from `report.json`). No number in the documentation is copied by hand.
 
-## What is measured, and how
+## ACS: What is measured, and how
 
 ```text
 corpus validity → oracle independence → adapter validity → mutation reachability
@@ -42,7 +51,7 @@ Runtime and component results are **different levels of evidence**. They are nev
 
 See [`docs/evaluation-spec.md`](docs/evaluation-spec.md) for the control matrix, outcome semantics, reason taxonomy and the declared policy parameters.
 
-## Claims discipline
+## ACS: Claims discipline
 
 **What the harness measures.** Whether the pinned SUT behaves as a declared, deterministic evaluation specification requires, on synthetic corpus data.
 
@@ -66,7 +75,7 @@ See [`docs/evaluation-spec.md`](docs/evaluation-spec.md) for the control matrix,
 
 The full list of limitations is emitted verbatim into every report (`src/report/limitations.ts`).
 
-## Quick start
+## ACS: Quick start
 
 Requires Node.js 22 or 24, git, and network access to GitHub and the npm registry (to clone the SUT and run `npm ci` in it).
 
@@ -89,7 +98,7 @@ node dist/src/cli.js evaluate --profile full --boundary all --mutations all --ch
 
 Every `evaluate` run writes `corpus.jsonl`, `corpus-manifest.json`, `report.json` and `summary.md` into the output directory.
 
-### Exit codes
+### ACS exit codes
 
 | Code | Meaning |
 |---|---|
@@ -98,11 +107,11 @@ Every `evaluate` run writes `corpus.jsonl`, `corpus-manifest.json`, `report.json
 | 2 | Harness invalid: corpus, oracle, adapter, protocol, SUT SHA or report problem. Adapter and harness errors never become DENY/REJECT/WITHHOLD |
 | 3 | Mutation gate failed: a surviving or invalid mutant, or a reachability problem |
 
-## Reports
+## ACS: Reports
 
 Generated reports for the v0.1 review candidate are committed under [`reports/v0.1/`](reports/v0.1/): `smoke/` (the 500-case CI profile) and `full/` (the ~10 000-case benchmark, run locally). Each directory has `report.json`, the `summary.md` rendered from it, and `corpus-manifest.json`. Each report records the `sut_commit`, `harness_commit` and `corpus_sha256` it was produced with. See [`docs/review-v0.1.md`](docs/review-v0.1.md) for the self-review, the deviations from the work order and the open risks.
 
-## SUT handling
+## ACS: SUT handling
 
 ACS is never installed as an npm or git dependency (it is a `private` package without a stable library API). For every run and every mutant the harness:
 
@@ -115,24 +124,174 @@ ACS is never installed as an npm or git dependency (it is a `private` package wi
 
 No exports are added to ACS. The adapter registers harness-owned tool test doubles in the SUT process's `tools` registry for the duration of one case, restores the registry afterwards, and refuses interleaved installs (tested).
 
-## Repository layout
-
-```text
-sut.lock.json            pinned SUT
-src/spec/                control matrix, families, outcomes, reason taxonomy, declared policy
-src/corpus/              case model, variant builders, deterministic stratified generator
-src/oracle/              oracle (spec-only) + static dependency-boundary checker
-src/adapter/             protocol v1 + ACS adapter (runtime, component, tool doubles)
-src/eval/                adapter client, comparator, runner, metrics, statistics
-src/sut/                 disposable checkout, build, environments
-src/mutation/            manifest, reachability validation, mutation runner
-src/report/              manifest, report builder, schema validation, summary renderer
-schemas/                 case, adapter protocol v1, report (JSON Schema 2020-12)
-mutations/               17 patches + manifest.json (reachability paths, patch SHA-256)
-corpus/                  golden smoke corpus + SHA-256
-docs/                    evaluation spec, adapter protocol, mutation reachability, review notes
-```
-
-## Not in v0.1
+## ACS: not in v0.1
 
 There is no OpenShell adapter or other SUT, no LLM oracle and no LLM case generation. There is also no tenant support, latency/SLA benchmark, web UI, dashboard, SIEM integration, certification framework, change to ACS or new ACS runtime control.
+
+# Automotive Agent Assurance
+
+A vendor-neutral evaluation pack for automotive marketplace and dealership agents: does an agent state vehicle facts, prices and inventory status in line with the trusted data it was given? The specification is [`docs/automotive/evaluation-spec.md`](docs/automotive/evaluation-spec.md).
+
+- **Adapter protocol.** Any SUT is reached through a JSON Lines process adapter (`auto-adapter-0.1.0`). Expected truth is never sent to the adapter.
+- **Structured observation first.** The adapter reports structured claims (listing, field, value, unit, attribution), status presentations, references and event-delivery acknowledgements. The evaluator never parses free text and never uses a model judge.
+- **Deterministic oracle.** Expected truth is derived from the synthetic scenario before any SUT call, and the committed corpus is golden-checked.
+- **Three executable domains** in auto-0.1.0:
+  - `vehicle_fact_integrity`
+  - `price_attribution`
+  - `stale_inventory`
+
+  The other domains in the specification (recommendation integrity, financing facts, prompt injection from listings, unauthorised external actions, confirmation before action, sponsored-ranking separation, human handoff) are **planned and not evaluated**.
+- **Evidence bundle.** Every run writes `corpus.jsonl`, `evidence.jsonl`, `manifest.json`, `report.json` and `summary.md`, bound together by SHA-256.
+- **Synthetic self-tests.** A deterministic in-repo reference agent exercises the harness path, and ten synthetic behaviour faults check that the harness detects declared faults.
+
+### Automotive evidence chain
+
+```text
+synthetic scenario
+→ expected truth (deterministic oracle)
+→ adapter-visible SUT
+→ structured observation
+→ deterministic evaluator
+→ evidence.jsonl
+→ manifest / SHA binding
+→ report.json
+→ summary.md
+```
+
+`summary.md` is rendered from `report.json` alone, and `report.json` embeds exactly the manifest that binds the corpus and evidence SHA-256 values. There is no model judge anywhere in the chain.
+
+### Automotive quick start
+
+Requires Node.js 22 or 24. No network access and no external SUT are needed.
+
+```sh
+npm ci
+npm run build
+
+# harness self-test against the in-repo deterministic reference agent
+npm run ace:auto -- evaluate \
+  --profile smoke \
+  --reference-agent \
+  --out out/automotive-smoke
+
+# synthetic behaviour-fault sensitivity self-test
+npm run ace:auto -- faults \
+  --profile smoke \
+  --out out/automotive-faults
+```
+
+- The reference run is a **harness self-test**: its 18/18 PASS validates the harness path.
+- The fault run checks that the harness **detects the declared synthetic faults**.
+- Neither run assesses an external automotive product.
+
+Further commands: `validate-report`, `validate-manifest`, `summary --file report.json`, `validate-fault-report`.
+
+### Evaluating an external adapter
+
+```sh
+npm run ace:auto -- evaluate \
+  --profile smoke \
+  --adapter-command /path/to/adapter \
+  --adapter-arg ... \
+  --out out/external-agent
+```
+
+- The adapter is started **without a shell**, with the command and each `--adapter-arg` passed separately.
+- It receives only the adapter view of each case. Expectations, probes and planted values are never sent.
+- Adapter and SUT identity are **self-declared** through the adapter hello and labelled as such in every manifest and summary.
+- The evaluator checks the structured observation the adapter reports. Whether that matches the UI or text an end user sees is the adapter's responsibility and is not verified (a fidelity limitation stated in every report).
+- No production integration ships with this repository.
+
+**`evaluate` exit codes:**
+
+| Code | Meaning |
+|---|---|
+| 0 | Valid run, no VIOLATION scenario. UNASSESSABLE is reported via `all_required_assessed: false`. |
+| 1 | One or more VIOLATION scenarios. |
+| 2 | Harness or report invalid: golden mismatch, `run_valid: false`, HARNESS_ERROR, schema failure. |
+
+### Automotive fault sensitivity
+
+`auto-faults-0.1.0` ([`faults/automotive/manifest.json`](faults/automotive/manifest.json)) is a set of ten deliberately planted synthetic behaviours:
+- cross-listing odometer;
+- untrusted odometer promotion;
+- unknown-listing fact;
+- cross-listing price;
+- mandatory-fee basis bypass;
+- wrong currency;
+- untrusted price promotion;
+- superseded price shown as current;
+- stale status cache;
+- stale price cache.
+
+The synthetic fault agent (`src/adapter/automotive-faults/`) derives its behaviour from the reference agent's observations. It activates only from adapter-visible scenario data and speaks the normal adapter protocol. These are **behaviour faults, not source mutants**: unlike the ACS track, there is no pinned automotive SUT source tree to patch.
+
+The gate passes only when all three conditions hold:
+
+1. the baseline reference agent PASSes every scenario;
+2. every fault run remains technically valid over the whole corpus;
+3. every declared fault produces a VIOLATION finding on one of its declared witness variants, for its declared field, carrying all of its declared reasons.
+
+A harness or protocol failure never kills a fault. VIOLATIONs outside the witnesses are recorded as descriptive collateral findings only. The output (`fault-sensitivity.json`, `fault-summary.md`, plus a normal evidence bundle for the baseline and for every fault) contains counts and a gate boolean only.
+
+**`faults` exit codes:**
+
+| Code | Meaning |
+|---|---|
+| 0 | Every declared fault was killed. |
+| 2 | Harness or self-test invalid. |
+| 3 | A fault survived or was invalid. |
+
+### Automotive reporting discipline
+
+- No aggregate score, maturity grade, assurance level, pass rate, kill rate or confidence bound.
+- No production failure probability. The ACS statistical model does not apply to this track: the automotive corpus has one designed case per variant, so it reports designed coverage, not sampling statistics.
+- Every count exposes its denominator: assessed = PASS + VIOLATION.
+- UNASSESSABLE is never PASS and never enters the assessed denominator.
+- HARNESS_ERROR is never a SUT violation.
+
+### Automotive limitations
+
+- The reference agent and the fault agent are synthetic.
+- Adapter structured-observation fidelity is not UI fidelity.
+- The corpus is synthetic and stratified by designed variants.
+- The fault set is human-authored. The evaluator, oracle and fault set may share conceptual blind spots.
+- External effects and actions are not executable domains in auto-0.1.0.
+
+The full list of limitations is emitted into every automotive report and fault report.
+
+# Repository layout
+
+```text
+sut.lock.json                       ACS: pinned SUT
+src/spec/                           ACS: control matrix, families, outcomes, reason taxonomy, declared policy
+src/corpus/                         ACS: case model, variant builders, deterministic stratified generator
+src/oracle/                         ACS: oracle (spec-only) + static dependency-boundary checker
+src/adapter/                        ACS: protocol v1 + ACS adapter (runtime, component, tool doubles)
+src/eval/                           ACS: adapter client, comparator, runner, metrics, statistics
+src/sut/                            ACS: disposable checkout, build, environments
+src/mutation/                       ACS: manifest, reachability validation, mutation runner
+src/report/                         ACS: manifest, report builder, schema validation, summary renderer
+schemas/                            ACS: case, adapter protocol v1, report (JSON Schema 2020-12)
+mutations/                          ACS: 17 patches + manifest.json (reachability paths, patch SHA-256)
+corpus/                             ACS: golden smoke corpus + SHA-256
+docs/                               ACS: evaluation spec, adapter protocol, mutation reachability, review notes
+
+src/spec/automotive/                automotive: versions, domains, verdicts, reason taxonomy
+src/corpus/automotive/              automotive: case model, builders, variant registry
+src/corpus/automotive-generation/   automotive: deterministic corpus generator
+src/oracle/automotive/              automotive: expected-truth oracle
+src/adapter/automotive/             automotive: adapter protocol and JSON Lines client
+src/adapter/automotive-reference/   automotive: deterministic reference agent (harness self-test)
+src/adapter/automotive-faults/      automotive: synthetic fault agent (fault-sensitivity self-test)
+src/eval/automotive/                automotive: deterministic evaluator and run engine
+src/report/automotive/              automotive: evidence, manifest, report, schema validation, summary
+src/fault/automotive/               automotive: fault-set validation, runner, judge, fault report, summary
+src/automotive-cli.ts               automotive: CLI (npm run ace:auto)
+schemas/automotive/                 automotive: case, adapter protocol, manifest, report, fault set, fault report
+corpus/automotive/                  automotive: golden smoke corpus + SHA-256
+faults/automotive/                  automotive: declared synthetic fault set
+docs/automotive/                    automotive: evaluation specification
+```
+
+Generated automotive bundles and fault reports are CI artifacts and are not committed.

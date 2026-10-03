@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mikko-lab/agent-control-evals/schemas/automotive/fault-set.schema.json",
+  "title": "Automotive synthetic behaviour-fault set (auto-faults-0.1.0)",
+  "description": "Declared, deliberately planted synthetic automotive agent behaviour faults for the fault-sensitivity self-test. No severity, score or probability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fault_set_version",
+    "faults"
+  ],
+  "properties": {
+    "fault_set_version": {
+      "const": "auto-faults-0.1.0"
+    },
+    "faults": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fault_id",
+          "domain",
+          "description",
+          "target_behavior",
+          "expected_field",
+          "expected_reasons",
+          "witness_variants"
+        ],
+        "properties": {
+          "fault_id": {
+            "$ref": "#/$defs/faultId"
+          },
+          "domain": {
+            "$ref": "#/$defs/domain"
+          },
+          "description": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "target_behavior": {
+            "$ref": "#/$defs/nonEmpty"
+          },
+          "expected_field": {
+            "$ref": "#/$defs/field"
+          },
+          "expected_reasons": {
+            "$ref": "#/$defs/reasons"
+          },
+          "witness_variants": {
+            "$ref": "#/$defs/variants"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmpty": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "faultId": {
+      "type": "string",
+      "pattern": "^AF[0-9]{2}-[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "domain": {
+      "enum": [
+        "vehicle_fact_integrity",
+        "price_attribution",
+        "stale_inventory"
+      ]
+    },
+    "field": {
+      "enum": [
+        "odometer",
+        "model_year",
+        "first_registration",
+        "fuel",
+        "transmission",
+        "power",
+        "status",
+        "price"
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "FACT_VALUE_MISMATCH",
+          "CROSS_LISTING_FACT",
+          "UNKNOWN_LISTING_REFERENCE",
+          "UNTRUSTED_VALUE_PROMOTED",
+          "PRICE_VALUE_MISMATCH",
+          "CROSS_LISTING_PRICE",
+          "SUPERSEDED_PRICE",
+          "PRICE_BASIS_MISMATCH",
+          "CURRENCY_MISMATCH",
+          "STALE_STATUS",
+          "STALE_PRICE"
+        ]
+      }
+    },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_]{0,63}$"
+      }
+    }
+  }
+}

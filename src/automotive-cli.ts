@@ -5,12 +5,19 @@
  *   validate-report --file <report.json>
  *   validate-manifest --file <manifest.json>
  *   summary --file <report.json>
+ *   faults --profile smoke --out <dir>
+ *   validate-fault-report --file <fault-sensitivity.json>
  *
  * evaluate exit codes:
  *   0  harness and report valid, no VIOLATION scenario (UNASSESSABLE may be present: see all_required_assessed)
  *   1  harness and report valid, one or more VIOLATION scenarios
  *   2  harness or report invalid: golden mismatch, run_valid false, HARNESS_ERROR, build inconsistency,
  *      schema validation failure, bad arguments
+ *
+ * faults exit codes (exit 1 is never used, it stays the evaluate SUT-VIOLATION code):
+ *   0  baseline valid and every declared synthetic fault killed
+ *   2  harness or self-test invalid: golden mismatch, invalid fault set, baseline failure, build or schema failure
+ *   3  fault gate failed: one or more declared faults survived or were invalid
  *
  * stdout carries one JSON object (or, for summary, the Markdown). Adapters are started without a shell,
  * with command and arguments kept separate.
@@ -28,12 +35,14 @@ import { prettyJsonFile } from "./report/automotive/json";
 import { renderAutomotiveSummary } from "./report/automotive/summary";
 import { AutomotiveReportBuildError, type AutomotiveHarnessIdentity, type AutomotiveReport } from "./report/automotive/types";
 import { validateAutomotiveManifest, validateAutomotiveReport } from "./report/automotive/validate";
+import { AUTOMOTIVE_FAULT_OUTPUT_DIRS, AUTOMOTIVE_FAULT_OUTPUT_FILES, runAutomotiveFaultGate, type AutomotiveFaultGateOptions } from "./fault/automotive/runner";
+import { validateAutomotiveFaultReport } from "./fault/automotive/validate";
 
 export const AUTOMOTIVE_REPO_ROOT = join(__dirname, "..", "..");
 export const AUTOMOTIVE_BUNDLE_FILES = ["corpus.jsonl", "evidence.jsonl", "manifest.json", "report.json", "summary.md"] as const;
 
 export interface CliResult {
-  exitCode: 0 | 1 | 2;
+  exitCode: 0 | 1 | 2 | 3;
   /** One JSON value, or the summary Markdown for `summary`. */
   stdout: unknown;
 }
@@ -122,6 +131,24 @@ export async function evaluateAutomotive(o: EvaluateOptions): Promise<CliResult>
   };
 }
 
+// ---------------------------------------------------------------- faults
+
+export type FaultsOptions = { root: string; out: string; harnessIdentity?: AutomotiveHarnessIdentity } & Partial<Pick<AutomotiveFaultGateOptions, "faultSetFile" | "referenceAdapter" | "faultAdapter" | "timeoutMs">>;
+
+/**
+ * Synthetic fault-sensitivity gate: in-repo reference baseline and in-repo synthetic fault agent only. The
+ * adapter overrides exist for the gate's own negative-control tests; the CLI never exposes them.
+ */
+export async function faultsAutomotive(o: FaultsOptions): Promise<CliResult> {
+  for (const f of AUTOMOTIVE_FAULT_OUTPUT_FILES) rmSync(join(o.out, f), { force: true });
+  for (const d of AUTOMOTIVE_FAULT_OUTPUT_DIRS) rmSync(join(o.out, d), { recursive: true, force: true });
+  const golden = checkAutomotiveGolden(o.root);
+  if (!golden.ok) return { exitCode: 2, stdout: { ok: false, error: `harness integrity: ${golden.error}; no adapter was started and no fault report was produced`, exit_code: 2 } };
+  mkdirSync(o.out, { recursive: true });
+  const harnessIdentity = o.harnessIdentity ?? readAutomotiveHarnessIdentity(o.root);
+  return runAutomotiveFaultGate({ ...o, entries: golden.entries, corpusBytes: golden.bytes, harnessIdentity });
+}
+
 // ---------------------------------------------------------------- file commands
 
 function readJsonFile(file: string): { ok: true; value: unknown } | { ok: false; error: string } {
@@ -132,10 +159,10 @@ function readJsonFile(file: string): { ok: true; value: unknown } | { ok: false;
   }
 }
 
-export function validateFileCommand(kind: "report" | "manifest", file: string): CliResult {
+export function validateFileCommand(kind: "report" | "manifest" | "fault-report", file: string): CliResult {
   const doc = readJsonFile(file);
   if (!doc.ok) return { exitCode: 2, stdout: { ok: false, errors: [doc.error] } };
-  const r = kind === "report" ? validateAutomotiveReport(doc.value) : validateAutomotiveManifest(doc.value);
+  const r = kind === "report" ? validateAutomotiveReport(doc.value) : kind === "manifest" ? validateAutomotiveManifest(doc.value) : validateAutomotiveFaultReport(doc.value);
   return { exitCode: r.ok ? 0 : 2, stdout: { ok: r.ok, errors: r.errors } };
 }
 
@@ -220,13 +247,26 @@ export async function automotiveMain(argv: readonly string[], root = AUTOMOTIVE_
       if (!file) return usage("--file is required");
       return validateFileCommand(p.cmd === "validate-report" ? "report" : "manifest", file);
     }
+    case "faults": {
+      const profile = str("profile") ?? "smoke";
+      if (profile !== "smoke") return usage(`unsupported automotive profile ${JSON.stringify(profile)}; only "smoke" exists in auto-0.1.0`);
+      const out = str("out");
+      if (!out) return usage("--out is required");
+      if (p.flags.has("reference-agent") || p.flags.has("adapter-command") || p.adapterArgs.length > 0 || p.flags.has("timeout-ms")) return usage("faults always uses the in-repo reference baseline and synthetic fault agent; adapter options are not accepted");
+      return faultsAutomotive({ root, out });
+    }
+    case "validate-fault-report": {
+      const file = str("file");
+      if (!file) return usage("--file is required");
+      return validateFileCommand("fault-report", file);
+    }
     case "summary": {
       const file = str("file");
       if (!file) return usage("--file is required");
       return summaryCommand(file);
     }
     default:
-      return usage(`unknown command ${JSON.stringify(p.cmd)}; commands: evaluate, validate-report, validate-manifest, summary`);
+      return usage(`unknown command ${JSON.stringify(p.cmd)}; commands: evaluate, validate-report, validate-manifest, summary, faults, validate-fault-report`);
   }
 }
 
