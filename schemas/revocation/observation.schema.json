@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "revocation-0.2.0 observation. Effects are reported at their occurrence step. A revocation_ack names the target it acknowledges; every other effect has target null.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,69 +20,148 @@
     "decisions": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "step",
-          "decision"
-        ],
-        "properties": {
-          "step": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "decision": {
-            "enum": [
-              "ALLOW",
-              "DENY",
-              "UNKNOWN"
-            ]
-          }
-        }
+        "$ref": "#/$defs/decision"
       }
     },
     "effects": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "step",
-          "kind",
-          "authority",
-          "execution"
-        ],
-        "properties": {
-          "step": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "kind": {
-            "enum": [
-              "approval_granted",
-              "permit_issued",
-              "execution_started",
-              "tool_commit",
-              "output_delivery",
-              "revocation_ack",
-              "cancellation_ack",
-              "execution_terminal"
-            ]
-          },
-          "authority": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "minLength": 1
-          },
-          "execution": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "minLength": 1
+        "$ref": "#/$defs/effect"
+      }
+    }
+  },
+  "$defs": {
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "id"
+          ],
+          "properties": {
+            "scope": {
+              "const": "authority"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "tenant",
+            "session"
+          ],
+          "properties": {
+            "scope": {
+              "const": "session"
+            },
+            "tenant": {
+              "type": "string",
+              "minLength": 1
+            },
+            "session": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "tenant"
+          ],
+          "properties": {
+            "scope": {
+              "const": "tenant"
+            },
+            "tenant": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "decision"
+      ],
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decision": {
+          "enum": [
+            "ALLOW",
+            "DENY",
+            "UNKNOWN"
+          ]
+        }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "kind",
+        "authority",
+        "execution",
+        "target"
+      ],
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "enum": [
+            "approval_granted",
+            "permit_issued",
+            "execution_started",
+            "tool_commit",
+            "output_delivery",
+            "revocation_ack",
+            "cancellation_ack",
+            "execution_terminal"
+          ]
+        },
+        "authority": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "execution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "target": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/target"
+            }
+          ]
         }
       }
     }

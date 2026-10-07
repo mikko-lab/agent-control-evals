@@ -7,6 +7,8 @@
     "observation_source",
     "corpus_sha256",
     "counts",
+    "technically_valid",
+    "has_confirmed_violation",
     "all_required_assessed",
     "acceptance_passed",
     "limitations",
@@ -14,7 +16,7 @@
   ],
   "properties": {
     "version": {
-      "const": "revocation-0.1.0"
+      "const": "revocation-0.2.0"
     },
     "observation_source": {
       "enum": [
@@ -35,7 +37,8 @@
         "UNASSESSABLE",
         "HARNESS_ERROR",
         "assessed",
-        "total"
+        "total",
+        "confirmed_violation_cases"
       ],
       "properties": {
         "PASS": {
@@ -61,8 +64,18 @@
         "total": {
           "type": "integer",
           "minimum": 0
+        },
+        "confirmed_violation_cases": {
+          "type": "integer",
+          "minimum": 0
         }
       }
+    },
+    "technically_valid": {
+      "type": "boolean"
+    },
+    "has_confirmed_violation": {
+      "type": "boolean"
     },
     "all_required_assessed": {
       "type": "boolean"
@@ -84,8 +97,10 @@
         "additionalProperties": false,
         "required": [
           "case_id",
-          "stage",
+          "family",
+          "state_at_cut",
           "verdict",
+          "confirmed_violation",
           "decision_findings",
           "effect_findings",
           "incomplete",
@@ -96,14 +111,99 @@
             "type": "string",
             "minLength": 1
           },
-          "stage": {
+          "family": {
             "enum": [
-              "pending",
-              "issued",
-              "active",
-              "in_flight",
-              "committed"
+              "pending_approval",
+              "issued_permit",
+              "active_session",
+              "in_flight_before_commit",
+              "in_flight_after_commit",
+              "descendant_scope",
+              "scope_isolation",
+              "identity",
+              "observation_timing",
+              "control"
             ]
+          },
+          "state_at_cut": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "step",
+                "target",
+                "authorities"
+              ],
+              "properties": {
+                "step": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "target": {
+                  "$ref": "#/$defs/target"
+                },
+                "authorities": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "grant",
+                      "revoked",
+                      "executions"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "grant": {
+                        "enum": [
+                          "pending",
+                          "approved",
+                          "issued",
+                          "consumed"
+                        ]
+                      },
+                      "revoked": {
+                        "enum": [
+                          "before_cut",
+                          "by_cut",
+                          "no"
+                        ]
+                      },
+                      "executions": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "phase"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "phase": {
+                              "enum": [
+                                "running",
+                                "committed",
+                                "delivered",
+                                "finish_requested"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "verdict": {
             "enum": [
@@ -112,6 +212,9 @@
               "UNASSESSABLE",
               "HARNESS_ERROR"
             ]
+          },
+          "confirmed_violation": {
+            "type": "boolean"
           },
           "decision_findings": {
             "type": "array",
@@ -124,10 +227,7 @@
               ],
               "properties": {
                 "step": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": "integer",
                   "minimum": 0
                 },
                 "reason": {
@@ -148,10 +248,7 @@
               ],
               "properties": {
                 "step": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": "integer",
                   "minimum": 0
                 },
                 "reason": {
@@ -171,12 +268,93 @@
           "errors": {
             "type": "array",
             "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "path",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "id"
+          ],
+          "properties": {
+            "scope": {
+              "const": "authority"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "tenant",
+            "session"
+          ],
+          "properties": {
+            "scope": {
+              "const": "session"
+            },
+            "tenant": {
+              "type": "string",
+              "minLength": 1
+            },
+            "session": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "tenant"
+          ],
+          "properties": {
+            "scope": {
+              "const": "tenant"
+            },
+            "tenant": {
               "type": "string",
               "minLength": 1
             }
           }
         }
-      }
+      ]
     }
   }
 }

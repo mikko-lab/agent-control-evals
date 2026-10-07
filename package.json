@@ -14,7 +14,8 @@
     "check:oracle-boundary": "npm run build && node dist/scripts/check-oracle-boundary.js",
     "ace": "node dist/src/cli.js",
     "ace:auto": "node dist/src/automotive-cli.js",
-    "ace:revocation": "node dist/src/revocation-cli.js"
+    "ace:revocation": "node dist/src/revocation-cli.js",
+    "check:revocation-regressions": "npm run build && node dist/scripts/revocation-regressions.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

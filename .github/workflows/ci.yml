@@ -140,18 +140,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - name: oracle independence and observation contract regressions
-        run: node --test dist/test/revocation/revocation.test.js
+      - name: corpus, oracle, evaluator, sensitivity and CLI contract tests
+        run: node --test --test-concurrency=1 dist/test/revocation/*.test.js
       - name: golden corpus, baseline and fixed-witness sensitivity gate
         run: npm run ace:revocation -- self-test --out out/revocation-a
       - name: independent rerun and complete bundle byte comparison
         run: |
           npm run ace:revocation -- self-test --out out/revocation-b
           diff -r out/revocation-a out/revocation-b
+      - name: evaluator regression mutants are caught by content
+        run: node dist/scripts/revocation-regressions.js --out out/revocation-a-regressions.json
       - name: upload revocation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: revocation-reports-node${{ matrix.node }}
-          path: out/revocation-a/**
+          path: |
+            out/revocation-a/**
+            out/revocation-a-regressions.json
           if-no-files-found: warn
