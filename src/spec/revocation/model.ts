@@ -1,4 +1,4 @@
-export const VERSION = 'revocation-0.2.0';
+export const VERSION = 'revocation-0.3.0';
 export const EFFECTS = ['approval_granted', 'permit_issued', 'execution_started', 'tool_commit', 'output_delivery', 'revocation_ack', 'cancellation_ack', 'execution_terminal'] as const;
 export type EffectKind = typeof EFFECTS[number];
 /** Effects that must occur at their own command step; execution_terminal may complete later within its window. */

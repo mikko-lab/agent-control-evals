@@ -6,7 +6,7 @@ import { observe } from '../../src/adapter/revocation-reference/runtime';
 import { evaluate } from '../../src/eval/revocation/evaluate';
 import { expected } from '../../src/oracle/revocation/expected';
 import { Case } from '../../src/spec/revocation/model';
-import { clone, decisionAt, effect, findings, fixture, run } from './helpers';
+import { cases, clone, decisionAt, effect, findings, fixture, get, run } from './helpers';
 
 // Decision channel
 
@@ -86,11 +86,81 @@ test('terminal: a permitted terminal completing after the finish request but bef
 });
 
 test('terminal: a premature terminal outside its window is an effect violation, and the window stays unconfirmed', () => {
-  const f = fixture('in-flight-before-commit'); f.o.effects.find(x => x.kind === 'execution_terminal')!.step = 3;
+  // No covering revocation: the window opens at the finish request (step 4).
+  const f = fixture('permit-single-use'); f.o.effects.find(x => x.kind === 'execution_terminal')!.step = 3;
   const e = run(f);
   assert.equal(e.verdict, 'VIOLATION'); assert.deepEqual(e.errors, []);
   assert.deepEqual(findings(e.effect_findings), ['unexpected_execution_terminal@3']);
-  assert(e.incomplete.includes('terminal evidence missing for e1 in window 5..6'));
+  assert(e.incomplete.includes('terminal evidence missing for e1 in window 4..6'));
+});
+
+const moveTerminal = (f: ReturnType<typeof fixture>, execution: string, step: number) => { f.o.effects.find(x => x.kind === 'execution_terminal' && x.execution === execution)!.step = step; return f; };
+
+test('revocation terminal: authority revocation ending the execution before finish passes; finish stays an allowed idempotent close', () => {
+  const f = moveTerminal(fixture('in-flight-before-commit'), 'e1', 1);
+  const e = run(f);
+  assert.equal(e.verdict, 'PASS', JSON.stringify(e));
+  assert.equal(decisionAt(f.o, 5).decision, 'ALLOW');
+});
+
+test('revocation terminal: session revocation ending a running execution passes; an uncovered session ending at the cut does not', () => {
+  assert.equal(run(moveTerminal(fixture('session-in-flight-commit-fence'), 'e1', 2)).verdict, 'PASS');
+  const other = run(moveTerminal(fixture('session-in-flight-commit-fence'), 'e2', 2));
+  assert.equal(other.verdict, 'VIOLATION'); assert(findings(other.effect_findings).includes('unexpected_execution_terminal@2'));
+});
+
+test('revocation terminal: tenant and ancestor revocation ending running executions pass; the other tenant does not end at the cut', () => {
+  assert.equal(run(moveTerminal(moveTerminal(fixture('tenant-multi-session-in-flight'), 'e1', 3), 'e2', 3)).verdict, 'PASS');
+  const other = run(moveTerminal(fixture('tenant-multi-session-in-flight'), 'e3', 3));
+  // Ending the uncovered execution at the cut is itself unexpected, and its later commit and delivery are post-terminal effects.
+  assert.deepEqual(findings(other.effect_findings), ['output_delivery_after_terminal@7', 'tool_commit_after_terminal@6', 'unexpected_execution_terminal@3']);
+  assert.equal(run(moveTerminal(fixture('derived-in-flight-ancestor-revoked'), 'e2', 1)).verdict, 'PASS');
+});
+
+test('revocation terminal: a conformant runtime that ends covered executions at the cut passes the whole corpus without duplicate terminals', () => {
+  let early = 0;
+  for (const c of cases) {
+    const o = observe(c, undefined, 'terminate_on_revoke');
+    assert.equal(evaluate(c, expected(c), o).verdict, 'PASS', c.id);
+    const terminals = o.effects.filter(x => x.kind === 'execution_terminal');
+    assert.equal(new Set(terminals.map(x => x.execution)).size, terminals.length, c.id);
+    early += terminals.filter(x => c.steps[x.step].op === 'revoke').length;
+  }
+  assert(early >= 10, `revocation-time terminals exercised: ${early}`);
+  // Cancellation receipt after the execution already ended is still acknowledged and accepted.
+  const o = observe(get('in-flight-before-commit'), undefined, 'terminate_on_revoke');
+  assert.deepEqual(o.effects.filter(x => x.kind === 'execution_terminal' || x.kind === 'cancellation_ack').map(x => `${x.kind}@${x.step}`), ['execution_terminal@1', 'cancellation_ack@2']);
+});
+
+test('revocation terminal: finish of an already ended execution must not report a second terminal', () => {
+  const f = fixture('in-flight-before-commit'); f.o.effects.push({ ...f.o.effects.find(x => x.kind === 'execution_terminal')!, step: 1 });
+  const e = run(f);
+  assert.equal(e.verdict, 'HARNESS_ERROR'); assert(e.errors.every(x => x.code === 'causally_impossible'));
+});
+
+test('revocation terminal: a terminal before the covering revocation and before finish is not accepted', () => {
+  const f = moveTerminal(fixture('in-flight-after-commit'), 'e1', 1);
+  const e = run(f);
+  assert.equal(e.verdict, 'VIOLATION');
+  assert.deepEqual(findings(e.effect_findings), ['unexpected_execution_terminal@1']);
+  assert(e.incomplete.includes('terminal evidence missing for e1 in window 2..7'));
+});
+
+test('revocation terminal: commit or delivery after the observed terminal is caught even at the expected step', () => {
+  const matched = run(moveTerminal(fixture('permit-single-use'), 'e1', 1));
+  assert.deepEqual(findings(matched.effect_findings), ['output_delivery_after_terminal@3', 'tool_commit_after_terminal@2', 'unexpected_execution_terminal@1']);
+  const afterCut = moveTerminal(fixture('in-flight-after-commit'), 'e1', 2); afterCut.o.effects.push(effect(4, 'output_delivery'));
+  const e = run(afterCut);
+  assert.equal(e.verdict, 'VIOLATION'); assert.deepEqual(findings(e.effect_findings), ['unexpected_output_delivery@4']);
+});
+
+test('revocation terminal: a terminal of another execution does not satisfy the completeness of the real one', () => {
+  const f = fixture('session-in-flight-commit-fence');
+  f.o.effects = f.o.effects.filter(x => !(x.kind === 'execution_terminal' && x.execution === 'e2'));
+  const t = f.o.effects.find(x => x.kind === 'execution_terminal' && x.execution === 'e1')!; t.authority = 'o'; t.execution = 'e2'; t.step = 7;
+  const e = run(f);
+  assert.equal(e.verdict, 'UNASSESSABLE');
+  assert(e.incomplete.includes('execution not observed terminal: e1'));
 });
 
 test('terminal: unauthorized start with later terminal is a valid, complete violation including the unexpected terminal', () => {
@@ -113,7 +183,7 @@ test('terminal: cancellation receipt without terminal evidence is not containmen
   assert(f.o.effects.some(x => x.kind === 'cancellation_ack'));
   const e = run(f);
   assert.equal(e.verdict, 'UNASSESSABLE');
-  assert.deepEqual(e.incomplete, ['terminal evidence missing for e1 in window 5..6', 'execution not observed terminal: e1']);
+  assert.deepEqual(e.incomplete, ['terminal evidence missing for e1 in window 1..6', 'execution not observed terminal: e1']);
 });
 
 test('terminal: terminal before the execution start is a causally impossible trace (HARNESS_ERROR)', () => {

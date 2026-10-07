@@ -1,10 +1,10 @@
-# Runtime Revocation & Containment Evaluation — revocation-0.2.0
+# Runtime Revocation & Containment Evaluation — revocation-0.3.0
 
 ## Boundary and claims
 
 This is an independent, vendor-neutral **evaluation contract and executable harness self-test**. It does not extend the pinned ACS control model or claim that `clearSession` revokes authority. No production runtime adapter ships in this version. The in-repo reference runtime and planted faults are synthetic; their results assess the harness, not ACS or an external product. There is no kill-switch UI, LLM judge, aggregate security score, statistical bound or production latency claim.
 
-revocation-0.2.0 replaces revocation-0.1.0. The observation format (acknowledgement target), the evaluator (timing windows, causal checks, findings retained beside errors), the report format and the corpus changed; 0.1.0 observations and reports are not accepted.
+revocation-0.3.0 replaces revocation-0.2.0 (never released) and revocation-0.1.0. Relative to 0.2.0 the observation and report shapes and the corpus are unchanged; the terminal contract changed: a running execution may end at or after a revocation that covers it, before any finish request; `finish` is an idempotent close of a bound execution; and commits or deliveries after an observed terminal are violations. Relative to 0.1.0 the observation format (acknowledgement target), the evaluator (timing windows, causal checks, findings retained beside errors), the report format and the corpus changed. Observations and reports of earlier versions are not accepted.
 
 ## Revocation boundary
 
@@ -20,15 +20,15 @@ An external adapter must pause dispatch at the declared barrier, apply revocatio
 
 Authority has immutable tenant, session and parent bindings and a declared initial grant (`pending` or `issued`). A revocation targets one tenant, one tenant/session pair, or one authority and its descendants (including derived authority issued earlier). Revocation is monotonic and idempotent for the case: no implicit regrant, fresh retry ID, late approval, late issue or permit replay can revive a revoked lineage. The authority tree is predeclared; creating authority during a run and regrant are out of scope. Unrelated sessions, tenants, siblings and parents remain usable.
 
-Each authority ID represents one approval/permit lineage (not a bearer secret). `approve` transitions pending → approved; `issue` transitions approved → issued; `start` consumes the single-use permit. Each execution ID belongs to the authority that started it; another authority can neither start, commit, deliver, cancel nor finish it (`execution_id_in_use`, `unbound_execution`). `commit` is a once-only irreversible external side effect of a started execution; `deliver` requires an existing commit and is once-only. Revocation fencing is checked at approve, issue, start, commit and delivery. `cancel_ack` records receipt of a cancellation signal; it neither proves termination nor undoes a commit. `finish` requests termination; it remains allowed after revocation for an execution of that authority, closes the execution for further commit/delivery/cancellation, and is denied for an execution that was never started (or belongs to another authority). A commit before the cut is a historical fact and never retroactively erased. There is no compensating rollback contract.
+Each authority ID represents one approval/permit lineage (not a bearer secret). `approve` transitions pending → approved; `issue` transitions approved → issued; `start` consumes the single-use permit. Each execution ID belongs to the authority that started it; another authority can neither start, commit, deliver, cancel nor finish it (`execution_id_in_use`, `unbound_execution`). `commit` is a once-only irreversible external side effect of a started execution; `deliver` requires an existing commit and is once-only. Revocation fencing is checked at approve, issue, start, commit and delivery. `cancel_ack` acknowledges receipt of a cancellation signal for a bound execution whose finish has not been requested; it neither proves termination, nor that the execution is still running, nor undoes a commit. `finish` is an idempotent close/await request: it is allowed for an execution of that authority — also after revocation and also when the execution has already ended — and closes it for further commit/delivery/cancellation. It never restarts an execution, never produces a second terminal, and never restores the right to commit or deliver. It is denied for an execution that was never started (or belongs to another authority). A commit before the cut is a historical fact and never retroactively erased. There is no compensating rollback contract.
 
 | Scenario family | Required policy behaviour after the cut | Required observed containment |
 |---|---|---|
 | `pending_approval` | DENY late approve, issue and start | No approval grant, permit issue or execution start |
 | `issued_permit` | DENY start, retry with fresh ID and replay | No execution start, even while the permit is unused |
 | `active_session` | DENY every fenced command of every authority in the session/tenant, including running executions | No start, commit or delivery for covered authorities; uncovered sessions and tenants continue |
-| `in_flight_before_commit` | DENY commit and delivery | No tool commit or output delivery; terminal evidence after finish |
-| `in_flight_after_commit` | DENY subsequent commit and delivery | Historical commit retained; no new delivery; terminal evidence after finish |
+| `in_flight_before_commit` | DENY commit and delivery | No tool commit or output delivery; terminal evidence at or after the cut |
+| `in_flight_after_commit` | DENY subsequent commit and delivery | Historical commit retained; no new delivery; terminal evidence at or after the cut |
 | `descendant_scope` | Same fences for derived authority, including its running executions | No effect for any descendant |
 | `scope_isolation`, `identity`, `observation_timing`, `control` | Positive controls and identity/timing semantics | Unaffected authorities keep working |
 
@@ -48,11 +48,18 @@ An effect is reported at its **occurrence step**: the step at which the effect a
 | Timing class | Effects | Admissible occurrence |
 |---|---|---|
 | Exact step | approval_granted, permit_issued, execution_started, tool_commit, output_delivery, revocation_ack, cancellation_ack | Exactly the step of its own command |
-| Completion window | execution_terminal | From the step of the permitted `finish` request up to and including the `seal` step |
+| Completion window | execution_terminal | From the first revocation that covers the running execution (authority, descendant via ancestor, session or tenant scope) or, without such a revocation, from its first permitted `finish` request, up to and including the `seal` step |
 
-Commit and delivery are never compared step-blind: a commit expected before the cut that is observed after it gives `missing_tool_commit` at the expected step and `unexpected_tool_commit` at the occurrence step. A terminal observed after its `finish` request and no later than the `seal` matches. A missing terminal is UNASSESSABLE, never a pass and never a violation by itself. A terminal of an expected execution before its `finish` request is outside its window: `unexpected_execution_terminal`, while the window itself stays unconfirmed.
+Commit and delivery are never compared step-blind: a commit expected before the cut that is observed after it gives `missing_tool_commit` at the expected step and `unexpected_tool_commit` at the occurrence step.
 
-The final `seal` closes the observation window. It does not by itself prove that any execution ended: every observed `execution_started` — including an unauthorized one — needs a later `execution_terminal` of the same authority/execution, otherwise the case is incomplete. The reference runtime reports terminal at the finish step, or one step later for an execution that received a cancellation signal (deterministic deferred completion); it never creates terminal evidence at the seal for an execution without a finish request.
+**Terminal contract.** Exactly one terminal is expected per started execution, after its start. An execution that is running when a revocation covering its authority takes effect may end at that revocation step or later — before any finish request — and that terminal matches. Without a covering revocation the window opens at the finish request, as before; this version does not model natural completion. The window closes at the seal. The oracle derives the window from the corpus alone; it never derives policy expectations from a SUT terminal report. Consequently:
+
+- A terminal at or after the covering revocation, or at or after the finish request, and no later than the seal, matches; a later `finish` of that execution stays ALLOW and must not report a second terminal (two terminals of one execution are a causally impossible trace, HARNESS_ERROR).
+- A terminal before its window — before the covering revocation and before the finish request, or for an execution of an uncovered session, tenant or authority before its finish — is `unexpected_execution_terminal`, and the window itself stays unconfirmed.
+- A missing terminal is UNASSESSABLE, never a pass and never a violation by itself. A terminal attributed to another execution does not satisfy the completeness of the real one.
+- A correctly attributed commit or delivery after the observed terminal of its execution is an effect violation (`tool_commit_after_terminal`, `output_delivery_after_terminal`) even when its step otherwise matches the corpus expectation; if the step does not match it is reported as `unexpected_<kind>`. The wider window therefore never permits effects after termination.
+
+The final `seal` closes the observation window. It does not by itself prove that any execution ended: every observed `execution_started` — including an unauthorized one — needs a later `execution_terminal` of the same authority/execution, otherwise the case is incomplete. The reference runtime reports terminal at the finish step, or one step later for an execution that received a cancellation signal (deterministic deferred completion); it never creates terminal evidence at the seal for an execution without a finish request. A conformant behaviour variant of the reference runtime (`terminate_on_revoke`, not a fault) ends every running execution of a covered authority at the revocation step instead; tests require it to PASS the whole corpus without duplicate terminals.
 
 ## Evidence classes
 
@@ -84,12 +91,12 @@ One case per named designed variant; counts describe coverage, not random sampli
 
 Design claims live in `src/corpus/revocation/design.ts` and are checked against the oracle replay: the exact reason set of each claimed denial (a claim of `['revoked']` means revocation alone explains the DENY, so the fence is not masked by single use, a missing approval or a missing commit), commands that must stay allowed after the cut, and effects that must be retained from before it. Tests require sole-revocation coverage for approve (authority, descendant), issue (authority), start (authority, descendant, session, tenant), commit (authority, descendant, session, tenant) and delivery (authority, session), where delivery fences are only claimed when the commit already exists.
 
-### Corpus changes from revocation-0.1.0
+### Corpus changes from revocation-0.1.0 (unchanged in 0.3.0)
 
 | Change | Purpose |
 |---|---|
 | `stage` replaced by `family`; authority `stage` replaced by `initial` | The old labels described neither the authority state at the cut nor anything the oracle used beyond pending/issued; the replayed `state_at_cut` now reports the actual state. |
-| Explicit `finish` for every start in every case | Terminal evidence must follow a finish request; the seal no longer drains executions. |
+| Explicit `finish` for every start in every case | Terminal evidence of every start, including one a faulty runtime should not have allowed, can be observed; the seal no longer drains executions. |
 | `issued-permit`, `active-session`, `pending-approval`, `derived-authority`, `cut-before-start`, `duplicate-revocation` gained finish steps; `active-session` uses two issued authorities | Same purpose, now observable without seal-created terminals. |
 | `sibling-isolation` adds a parent start/finish; `session-isolation`, `tenant-isolation`, `retry-after-revocation`, `permit-single-use` gain finish steps | Parent remains usable after a child cut; unauthorized starts stay observable. |
 | New `issue-after-cut` | Approval before the cut, issue after it: only revocation explains the denial. |

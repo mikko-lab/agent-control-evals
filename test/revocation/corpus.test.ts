@@ -128,7 +128,10 @@ test('oracle: earlier irreversible commits are retained, later delivery forbidde
   const after = expected(get('in-flight-after-commit'));
   assert.deepEqual(after.effects.filter(x => x.kind === 'tool_commit').map(x => x.earliest), [1]);
   assert(!after.effects.some(x => x.kind === 'output_delivery'));
-  assert.deepEqual(after.effects.find(x => x.kind === 'execution_terminal'), { kind: 'execution_terminal', authority: 'a', execution: 'e1', target: null, earliest: 6, latest: 7 });
+  // The covering cut at step 2 opens the terminal window before the finish request at step 6.
+  assert.deepEqual(after.effects.find(x => x.kind === 'execution_terminal'), { kind: 'execution_terminal', authority: 'a', execution: 'e1', target: null, earliest: 2, latest: 7 });
+  assert.deepEqual(expected(get('permit-single-use')).effects.find(x => x.kind === 'execution_terminal'), { kind: 'execution_terminal', authority: 'a', execution: 'e1', target: null, earliest: 4, latest: 6 }, 'without a covering cut the window opens at finish');
+  assert.equal(expected(get('sibling-isolation')).effects.filter(x => x.kind === 'execution_terminal').length, 2);
   assert.deepEqual(expected(get('pending-approval')).effects.map(x => x.kind), ['revocation_ack']);
   assert.deepEqual(expected(get('execution-id-reuse')).rationale.map(r => r.reasons), [['execution_id_in_use'], ['unbound_execution'], ['unbound_execution']]);
 });

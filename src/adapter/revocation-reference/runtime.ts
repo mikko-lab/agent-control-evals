@@ -5,14 +5,19 @@ export const FAULTS = [
   'decision_only_false_allow', 'decision_only_false_deny', 'write_behind_commit', 'execution_id_reuse',
 ] as const;
 export type Fault = typeof FAULTS[number];
-interface Job { owner: string; execution: string; committed: boolean; materialized: boolean; delivered: boolean; closed: boolean; cancelled: boolean }
+interface Job { owner: string; execution: string; committed: boolean; materialized: boolean; delivered: boolean; closed: boolean; cancelled: boolean; ended: boolean }
+/**
+ * Conformant behaviour variants (not faults): 'terminate_on_revoke' ends every running execution of a covered authority
+ * at the revocation step, before any finish request; a later finish is an idempotent close without a second terminal.
+ */
+export type Variant = 'finish_terminates' | 'terminate_on_revoke';
 /**
  * Synthetic runtime with its own state machine. Effects are instrumented here, independently of the policy decision
  * records. Faults act on scenario content (operations, scopes, sessions, ownership), never on case IDs or families.
  * Deterministic deferral: an execution that received a cancellation signal reports terminal one step after its finish
  * request (always no later than the seal). The seal never creates terminal evidence.
  */
-export function observe(c: Case, fault?: Fault): Observation {
+export function observe(c: Case, fault?: Fault, variant: Variant = 'finish_terminates'): Observation {
   const observation: Observation = { case_id: c.id, decisions: [], effects: [], complete: true };
   const grants = new Map(c.authorities.map(a => [a.id, { phase: a.initial as GrantState, blockedBy: new Set<Target['scope']>() }]));
   const jobs = new Map<string, Job>();
@@ -49,6 +54,7 @@ export function observe(c: Case, fault?: Fault): Observation {
         observation.effects = observation.effects.filter(e => !((e.kind === 'tool_commit' || e.kind === 'output_delivery') && e.execution !== null && owned.has(e.execution)));
       }
       for (const b of buffered) b.armed = true;
+      if (variant === 'terminate_on_revoke') for (const job of jobs.values()) if (covered.has(job.owner) && !job.closed && !job.ended) { job.ended = true; push(step, 'execution_terminal', job.owner, job.execution); }
       return;
     }
     const state = grants.get(s.authority)!;
@@ -67,16 +73,19 @@ export function observe(c: Case, fault?: Fault): Observation {
       case 'approve': refused = state.phase !== 'pending'; break;
       case 'issue': refused = state.phase !== 'approved'; break;
       case 'start': refused = state.phase !== 'issued' || jobs.has(key(s.authority, s.execution)); break;
-      case 'commit': refused = !bound || job!.closed || job!.committed; break;
-      case 'deliver': refused = !bound || job!.closed || !job!.committed || job!.delivered || (fault === 'write_behind_commit' && !job!.materialized); break;
-      case 'cancel_ack': case 'finish': refused = !bound || job!.closed; break;
+      case 'commit': refused = !bound || job!.closed || job!.ended || job!.committed; break;
+      case 'deliver': refused = !bound || job!.closed || job!.ended || !job!.committed || job!.delivered || (fault === 'write_behind_commit' && !job!.materialized); break;
+      // A cancellation receipt is acknowledged even if the execution has already ended; it is not evidence of running.
+      case 'cancel_ack': refused = !bound || job!.closed; break;
+      // finish is an idempotent close/await for a bound execution, including one that already ended.
+      case 'finish': refused = !bound; break;
     }
     const denied = blocked || refused;
     if (!denied) {
       switch (s.op) {
         case 'approve': state.phase = 'approved'; push(step, 'approval_granted', s.authority, null); break;
         case 'issue': state.phase = 'issued'; push(step, 'permit_issued', s.authority, null); break;
-        case 'start': state.phase = 'consumed'; jobs.set(key(s.authority, s.execution), { owner: s.authority, execution: s.execution, committed: false, materialized: false, delivered: false, closed: false, cancelled: false }); push(step, 'execution_started', s.authority, s.execution); break;
+        case 'start': state.phase = 'consumed'; jobs.set(key(s.authority, s.execution), { owner: s.authority, execution: s.execution, committed: false, materialized: false, delivered: false, closed: false, cancelled: false, ended: false }); push(step, 'execution_started', s.authority, s.execution); break;
         case 'commit':
           job!.committed = true;
           if (fault === 'write_behind_commit') buffered.push({ job: job!, armed: false });
@@ -84,7 +93,11 @@ export function observe(c: Case, fault?: Fault): Observation {
           break;
         case 'deliver': job!.delivered = true; push(step, 'output_delivery', s.authority, s.execution); break;
         case 'cancel_ack': job!.cancelled = true; push(step, 'cancellation_ack', s.authority, s.execution); break;
-        case 'finish': job!.closed = true; if (job!.cancelled) deferredTerminals.push(job!); else push(step, 'execution_terminal', s.authority, s.execution); break;
+        case 'finish':
+          if (job!.closed || job!.ended) { job!.closed = true; break; }
+          job!.closed = true; job!.ended = true;
+          if (job!.cancelled) deferredTerminals.push(job!); else push(step, 'execution_terminal', s.authority, s.execution);
+          break;
       }
     }
     // Fault keeps a DENY decision: only the independently recorded side effect exposes it.

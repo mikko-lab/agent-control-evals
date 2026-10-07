@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "revocation-0.2.0 observation. Effects are reported at their occurrence step. A revocation_ack names the target it acknowledges; every other effect has target null.",
+  "$comment": "revocation-0.3.0 observation. Effects are reported at their occurrence step. A revocation_ack names the target it acknowledges; every other effect has target null.",
   "type": "object",
   "additionalProperties": false,
   "required": [

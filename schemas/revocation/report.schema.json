@@ -16,7 +16,7 @@
   ],
   "properties": {
     "version": {
-      "const": "revocation-0.2.0"
+      "const": "revocation-0.3.0"
     },
     "observation_source": {
       "enum": [

@@ -7,7 +7,7 @@ const g = (op: 'approve' | 'issue', authority = 'a'): Step => ({ op, authority }
 const seal: Step = { op: 'seal' };
 function c(id: string, family: Family, steps: Step[], authorities = [a()]): Case { return { id, family, authorities, steps: [...steps, seal] }; }
 /**
- * Designed revocation-0.2.0 corpus. Every execution a faulty runtime could start has an explicit finish request,
+ * Designed revocation-0.3.0 corpus. Every execution a faulty runtime could start has an explicit finish request,
  * so terminal evidence never comes from the seal itself. Purposes and sole-revocation claims are in ./design.
  */
 export function generateCorpus(): Case[] {

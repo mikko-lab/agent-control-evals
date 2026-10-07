@@ -91,10 +91,15 @@ export function evaluate(c: Case, truth: Expected, input: unknown): Evidence {
 
   // Observed effects at their occurrence step against expected windows; multisets keep duplicates.
   const open = truth.effects.map(x => ({ x, used: false }));
+  const matched: Effect[] = [];
   for (const f of accepted) {
     const match = open.filter(m => !m.used && sameIdentity(f, m.x) && withinWindow(f.step, m.x)).sort((p, q) => p.x.latest - q.x.latest)[0];
     if (match === undefined) e.effect_findings.push({ step: f.step, reason: `unexpected_${f.kind}` });
-    else match.used = true;
+    else { match.used = true; matched.push(f); }
+  }
+  // A side effect after its execution's observed terminal is a violation even where its step matches the corpus.
+  for (const f of matched) {
+    if ((f.kind === 'tool_commit' || f.kind === 'output_delivery') && accepted.some(t => t.kind === 'execution_terminal' && executionKey(t) === executionKey(f) && t.step < f.step)) e.effect_findings.push({ step: f.step, reason: `${f.kind}_after_terminal` });
   }
   for (const { x } of open.filter(m => !m.used)) {
     const at = x.kind === 'execution_terminal' ? `${x.execution} in window ${x.earliest}..${x.latest}` : `${x.kind} at step ${x.earliest}`;

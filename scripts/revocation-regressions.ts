@@ -1,5 +1,5 @@
 /**
- * Evaluator self-regression check for revocation-0.2.0. Each mutant is a deliberate evaluator defect applied to a
+ * Evaluator self-regression check for revocation-0.3.0. Each mutant is a deliberate evaluator defect applied to a
  * disposable copy of the compiled harness (the production evaluator is never changed). A mutant counts as caught only
  * by content: its patch applies exactly once, the copied suite loads and runs (other tests pass, none cancelled), and
  * the named sentinel tests fail with assertion errors; mutants that remove a gate signal must also fail the
@@ -24,19 +24,19 @@ export const MUTANTS: Mutant[] = [
   {
     id: 'step_blind_effects', description: 'Effect comparison ignores the occurrence step.', file: EVALUATOR,
     from: 'return step >= expected.earliest && step <= expected.latest;', to: 'return true;',
-    sentinels: ['timing: a commit shifted across the cut is detected from its occurrence step although kind and identity are unchanged', 'timing: exact-step effects are not given a late window (delivery one step late is a violation)'],
+    sentinels: ['timing: a commit shifted across the cut is detected from its occurrence step although kind and identity are unchanged', 'timing: exact-step effects are not given a late window (delivery one step late is a violation)', 'revocation terminal: a terminal before the covering revocation and before finish is not accepted'],
     gate_unkilled: ['write_behind_commit'],
   },
   {
     id: 'no_start_terminal_pairing', description: 'Observed starts are no longer paired with a later terminal.', file: EVALUATOR,
     from: 'for (const started of acceptedStarts)', to: 'for (const started of [])',
-    sentinels: ['terminal: unauthorized start without terminal evidence is incomplete, so it cannot kill a fault'],
+    sentinels: ['terminal: unauthorized start without terminal evidence is incomplete, so it cannot kill a fault', 'revocation terminal: a terminal of another execution does not satisfy the completeness of the real one'],
     gate_unkilled: [],
   },
   {
     id: 'ignore_unexpected_terminals', description: 'Unexpected terminal observations are ignored.', file: EVALUATOR,
     from: 'if (match === undefined)', to: "if (match === undefined && f.kind === 'execution_terminal') continue; if (match === undefined)",
-    sentinels: ['terminal: a premature terminal outside its window is an effect violation, and the window stays unconfirmed', 'terminal: unauthorized start with later terminal is a valid, complete violation including the unexpected terminal'],
+    sentinels: ['terminal: a premature terminal outside its window is an effect violation, and the window stays unconfirmed', 'terminal: unauthorized start with later terminal is a valid, complete violation including the unexpected terminal', 'revocation terminal: a terminal before the covering revocation and before finish is not accepted', 'revocation terminal: session revocation ending a running execution passes; an uncovered session ending at the cut does not'],
     gate_unkilled: [],
   },
 ];
