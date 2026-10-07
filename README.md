@@ -1,13 +1,14 @@
 # agent-control-evals
 
-Deterministic, reproducible evaluation harnesses for AI agent systems. The repository contains two independent tracks that share only generic utilities (canonical JSON, hashing):
+Deterministic, reproducible evaluation harnesses for AI agent systems. The repository contains three independent tracks that share only generic utilities (canonical JSON, hashing):
 
 | Track | What it evaluates | Sensitivity self-test | Statistics |
 |---|---|---|---|
 | **[ACS runtime-control evaluation](#acs-runtime-control-evaluation)** (v0.1) | One pinned open-source SUT, its runtime and component control boundaries | Source-patch mutation of the pinned SUT | Declared statistical model with conditional confidence bounds |
 | **[Automotive Agent Assurance](#automotive-agent-assurance)** (auto-0.2.0) | Vendor-neutral automotive agent behaviour through an adapter protocol: structured observations first, deterministic oracle, no LLM judge, 4 executable domains, evidence bundle | Synthetic behaviour faults (`auto-faults-0.2.0`) | None: counts and designed coverage only |
+| **[Runtime Revocation & Containment Evaluation](#runtime-revocation--containment-evaluation)** (revocation-0.1.0) | Authority revocation at pending approval, issued permit, active session and in-flight execution; policy decisions separate from observed effects | Eight synthetic behaviour faults with fixed witnesses | None: counts and designed coverage only |
 
-Neither track shows that any system is secure, safe, certified, compliant or production-ready.
+None of the tracks shows that any system is secure, safe, certified, compliant or production-ready.
 
 # ACS runtime-control evaluation
 
@@ -265,6 +266,26 @@ A harness or protocol failure never kills a fault. VIOLATIONs outside the witnes
 - Recommendation integrity checks match precision against declared hard constraints only; soft preferences, ranking and recall are out of scope.
 
 The full list of limitations is emitted into every automotive report and fault report.
+
+# Runtime Revocation & Containment Evaluation
+
+An independent evaluation contract for revocation and containment, with **18 designed cases** and **eight synthetic behaviour faults**. The [specification](docs/revocation/evaluation-spec.md) defines the linearization cut, monotonic authority revocation, tenant/session/descendant scopes, single-use permits, commit and delivery fencing, and closed observation barriers.
+
+Policy decisions and observed effects are evaluated separately. A correct DENY with a tool commit is an effect violation. A cancellation acknowledgement is not terminal evidence. Earlier irreversible commits remain historical facts. Unknown authority, incomplete observations and missing terminal evidence never PASS.
+
+```sh
+npm ci
+npm run build
+npm run ace:revocation -- self-test --out out/revocation
+
+# Import one structured observation per golden corpus case (array, any case order).
+# Use self-test observations.json as a format example, not as external evidence.
+npm run ace:revocation -- evaluate --observations observations.json --out out/revocation-external
+```
+
+The self-test writes SHA-bound baseline and fault bundles, separate decision/effect findings, verdicts, limitations and a sensitivity gate. Reports are byte-deterministic. `self-test` exits 0 only when the baseline PASSes all cases and all declared faults are killed by valid fixed witnesses. `evaluate` exits 0 only for complete PASS, 1 for a valid observed violation, and 2 for invalid or incomplete evidence.
+
+**This version evaluates a synthetic reference runtime and can compare imported observations. It does not integrate with ACS or a production runtime.** Imported observations are labelled `external_adapter_declared_unverified`: actual barrier closure, hidden effects and adapter fidelity are not independently verified. No kill-switch UI or production revocation-latency claim is included. No results from this track are combined with ACS or automotive results.
 
 # Repository layout
 

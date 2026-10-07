@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "complete",
+    "decisions",
+    "effects"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "decision"
+        ],
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "decision": {
+            "enum": [
+              "ALLOW",
+              "DENY",
+              "UNKNOWN"
+            ]
+          }
+        }
+      }
+    },
+    "effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "kind",
+          "authority",
+          "execution"
+        ],
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "kind": {
+            "enum": [
+              "approval_granted",
+              "permit_issued",
+              "execution_started",
+              "tool_commit",
+              "output_delivery",
+              "revocation_ack",
+              "cancellation_ack",
+              "execution_terminal"
+            ]
+          },
+          "authority": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "execution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

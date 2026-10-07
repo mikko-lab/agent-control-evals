@@ -123,3 +123,35 @@ jobs:
             out/automotive/reference/**
             out/automotive/faults-a/**
           if-no-files-found: warn
+
+  revocation:
+    name: revocation containment (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: oracle independence and observation contract regressions
+        run: node --test dist/test/revocation/revocation.test.js
+      - name: golden corpus, baseline and fixed-witness sensitivity gate
+        run: npm run ace:revocation -- self-test --out out/revocation-a
+      - name: independent rerun and complete bundle byte comparison
+        run: |
+          npm run ace:revocation -- self-test --out out/revocation-b
+          diff -r out/revocation-a out/revocation-b
+      - name: upload revocation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: revocation-reports-node${{ matrix.node }}
+          path: out/revocation-a/**
+          if-no-files-found: warn
