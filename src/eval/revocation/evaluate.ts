@@ -43,7 +43,9 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
   // Pinned runtime adapter: the reported items must be exactly what the probe log and the call records show.
   const unsupported = new Set<string>();
   let seqTrusted = true;
-  if (probeMode) seqTrusted = checkRuntimeReport(c, o as unknown as RuntimeObservation, malformed, unsupported, control, e, error);
+  let evidenceGaps = false;
+  let contradictoryCommits = new Set<string>();
+  if (probeMode) ({ seqTrusted, evidenceGaps, contradictoryCommits } = checkRuntimeReport(c, o as unknown as RuntimeObservation, malformed, unsupported, control, e, error));
 
   // Decisions: one per step; duplicates and out-of-range steps are not guessed between.
   const decisions = new Map<number, Decision[]>();
@@ -101,13 +103,16 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
     const commits = byStep.filter(y => y.f.kind === 'tool_commit' && !rejected.has(y.path) && executionKey(y.f) === executionKey(x.f)).map(y => y.f);
     if (commits.some(y => before(y, x.f))) continue;
     if (commits.some(y => unordered(y, x.f))) { orderUnknown(x.f, 'its commit'); continue; }
+    // A commit whose state evidence is contradictory is unconfirmed, not absent: the delivery is not impossible.
+    if (x.f.execution !== null && contradictoryCommits.has(x.f.execution)) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
     rejected.add(x.path); error('causally_impossible', x.path, `output_delivery at step ${x.f.step} precedes every observed commit of ${x.f.execution}`);
   }
   const terminals = new Map<string, string[]>();
   for (const x of byStep) if (x.f.kind === 'execution_terminal' && !rejected.has(x.path)) terminals.set(executionKey(x.f), [...(terminals.get(executionKey(x.f)) ?? []), x.path]);
   for (const [key, paths] of terminals) if (paths.length > 1) for (const path of paths) { rejected.add(path); error('causally_impossible', path, `execution ${key} reported terminal ${paths.length} times`); }
   const accepted = byStep.filter(x => !rejected.has(x.path)).map(x => x.f);
-  const effectsExcluded = attributable.length !== o.effects.length || rejected.size > 0;
+  // Contradictory state evidence (probe_seq mode) leaves expected effects unconfirmed, never missing.
+  const effectsExcluded = attributable.length !== o.effects.length || rejected.size > 0 || evidenceGaps;
 
   // Policy decisions, compared separately from effects.
   if (!o.complete) e.incomplete.push('observation window not sealed');
@@ -160,14 +165,17 @@ type ErrorSink = (code: string, path: string, message: string) => void;
  *  - every fact first present outside a step barrier is drift (incomplete), never an effect;
  *  - every reported decision is the SUT answer recorded in the call of its step.
  * Reported items without that evidence are excluded and reported as errors; evidence the report omits is an error.
- * Returns whether seq can be trusted for ordering within a step.
+ *  - every fact whose state evidence is contradictory (a terminal without its record and terminal-log entry, a commit
+ *    key without its written value or version growth) is incomplete evidence, never an effect.
+ * Returns whether seq can be trusted for ordering within a step, and whether the state evidence has gaps.
  */
-function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): boolean {
+function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): { seqTrusted: boolean; evidenceGaps: boolean; contradictoryCommits: Set<string> } {
   const logIssues = probeLogIssues(o.probes);
   for (const issue of logIssues) error('sequence_inconsistent', '/probes', issue);
   const derived = derive(o.probes, o.identity);
   for (const r of derived.regressions) error('sequence_inconsistent', '/probes', r);
   for (const d of derived.drift) e.incomplete.push(`effect observed outside a step barrier (probe ${d.probe}, ${d.point}): ${d.key}`);
+  for (const x of derived.inconsistent) e.incomplete.push(`inconsistent state evidence (probe ${x.probe}): ${x.key}: ${x.reason}`);
   const open = derived.effects.map(x => ({ slot: effectSlot(x.effect), kind: x.effect.kind, step: x.effect.step, key: x.key, used: false }));
   o.effects.forEach((f, index) => {
     const path = `/effects/${index}`;
@@ -198,7 +206,8 @@ function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<strin
   for (const call of o.calls) {
     if (call.step < c.steps.length && !control.has(call.step) && !reported.has(call.step) && decisionFromCall(c.steps[call.step], call) !== undefined) error('decision_not_reported', '/decisions', `the SUT call of step ${call.step} is recorded, but its decision is not reported`);
   }
-  return logIssues.length === 0 && derived.regressions.length === 0;
+  const contradictoryCommits = new Set(derived.inconsistent.filter(x => x.key.startsWith('commit:')).map(x => /^commit:ace:(.+)#\d+$/.exec(x.key)?.[1] ?? ''));
+  return { seqTrusted: logIssues.length === 0 && derived.regressions.length === 0, evidenceGaps: derived.inconsistent.length > 0, contradictoryCommits };
 }
 
 function finish(e: Evidence): Evidence {

@@ -9,6 +9,7 @@ import { runProfile } from '../../eval/revocation/runtime-run';
 import { AdapterCase, AdapterFault, capabilityIdFor, report, requestDisciplineIssues, sessionDisciplineIssues } from '../../adapter/revocation-runtime/runner';
 import { controlSteps, Profile, Supplement } from '../../profile/revocation/profile';
 import { MUTANTS, witnessFailures } from './mutants';
+import { commitValueJson } from '../../spec/revocation/runtime-observation';
 
 export interface AdapterMutantResult { id: AdapterFault; detected: boolean; how: string }
 
@@ -26,6 +27,19 @@ export function editProbes(o: RuntimeObservation, from: number, edit: (s: ProbeS
   const out = clone(o);
   out.probes.forEach((p, k) => { if (k >= from) edit(p.state); });
   return out;
+}
+/** Simulated SUT state: commit attempt n of `label` written (key, written value, version growth), as the runtime would show it. */
+export function writeCommit(s: ProbeState, label: string, n: number): void {
+  s.managed.push({ key: `ace:${label}#${n}`, label, n, value_json: commitValueJson(label, n) });
+  s.managed_version += 1;
+}
+/** Simulated SUT state: `label`'s execution terminal with its own record and one terminal-log entry. */
+export function markTerminal(s: ProbeState, label: string, outcome = 'failed'): void {
+  for (const x of s.executions) if (x.label === label) {
+    x.state = 'terminal';
+    x.terminal = { execution_id: x.execution_id, outcome };
+    if (!s.terminals.some(t => t.execution_id === x.execution_id)) s.terminals.push({ execution_id: x.execution_id, outcome });
+  }
 }
 export const probeIndex = (o: RuntimeObservation, step: number, point: string) => o.probes.findIndex(p => p.step === step && p.point === point);
 const ev = (c: Case, truth: Expected, o: RuntimeObservation) => evaluate(c, truth, o, { ordering: 'probe_seq', controlSteps: controlSteps(c) });
@@ -82,7 +96,7 @@ export async function adapterMutantChecks(builds: { baseline: string; m10?: stri
   {
     const { c, truth } = caseOf('in-flight-before-commit');
     const base = (await runProfile(builds.baseline, cases, truths, profile, supplement, { only: one(c.id) })).corpus[0].run.observation;
-    const written = editProbes(base, probeIndex(base, 3, 'barrier_complete'), s => { s.managed.push({ key: 'ace:e1#1', label: 'e1', n: 1 }); });
+    const written = editProbes(base, probeIndex(base, 3, 'barrier_complete'), s => writeCommit(s, 'e1', 1));
     const correct = ev(c, truth, rereport(c, written));
     const am = ev(c, truth, rereport(c, written, 'AM6_drop_commit_on_throw'));
     add('AM6_drop_commit_on_throw', correct.effect_findings.some(f => f.reason === 'unexpected_tool_commit' && f.step === 3) && codes(am).includes('effect_not_reported'), `correct report: ${correct.verdict} ${JSON.stringify(correct.effect_findings)}; AM6: ${am.verdict} [${codes(am).join(',')}]`);

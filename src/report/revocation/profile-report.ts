@@ -17,7 +17,9 @@ export const PROFILE_LIMITATIONS = [
   'Effects are derived from full-state probes; order within a step is established only by probe-bound seq.',
   'Designed synthetic coverage, not statistical sampling; corpus, oracle, profile and faults are human-authored and may share blind spots.',
 ];
-export interface SutBlock { repository: string; commit: string; tree: string; version: string; lock_sha256: string; build_sha256: string; baseline_verified: boolean }
+export interface SutBlock { repository: string; commit: string; tree: string; version: string; lock_sha256: string; build_sha256: string | null; baseline_verified: boolean }
+/** pinned_runtime_adapter: observed in this run. recorded_runtime_adapter_observations: a recorded bundle, re-evaluated without starting the SUT. */
+export type ObservationSource = 'pinned_runtime_adapter' | 'recorded_runtime_adapter_observations';
 export interface SupplementEntry {
   case_id: string; purpose: string; expectation_source: string; runtime_specific_reason?: string;
   expected_result: SupplementCase['expected_result']; declared_incomplete: string[];
@@ -42,7 +44,7 @@ export function compareDeclaration(s: SupplementCase, e: Evidence): string[] {
 const supplementValid = (s: SupplementCase, e: Evidence) => e.errors.length === 0 && e.incomplete.every(i => (s.declared_incomplete ?? []).includes(i));
 
 export function buildProfileReport(input: {
-  corpus: Case[]; truths: Expected[]; corpus_sha256: string;
+  corpus: Case[]; truths: Expected[]; corpus_sha256: string; observation_source: ObservationSource;
   profile: Profile; profile_sha256: string; supplement_id: string; supplement_sha256: string;
   evidence: Map<string, Evidence>; supplement: { c: SupplementCase; e: Evidence }[];
   sut: SutBlock; harness_commit: string | null; harness_worktree_clean: boolean;
@@ -82,9 +84,10 @@ export function buildProfileReport(input: {
   const supplement_acceptance_passed = supplementCounts.matching === supplementCounts.total;
   // Every requirement of every case assessed and passed: impossible while any case is OUT_OF_SCOPE or any K decision is skipped.
   const contract_acceptance_passed = counts.out_of_scope === 0 && counts.not_assessed_requirements === 0 && counts.PASS === counts.corpus_total && technically_valid;
-  const statement = `Declared-profile result for ${profile.profile} on acs-guardrail-demo@${input.sut.commit}: ${counts.in_profile} of ${counts.corpus_total} corpus cases in profile, PASS ${counts.PASS} of ${counts.in_profile}; ${counts.not_assessed_requirements} requirements (finish/seal decisions) not assessed. This is not a ${VERSION} contract pass. Supplement: ${supplementCounts.matching} of ${supplementCounts.total} runtime-specific checks as declared (reported separately; not part of corpus coverage).`;
+  const recorded = input.observation_source === 'recorded_runtime_adapter_observations' ? ' Evaluated from recorded observations without starting the SUT.' : '';
+  const statement = `Declared-profile result for ${profile.profile} on acs-guardrail-demo@${input.sut.commit}: ${counts.in_profile} of ${counts.corpus_total} corpus cases in profile, PASS ${counts.PASS} of ${counts.in_profile}; ${counts.not_assessed_requirements} requirements (finish/seal decisions) not assessed. This is not a ${VERSION} contract pass. Supplement: ${supplementCounts.matching} of ${supplementCounts.total} runtime-specific checks as declared (reported separately; not part of corpus coverage).${recorded}`;
   return {
-    version: VERSION, mode: 'declared_profile' as const, observation_source: 'pinned_runtime_adapter' as const, corpus_sha256: input.corpus_sha256,
+    version: VERSION, mode: 'declared_profile' as const, observation_source: input.observation_source, corpus_sha256: input.corpus_sha256,
     sut: input.sut, profile: { id: profile.profile, sha256: input.profile_sha256 }, supplement_file: { id: input.supplement_id, sha256: input.supplement_sha256 }, harness_commit: input.harness_commit, harness_worktree_clean: input.harness_worktree_clean,
     counts,
     corpus_coverage: { in_profile: counts.in_profile, total: counts.corpus_total },
@@ -118,7 +121,7 @@ export function profileSummary(r: ProfileReport): string {
   const f = (xs: { reason: string; step: number }[]) => xs.map(x => `${x.reason}@${x.step}`).join(', ');
   return `# Runtime Revocation & Containment Evaluation: declared profile\n\n> ${r.statement}\n\n` +
     `Version: ${r.version}. Mode: ${r.mode}. Observation source: ${r.observation_source}.\n\n` +
-    `SUT: ${r.sut.repository} @ ${r.sut.commit} (tree ${r.sut.tree}, version ${r.sut.version}); lock SHA-256 ${r.sut.lock_sha256}; build SHA-256 ${r.sut.build_sha256}; baseline verified: ${r.sut.baseline_verified}.\n\n` +
+    `SUT: ${r.sut.repository} @ ${r.sut.commit} (tree ${r.sut.tree}, version ${r.sut.version}); lock SHA-256 ${r.sut.lock_sha256}; build SHA-256 ${r.sut.build_sha256 ?? 'none (recorded observations re-evaluated; no SUT loaded)'}; baseline verified: ${r.sut.baseline_verified}.\n\n` +
     `Profile: ${r.profile.id} (SHA-256 ${r.profile.sha256}). Supplement: ${r.supplement_file.id} (SHA-256 ${r.supplement_file.sha256}). Corpus SHA-256: ${r.corpus_sha256}. Harness commit: ${r.harness_commit ?? 'unknown'} (worktree clean: ${r.harness_worktree_clean}).\n\n` +
     `Corpus coverage: ${r.corpus_coverage.in_profile}/${r.corpus_coverage.total} IN_PROFILE, ${r.counts.out_of_scope} OUT_OF_SCOPE. Profile pass rate: ${r.profile_pass_rate.pass}/${r.profile_pass_rate.in_profile}. ` +
     `PASS ${r.counts.PASS}; VIOLATION ${r.counts.VIOLATION}; UNASSESSABLE ${r.counts.UNASSESSABLE}; HARNESS_ERROR ${r.counts.HARNESS_ERROR}. Not assessed (finish/seal decisions): ${r.counts.not_assessed_requirements}.\n\n` +

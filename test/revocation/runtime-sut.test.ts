@@ -56,3 +56,56 @@ test('pinned runtime: checkout verification fails closed on a wrong commit, tree
   writeFileSync(stray, 'dirty');
   try { assert.throws(() => verifyRevocationCheckout(lock, env!.checkout), /not clean/); } finally { rmSync(stray, { force: true }); }
 });
+
+/**
+ * Runs one IN_PROFILE case against the pinned runtime with a test double around one executor read surface (the
+ * prototype is restored afterwards). These reproduce the review experiments: the adapter must read the evidence the
+ * specification requires, so a runtime that hides it can never PASS.
+ */
+async function withPatchedExecutor(id: string, patch: (proto: Record<string, unknown>) => () => void) {
+  const { profile } = loadProfile(root, lock.profile, cases, corpusSha, VERSION, lock.sut_commit);
+  const { supplement } = loadSupplement(root, lock.supplement, VERSION, lock.sut_commit);
+  const proto = loadRevocationSut(env!.build).GuardedExecutor.prototype as Record<string, unknown>;
+  const restore = patch(proto);
+  try {
+    return (await runProfile(env!.build, cases, cases.map(expected), profile, supplement, { only: x => x === id })).corpus[0].evidence;
+  } finally { restore(); }
+}
+const wrapMethod = (proto: Record<string, unknown>, name: string, f: (original: (...a: unknown[]) => unknown) => (this: unknown, ...a: unknown[]) => unknown) => {
+  const original = proto[name] as (...a: unknown[]) => unknown;
+  proto[name] = f(original);
+  return () => { proto[name] = original; };
+};
+
+test('pinned runtime, review experiment: snapshot terminal record removed and terminals() empty -> not PASS', { skip }, async () => {
+  const e = await withPatchedExecutor('start-before-cut', proto => {
+    const r1 = wrapMethod(proto, 'getExecution', original => function (this: unknown, ...a: unknown[]) { const s = original.apply(this, a) as Record<string, unknown> | undefined; if (s) delete s.terminal; return s; });
+    const r2 = wrapMethod(proto, 'terminals', () => function () { return []; });
+    return () => { r1(); r2(); };
+  });
+  assert.notEqual(e.verdict, 'PASS'); assert.deepEqual(e.errors, []);
+  assert.ok(e.incomplete.some(x => x.includes('no terminal record in the snapshot')), JSON.stringify(e.incomplete));
+});
+
+test('pinned runtime: terminal record bound to another execution -> not PASS', { skip }, async () => {
+  const e = await withPatchedExecutor('session-in-flight-commit-fence', proto => wrapMethod(proto, 'getExecution', original => function (this: unknown, ...a: unknown[]) {
+    const s = original.apply(this, a) as { terminal?: { execution_id: string } } | undefined;
+    if (s?.terminal) s.terminal = { ...s.terminal, execution_id: `${s.terminal.execution_id}-other` };
+    return s;
+  }));
+  assert.notEqual(e.verdict, 'PASS'); assert.deepEqual(e.errors, []);
+  assert.ok(e.incomplete.some(x => x.includes('terminal record names')), JSON.stringify(e.incomplete));
+});
+
+test('pinned runtime, review experiment: managed state lists the key but get() is undefined and version stays 0 -> not PASS', { skip }, async () => {
+  const e = await withPatchedExecutor('commit-before-cut', proto => {
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'managedState')!;
+    Object.defineProperty(proto, 'managedState', { configurable: true, get(this: unknown) {
+      const real = descriptor.get!.call(this) as { keys: () => string[]; has: (k: string) => boolean };
+      return { keys: () => real.keys(), has: (k: string) => real.has(k), get: () => undefined, version: 0 };
+    } });
+    return () => { Object.defineProperty(proto, 'managedState', descriptor); };
+  });
+  assert.notEqual(e.verdict, 'PASS'); assert.deepEqual(e.errors, []);
+  assert.ok(e.incomplete.some(x => x.includes('get(key) returned undefined')), JSON.stringify(e.incomplete));
+});

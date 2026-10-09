@@ -192,6 +192,17 @@ jobs:
           test "$code" -eq 3
           diff -r out/revocation-runtime-a out/revocation-runtime-b
           cmp out/revocation-runtime-a/observations.json test/fixtures/revocation-runtime/a682e44-baseline-observations.json
+      - name: 2b. recorded observations re-evaluated without the SUT give the same evidence, acceptance fields and exit 3
+        run: |
+          set +e
+          node dist/src/revocation-cli.js evaluate --observations out/revocation-runtime-a/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-recorded
+          code=$?
+          set -e
+          test "$code" -eq 3
+          cmp out/revocation-runtime-a/evidence.jsonl out/revocation-recorded/evidence.jsonl
+          cmp out/revocation-runtime-a/supplement-evidence.jsonl out/revocation-recorded/supplement-evidence.jsonl
+          cmp out/revocation-runtime-a/observations.json out/revocation-recorded/observations.json
+          node -e "const a=require('./out/revocation-runtime-a/report.json'),b=require('./out/revocation-recorded/report.json');for(const k of ['counts','technically_valid','has_confirmed_violation','contract_acceptance_passed','profile_acceptance_passed','supplement_acceptance_passed'])if(JSON.stringify(a[k])!==JSON.stringify(b[k])){console.error('differs: '+k);process.exit(1)}"
       - name: 3. tests against the pinned runtime
         run: node --test --test-concurrency=1 dist/test/revocation/runtime-sut.test.js
         env:

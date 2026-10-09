@@ -37,23 +37,51 @@ function authorityOf(state: ProbeState, label: string, identity: IdentityMapping
   return state.entries.find(x => x.label === label)?.request_authority ?? null;
 }
 
-/** Facts present in one probe, keyed by a stable identity, with the effect each one denotes. */
-export function facts(state: ProbeState, identity: IdentityMapping): Map<string, Omit<Effect, 'step'>> {
+/** The value the adapter writes for commit attempt n of an execution label; a commit is evidenced only by this value. */
+export const commitValueJson = (label: string, n: number) => canonicalJson({ label, n });
+
+/**
+ * Facts present in one probe, keyed by a stable identity, with the effect each one denotes, and the facts whose
+ * evidence in this probe is contradictory (section 3.6):
+ *  - a terminal needs the execution state `terminal`, the snapshot's own terminal record for that same execution and
+ *    exactly one entry for it in the executor's terminal log; any other combination is contradictory;
+ *  - a commit needs its key in keys() and get(key) returning exactly the written value (the version check across
+ *    probes is in derive()); a key without that value is contradictory.
+ * A contradictory fact is not an effect: it is incomplete evidence, whatever the SUT's API answered.
+ */
+export function facts(state: ProbeState, identity: IdentityMapping): { present: Map<string, Omit<Effect, 'step'>>; inconsistent: Map<string, string> } {
   const out = new Map<string, Omit<Effect, 'step'>>();
+  const inconsistent = new Map<string, string>();
   const ex = (kind: EffectKind, label: string) => ({ kind, authority: authorityOf(state, label, identity), execution: label, target: null });
   for (const r of state.receipts) out.set(`ack@${r.step}`, { kind: 'revocation_ack', authority: null, execution: null, target: contractTarget(r.target, identity) });
   for (const x of state.entries) out.set(`start:${x.label}`, ex('execution_started', x.label));
-  for (const m of state.managed) out.set(`commit:${m.key}`, ex('tool_commit', m.label));
+  for (const m of state.managed) {
+    if (m.value_json === commitValueJson(m.label, m.n)) out.set(`commit:${m.key}`, ex('tool_commit', m.label));
+    else inconsistent.set(`commit:${m.key}`, m.value_json === null ? 'key listed but get(key) returned undefined' : `get(key) returned ${m.value_json}, not the written value`);
+  }
   for (const d of state.deliveries) out.set(`deliver:${d.label}`, ex('output_delivery', d.label));
+  const known = new Set(state.executions.map(x => x.execution_id));
   for (const x of state.executions) {
     if (x.cancellation_acknowledged) out.set(`cack:${x.label}`, ex('cancellation_ack', x.label));
-    if (x.state === 'terminal') out.set(`term:${x.label}`, ex('execution_terminal', x.label));
+    const logged = state.terminals.filter(t => t.execution_id === x.execution_id).length;
+    const record = x.terminal;
+    if (x.state === 'terminal') {
+      if (record && record.execution_id === x.execution_id && logged === 1) out.set(`term:${x.label}`, ex('execution_terminal', x.label));
+      else inconsistent.set(`term:${x.label}`, `state terminal, but ${!record ? 'no terminal record in the snapshot' : record.execution_id !== x.execution_id ? `the snapshot's terminal record names ${record.execution_id}` : `${logged} entries in terminals()`}`);
+    } else if (record || logged > 0) inconsistent.set(`term:${x.label}`, `state ${x.state}, but ${record ? 'a terminal record' : `${logged} terminals() entries`} present`);
   }
-  return out;
+  for (const t of state.terminals) if (!known.has(t.execution_id)) inconsistent.set(`term:?${t.execution_id}`, `terminals() lists ${t.execution_id}, which no observed execution has`);
+  return { present: out, inconsistent };
 }
 
 export interface DerivedEffect { key: string; effect: Effect & { seq: number }; point: ProbePoint }
-export interface Derivation { effects: DerivedEffect[]; drift: { key: string; probe: number; point: ProbePoint }[]; regressions: string[] }
+export interface Derivation {
+  effects: DerivedEffect[];
+  drift: { key: string; probe: number; point: ProbePoint }[];
+  regressions: string[];
+  /** Facts whose evidence is contradictory (first probe at which each was seen so). Never effects; incomplete evidence. */
+  inconsistent: { key: string; probe: number; reason: string }[];
+}
 
 /**
  * Every fact's first presence. `seq` is the index of the first probe in which it was present, and its step is that
@@ -62,18 +90,28 @@ export interface Derivation { effects: DerivedEffect[]; drift: { key: string; pr
  */
 export function derive(probes: Probe[], identity: IdentityMapping): Derivation {
   const seen = new Set<string>();
-  const result: Derivation = { effects: [], drift: [], regressions: [] };
+  const flagged = new Set<string>();
+  const result: Derivation = { effects: [], drift: [], regressions: [], inconsistent: [] };
+  const flag = (key: string, probe: number, reason: string) => { if (!flagged.has(key)) { flagged.add(key); result.inconsistent.push({ key, probe, reason }); } };
   let previous = new Set<string>();
+  let previousVersion = 0;
   probes.forEach((p, k) => {
-    const present = facts(p.state, identity);
-    for (const key of previous) if (!present.has(key)) result.regressions.push(`${key} disappears at probe ${k}`);
+    const { present, inconsistent } = facts(p.state, identity);
+    for (const [key, reason] of inconsistent) flag(key, k, reason);
+    // A commit first present at this probe needs the managed-state version to have grown by at least one per new commit.
+    const version = p.state.managed_version;
+    if (version < previousVersion) result.regressions.push(`managed_version decreases at probe ${k}`);
+    const newCommits = [...present.keys()].filter(key => key.startsWith('commit:') && !seen.has(key) && !flagged.has(key));
+    if (newCommits.length > version - previousVersion) for (const key of newCommits) { flag(key, k, `managed_version ${previousVersion} -> ${version} does not account for ${newCommits.length} new commit(s)`); present.delete(key); }
+    previousVersion = version;
+    for (const key of previous) if (!present.has(key) && !flagged.has(key)) result.regressions.push(`${key} disappears at probe ${k}`);
     for (const [key, f] of present) {
-      if (seen.has(key)) continue;
+      if (seen.has(key) || flagged.has(key)) continue;
       seen.add(key);
       if (DRIFT_POINTS.includes(p.point)) result.drift.push({ key, probe: k, point: p.point });
       else result.effects.push({ key, effect: { step: p.step, ...f, seq: k }, point: p.point });
     }
-    previous = new Set(present.keys());
+    previous = new Set([...present.keys()].filter(key => !flagged.has(key)));
   });
   return result;
 }

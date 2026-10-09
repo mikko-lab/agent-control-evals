@@ -68,10 +68,20 @@ export interface ProbeState {
   receipts: { step: number; target: RuntimeTarget }[];
   /** Tool-double invocations: contract execution label and the authority named by the request marker. */
   entries: { label: string; execution_id: string; request_authority: string }[];
-  /** Runtime execution records (getExecution) of every invocation seen so far. */
-  executions: { label: string; execution_id: string; capability_id: string; session_id: string; state: string; cancellation_acknowledged: boolean }[];
-  /** Managed-state keys written so far, with the execution label and commit attempt they belong to. */
-  managed: { key: string; label: string; n: number }[];
+  /**
+   * Runtime execution records (getExecution) of every invocation seen so far, with the snapshot's own terminal record
+   * (null when the snapshot has none).
+   */
+  executions: { label: string; execution_id: string; capability_id: string; session_id: string; state: string; cancellation_acknowledged: boolean; terminal: { execution_id: string; outcome: string } | null }[];
+  /** The executor's terminal log (terminals()), in its own order. */
+  terminals: { execution_id: string; outcome: string }[];
+  /**
+   * Managed-state keys (keys()) with the execution label and commit attempt they belong to, and the value get(key)
+   * returned, as canonical JSON (null when get returned undefined).
+   */
+  managed: { key: string; label: string; n: number; value_json: string | null }[];
+  /** managedState.version at this probe. */
+  managed_version: number;
   /** Public promises fulfilled with a successful result carrying the execution's output nonce. */
   deliveries: { label: string }[];
 }

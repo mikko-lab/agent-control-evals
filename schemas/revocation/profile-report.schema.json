@@ -649,7 +649,10 @@
       "const": "declared_profile"
     },
     "observation_source": {
-      "const": "pinned_runtime_adapter"
+      "enum": [
+        "pinned_runtime_adapter",
+        "recorded_runtime_adapter_observations"
+      ]
     },
     "corpus_sha256": {
       "type": "string",
@@ -689,8 +692,15 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "build_sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "baseline_verified": {
           "type": "boolean"

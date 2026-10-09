@@ -399,7 +399,9 @@
         "receipts",
         "entries",
         "executions",
+        "terminals",
         "managed",
+        "managed_version",
         "deliveries"
       ],
       "properties": {
@@ -460,7 +462,8 @@
               "capability_id",
               "session_id",
               "state",
-              "cancellation_acknowledged"
+              "cancellation_acknowledged",
+              "terminal"
             ],
             "properties": {
               "label": {
@@ -485,6 +488,31 @@
               },
               "cancellation_acknowledged": {
                 "type": "boolean"
+              },
+              "terminal": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "execution_id",
+                      "outcome"
+                    ],
+                    "properties": {
+                      "execution_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                ]
               }
             }
           }
@@ -497,7 +525,8 @@
             "required": [
               "key",
               "label",
-              "n"
+              "n",
+              "value_json"
             ],
             "properties": {
               "key": {
@@ -511,6 +540,16 @@
               "n": {
                 "type": "integer",
                 "minimum": 1
+              },
+              "value_json": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
               }
             }
           }
@@ -530,6 +569,31 @@
               }
             }
           }
+        },
+        "terminals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "execution_id",
+              "outcome"
+            ],
+            "properties": {
+              "execution_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "managed_version": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

@@ -3,6 +3,8 @@
  *
  *   run-adapter --lock FILE --profile FILE --out DIR [--work DIR] [--sut-source PATH] [--verify-baseline]
  *   mutants     --lock FILE --profile FILE --out DIR [--work DIR] [--sut-source PATH] [--only M1,M2,...]
+ *   evaluate    --observations FILE --lock FILE --profile FILE --out DIR
+ *     (recorded corpus and supplement observations of a run-adapter bundle; the SUT is not started)
  *
  * Both fail closed on the lock, the committed profile and supplement (golden SHA-256 and classifier), and the golden
  * corpus before any runtime is invoked. Exit codes: run-adapter as profileExitCode (2/1/3, never 0); mutants 0 when
@@ -15,13 +17,14 @@ import { canonicalJson, canonicalJsonLines } from '../../util/canonical-json';
 import { sha256Hex } from '../../util/hash';
 import { generateCorpus } from '../../corpus/revocation/cases';
 import { expected } from '../../oracle/revocation/expected';
-import { Case, Expected, VERSION } from '../../spec/revocation/model';
+import { Case, Evidence, Expected, VERSION } from '../../spec/revocation/model';
+import { evaluate } from './evaluate';
 import { loadRevocationLock, RevocationLock } from '../../sut/revocation-lock';
 import { prepareRevocationEnv, RevocationEnv } from '../../sut/revocation-env';
-import { loadProfile, loadSupplement, Profile, Supplement } from '../../profile/revocation/profile';
-import { buildProfileReport, profileExitCode, profileSummary, ProfileReport } from '../../report/revocation/profile-report';
+import { controlSteps, loadProfile, loadSupplement, Profile, Supplement, SupplementCase } from '../../profile/revocation/profile';
+import { buildProfileReport, ObservationSource, profileExitCode, profileSummary, ProfileReport } from '../../report/revocation/profile-report';
 import { validateProfileReport } from '../../report/revocation/validate';
-import { observationsOf, ProfileRun, runProfile } from './runtime-run';
+import { observationsOf, runProfile } from './runtime-run';
 import { MUTANTS, witnessFailures } from '../../mutation/revocation/mutants';
 import { adapterMutantChecks } from '../../mutation/revocation/adapter-mutants';
 
@@ -64,7 +67,9 @@ function parse(args: string[], valued: string[], flags: string[]): { options: Ma
 }
 
 function setup(command: string, args: string[]): Setup {
-  const { options, flags } = parse(args, ['--out', '--lock', '--profile', '--work', '--sut-source', ...(command === 'mutants' ? ['--only'] : [])], command === 'run-adapter' ? ['--verify-baseline'] : []);
+  const valued = command === 'evaluate' ? ['--out', '--lock', '--profile', '--observations'] : ['--out', '--lock', '--profile', '--work', '--sut-source', ...(command === 'mutants' ? ['--only'] : [])];
+  const { options, flags } = parse(args, valued, command === 'run-adapter' ? ['--verify-baseline'] : []);
+  if (command === 'evaluate' && !options.has('--observations')) throw new Error('Required option missing');
   const root = resolve(__dirname, '..', '..', '..', '..');
   const lockPath = resolve(options.get('--lock')!);
   const { lock, sha256: lockSha256 } = loadRevocationLock(lockPath, VERSION);
@@ -91,12 +96,54 @@ function harnessClean(root: string): boolean {
   try { return execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === ''; } catch { return false; }
 }
 
-function reportOf(s: Setup, env: RevocationEnv, run: ProfileRun): ProfileReport {
+export interface RecordedObservations { corpus: unknown[]; supplement: unknown[] }
+export class RecordedInputError extends Error {}
+
+/**
+ * The single evaluation path of declared-profile observations, shared by run-adapter (fresh observations) and
+ * evaluate (recorded observations): exactly one observation per IN_PROFILE corpus case and per supplement case, no
+ * observation for an OUT_OF_SCOPE or unknown case, each evaluated in probe_seq mode with its harness control steps.
+ */
+export function evaluateRecorded(s: Pick<Setup, 'cases' | 'truths' | 'profile' | 'supplement'>, input: unknown): { evidence: Map<string, Evidence>; supplement: { c: SupplementCase; e: Evidence }[]; observations: RecordedObservations } {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new RecordedInputError('Recorded observations must be an object with corpus and supplement arrays');
+  const keys = Object.keys(input).sort();
+  if (JSON.stringify(keys) !== JSON.stringify(['corpus', 'supplement'])) throw new RecordedInputError(`Recorded observations must have exactly the fields corpus and supplement, not ${JSON.stringify(keys)}`);
+  const o = input as RecordedObservations;
+  if (!Array.isArray(o.corpus) || !Array.isArray(o.supplement)) throw new RecordedInputError('corpus and supplement must be arrays');
+  const ids = (list: unknown[], what: string) => list.map((x, i) => {
+    const id = typeof x === 'object' && x !== null ? (x as { case_id?: unknown }).case_id : undefined;
+    if (typeof id !== 'string') throw new RecordedInputError(`${what}[${i}] has no case_id`);
+    return id;
+  });
+  const corpusIds = ids(o.corpus, 'corpus'), supplementIds = ids(o.supplement, 'supplement');
+  const inProfile = s.profile.cases.filter(c => c.applicability === 'IN_PROFILE').map(c => c.id);
+  const outOfScope = new Set(s.profile.cases.filter(c => c.applicability === 'OUT_OF_SCOPE').map(c => c.id));
+  for (const id of corpusIds) if (outOfScope.has(id)) throw new RecordedInputError(`An observation for the OUT_OF_SCOPE case ${id} is not accepted`);
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && new Set(a).size === a.length && b.every(x => a.includes(x));
+  if (!sameSet(corpusIds, inProfile)) throw new RecordedInputError('Expected exactly one corpus observation per IN_PROFILE case');
+  if (!sameSet(supplementIds, s.supplement.cases.map(c => c.id))) throw new RecordedInputError('Expected exactly one observation per supplement case');
+  const evidence = new Map<string, Evidence>();
+  s.cases.forEach((c, i) => {
+    const p = s.profile.cases[i];
+    if (p.applicability !== 'IN_PROFILE') return;
+    evidence.set(c.id, evaluate(c, s.truths[i], o.corpus[corpusIds.indexOf(c.id)], { ordering: 'probe_seq', controlSteps: p.not_assessed_requirements }));
+  });
+  const supplement = s.supplement.cases.map(sc => {
+    const c: Case = { id: sc.id, family: sc.family, authorities: sc.authorities, steps: sc.steps };
+    return { c: sc, e: evaluate(c, sc.expected, o.supplement[supplementIds.indexOf(sc.id)], { ordering: 'probe_seq', controlSteps: controlSteps(sc) }) };
+  });
+  // Canonical order: profile case order, then supplement order.
+  const observations = { corpus: inProfile.map(id => o.corpus[corpusIds.indexOf(id)]), supplement: s.supplement.cases.map(c => o.supplement[supplementIds.indexOf(c.id)]) };
+  return { evidence, supplement, observations };
+}
+
+type Build = { build_sha256: string | null; baseline_verified: boolean };
+function reportOf(s: Setup, build: Build, evaluated: ReturnType<typeof evaluateRecorded>, source: ObservationSource): ProfileReport {
   return buildProfileReport({
-    corpus: s.cases, truths: s.truths, corpus_sha256: s.corpusSha256,
+    corpus: s.cases, truths: s.truths, corpus_sha256: s.corpusSha256, observation_source: source,
     profile: s.profile, profile_sha256: s.profileSha256, supplement_id: s.supplement.supplement, supplement_sha256: s.supplementSha256,
-    evidence: new Map(run.corpus.map(x => [x.c.id, x.evidence])), supplement: run.supplement.map(x => ({ c: x.c, e: x.evidence })),
-    sut: { repository: s.lock.sut_repository, commit: s.lock.sut_commit, tree: s.lock.sut_tree, version: s.lock.sut_version, lock_sha256: s.lockSha256, build_sha256: env.build_sha256, baseline_verified: env.baseline_verified },
+    evidence: evaluated.evidence, supplement: evaluated.supplement,
+    sut: { repository: s.lock.sut_repository, commit: s.lock.sut_commit, tree: s.lock.sut_tree, version: s.lock.sut_version, lock_sha256: s.lockSha256, build_sha256: build.build_sha256, baseline_verified: build.baseline_verified },
     harness_commit: harnessCommit(s.root), harness_worktree_clean: harnessClean(s.root),
   });
 }
@@ -110,23 +157,23 @@ function writer(out: string) {
   return { files, write };
 }
 
-function bundle(write: (p: string, c: string) => void, prefix: string, run: ProfileRun, report: ProfileReport) {
+function bundle(write: (p: string, c: string) => void, prefix: string, observations: RecordedObservations, report: ProfileReport) {
   const errors = validateProfileReport(report);
   if (errors.length) throw new Error(`profile report schema: ${errors.join('; ')}`);
-  write(`${prefix}observations.json`, canonicalJson(observationsOf(run)) + '\n');
+  write(`${prefix}observations.json`, canonicalJson(observations) + '\n');
   write(`${prefix}evidence.jsonl`, canonicalJsonLines(report.evidence));
   write(`${prefix}supplement-evidence.jsonl`, canonicalJsonLines(report.supplement.cases));
   write(`${prefix}report.json`, canonicalJson(report) + '\n');
   write(`${prefix}summary.md`, profileSummary(report));
 }
 
-function manifest(s: Setup, env: RevocationEnv, files: { path: string; sha256: string }[], extra: Record<string, unknown> = {}) {
+function manifest(s: Setup, env: RevocationEnv | null, files: { path: string; sha256: string }[], extra: Record<string, unknown> = {}, source: ObservationSource = 'pinned_runtime_adapter') {
   const implementation = IMPLEMENTATION.map(path => ({ path, sha256: sha256Hex(readFileSync(join(s.root, path))) }));
   const bound = [s.profilePath, s.profilePath.replace(/\.json$/, '.sha256'), s.lock.supplement, s.lock.supplement.replace(/\.json$/, '.sha256')].map(path => ({ path, sha256: sha256Hex(readFileSync(join(s.root, path))) }));
   return canonicalJson({
-    version: VERSION, mode: 'declared_profile', observation_source: 'pinned_runtime_adapter', corpus_sha256: s.corpusSha256,
+    version: VERSION, mode: 'declared_profile', observation_source: source, corpus_sha256: s.corpusSha256,
     lock: { path: 'sut.revocation.lock.json', sha256: s.lockSha256 }, profile: { id: s.profile.profile, sha256: s.profileSha256 }, supplement: { id: s.supplement.supplement, sha256: s.supplementSha256 },
-    sut: { repository: s.lock.sut_repository, commit: s.lock.sut_commit, tree: s.lock.sut_tree, version: s.lock.sut_version, build_sha256: env.build_sha256, modules: env.modules, baseline_verified: env.baseline_verified },
+    sut: { repository: s.lock.sut_repository, commit: s.lock.sut_commit, tree: s.lock.sut_tree, version: s.lock.sut_version, build_sha256: env?.build_sha256 ?? null, modules: env?.modules ?? [], baseline_verified: env?.baseline_verified ?? false },
     bound_files: bound, implementation_sha256: sha256Hex(canonicalJson(implementation)), implementation, files, ...extra,
   }) + '\n';
 }
@@ -135,10 +182,12 @@ async function runAdapter(args: string[]): Promise<number> {
   const s = setup('run-adapter', args);
   const env = prepareRevocationEnv(s.lock, 'baseline', { workDir: s.work, harnessRoot: s.root, sourceOverride: s.sourceOverride, verifyBaseline: s.flags.has('--verify-baseline') });
   const run = await runProfile(env.build, s.cases, s.truths, s.profile, s.supplement);
-  const report = reportOf(s, env, run);
+  // Fresh observations go through exactly the path recorded observations take.
+  const evaluated = evaluateRecorded(s, observationsOf(run));
+  const report = reportOf(s, env, evaluated, 'pinned_runtime_adapter');
   const { files, write } = writer(s.out);
   write('corpus.jsonl', s.corpus);
-  bundle(write, '', run, report);
+  bundle(write, '', evaluated.observations, report);
   writeFileSync(join(s.out, 'manifest.json'), manifest(s, env, files));
   const exit = profileExitCode(report);
   console.log(canonicalJson({ ...report.counts, technically_valid: report.technically_valid, has_confirmed_violation: report.has_confirmed_violation, contract_acceptance_passed: report.contract_acceptance_passed, profile_acceptance_passed: report.profile_acceptance_passed, supplement_acceptance_passed: report.supplement_acceptance_passed, exit }));
@@ -153,9 +202,10 @@ async function mutants(args: string[]): Promise<number> {
   const { files, write } = writer(s.out);
   const baseline = prepareRevocationEnv(s.lock, 'baseline', { workDir: s.work, harnessRoot: s.root, sourceOverride: s.sourceOverride });
   const baseRun = await runProfile(baseline.build, s.cases, s.truths, s.profile, s.supplement);
-  const baseReport = reportOf(s, baseline, baseRun);
+  const baseEvaluated = evaluateRecorded(s, observationsOf(baseRun));
+  const baseReport = reportOf(s, baseline, baseEvaluated, 'pinned_runtime_adapter');
   const baseExit = profileExitCode(baseReport);
-  bundle(write, 'baseline/', baseRun, baseReport);
+  bundle(write, 'baseline/', baseEvaluated.observations, baseReport);
   const results: Record<string, unknown>[] = [];
   const builds: { baseline: string; m10?: string; m11?: string } = { baseline: baseline.build };
   for (const m of selected) {
@@ -163,10 +213,11 @@ async function mutants(args: string[]): Promise<number> {
     if (m.id === 'M10') builds.m10 = env.build;
     if (m.id === 'M11') builds.m11 = env.build;
     const run = await runProfile(env.build, s.cases, s.truths, s.profile, s.supplement);
-    const report = reportOf(s, env, run);
+    const evaluated = evaluateRecorded(s, observationsOf(run));
+    const report = reportOf(s, env, evaluated, 'pinned_runtime_adapter');
     const exit = profileExitCode(report);
-    bundle(write, `mutants/${m.id}/`, run, report);
-    const e = m.witness.set === 'corpus' ? run.corpus.find(x => x.c.id === m.witness.case_id)?.evidence : run.supplement.find(x => x.c.id === m.witness.case_id)?.evidence;
+    bundle(write, `mutants/${m.id}/`, evaluated.observations, report);
+    const e = m.witness.set === 'corpus' ? evaluated.evidence.get(m.witness.case_id) : evaluated.supplement.find(x => x.c.id === m.witness.case_id)?.e;
     const failures = witnessFailures(m.witness, e, exit);
     results.push({ id: m.id, description: m.description, patch: m.patch, patch_sha256: sha256Hex(readFileSync(join(s.root, 'mutations/revocation', m.patch))), typechecked: true, build_sha256: env.build_sha256, witness: m.witness, exit, verdict: e?.verdict ?? null, decision_findings: e?.decision_findings ?? [], effect_findings: e?.effect_findings ?? [], incomplete: e?.incomplete ?? [], detected: failures.length === 0, failures });
   }
@@ -178,6 +229,24 @@ async function mutants(args: string[]): Promise<number> {
   return gate ? 0 : 1;
 }
 
+/** Evaluates recorded observations without starting the SUT: same validations, evaluation and exit rules. */
+async function evaluateCommand(args: string[]): Promise<number> {
+  const s = setup('evaluate', args);
+  const raw = readFileSync(resolve(s.options.get('--observations')!));
+  let input: unknown;
+  try { input = JSON.parse(raw.toString('utf8')); } catch { throw new RecordedInputError('Recorded observations are not valid JSON'); }
+  const evaluated = evaluateRecorded(s, input);
+  const source: ObservationSource = 'recorded_runtime_adapter_observations';
+  const report = reportOf(s, { build_sha256: null, baseline_verified: false }, evaluated, source);
+  const { files, write } = writer(s.out);
+  write('corpus.jsonl', s.corpus);
+  bundle(write, '', evaluated.observations, report);
+  writeFileSync(join(s.out, 'manifest.json'), manifest(s, null, files, { input_observations_sha256: sha256Hex(raw) }, source));
+  const exit = profileExitCode(report);
+  console.log(canonicalJson({ ...report.counts, technically_valid: report.technically_valid, has_confirmed_violation: report.has_confirmed_violation, contract_acceptance_passed: report.contract_acceptance_passed, profile_acceptance_passed: report.profile_acceptance_passed, supplement_acceptance_passed: report.supplement_acceptance_passed, exit }));
+  return exit;
+}
+
 export async function runtimeCommand(command: string, args: string[]): Promise<number> {
-  return command === 'run-adapter' ? runAdapter(args) : mutants(args);
+  return command === 'run-adapter' ? runAdapter(args) : command === 'evaluate' ? evaluateCommand(args) : mutants(args);
 }

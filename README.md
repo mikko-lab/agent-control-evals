@@ -295,6 +295,8 @@ revocation-0.4.0 adds an in-process adapter for one pinned runtime, `mikko-lab/a
 ```sh
 # Exit 3 = declared profile accepted; never a contract pass. Exit 0 is reserved for full-contract acceptance.
 npm run ace:revocation -- run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-runtime --verify-baseline
+# Re-evaluate the recorded observations of a run without starting the SUT (same validations and exit rules)
+npm run ace:revocation -- evaluate --observations out/revocation-runtime/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-recorded
 # SUT mutants M1-M11 (typechecked patches under mutations/revocation/) and adapter mutants AM1-AM10, with fixed witnesses
 npm run ace:revocation -- mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-mutants
 ```

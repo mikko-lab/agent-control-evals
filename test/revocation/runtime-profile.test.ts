@@ -18,7 +18,7 @@ import { classify } from '../../src/profile/revocation/classifier';
 import { controlSteps, loadProfile, loadSupplement, ProfileError } from '../../src/profile/revocation/profile';
 import { buildProfileReport, profileExitCode } from '../../src/report/revocation/profile-report';
 import { validateProfileReport } from '../../src/report/revocation/validate';
-import { editProbes, probeIndex, rereport } from '../../src/mutation/revocation/adapter-mutants';
+import { editProbes, markTerminal, probeIndex, rereport, writeCommit } from '../../src/mutation/revocation/adapter-mutants';
 import { loadRevocationLock, RevocationLockError } from '../../src/sut/revocation-lock';
 import { canonicalJsonLines } from '../../src/util/canonical-json';
 import { sha256Hex } from '../../src/util/hash';
@@ -42,7 +42,7 @@ function reportWith(over: Map<string, Evidence> = new Map(), prof = profile) {
   for (const [id, e] of over) if (cases.some(c => c.id === id)) evidence.set(id, e);
   const supp = supplement.cases.map(c => ({ c, e: over.get(c.id) ?? ev(c.id, obsOf(c.id)) }));
   return buildProfileReport({
-    corpus: cases, truths: cases.map(expected), corpus_sha256: corpusSha, profile: prof, profile_sha256: profileSha, supplement_id: supplement.supplement, supplement_sha256: supplementSha,
+    corpus: cases, truths: cases.map(expected), corpus_sha256: corpusSha, observation_source: 'pinned_runtime_adapter', profile: prof, profile_sha256: profileSha, supplement_id: supplement.supplement, supplement_sha256: supplementSha,
     evidence, supplement: supp,
     sut: { repository: lock.sut_repository, commit: lock.sut_commit, tree: lock.sut_tree, version: lock.sut_version, lock_sha256: lockSha256, build_sha256: '0'.repeat(64), baseline_verified: false },
     harness_commit: null, harness_worktree_clean: false,
@@ -129,7 +129,7 @@ test('acceptance arithmetic: a profile with all 27 cases IN_PROFILE that still s
 test('effect independence: observed effects stand whatever the API answered; disagreement is not a HARNESS_ERROR', () => {
   // (a) a managed-state write at a commit the runtime denied with CommitRejectedError
   const base = obsOf('in-flight-before-commit');
-  const write = (o: RuntimeObservation, step: number) => editProbes(o, probeIndex(o, step, 'barrier_complete'), s => { s.managed.push({ key: 'ace:e1#1', label: 'e1', n: 1 }); });
+  const write = (o: RuntimeObservation, step: number) => editProbes(o, probeIndex(o, step, 'barrier_complete'), s => writeCommit(s, 'e1', 1));
   const a = ev('in-flight-before-commit', rereport(caseOf('in-flight-before-commit'), write(base, 3)));
   assert.deepEqual([a.verdict, findings(a), a.errors], ['VIOLATION', ['unexpected_tool_commit@3'], []]);
   // (b) the same write with a non-CommitRejectedError throw: UNKNOWN decision, the effect is still a finding
@@ -150,7 +150,7 @@ test('effect independence: observed effects stand whatever the API answered; dis
 test('partial runs keep confirmed findings: VIOLATION with incomplete, HARNESS_ERROR with findings, UNASSESSABLE without; all exit 2', () => {
   const id = 'start-before-cut';
   const truncate = (o: RuntimeObservation, last: number) => { const x = clone(o); x.probes = x.probes.filter(p => p.step <= last); x.calls = x.calls.filter(c => c.step <= last); x.complete = false; return x; };
-  const violating = editProbes(obsOf(id), probeIndex(obsOf(id), 2, 'barrier_complete'), s => { s.managed.push({ key: 'ace:e1#1', label: 'e1', n: 1 }); });
+  const violating = editProbes(obsOf(id), probeIndex(obsOf(id), 2, 'barrier_complete'), s => writeCommit(s, 'e1', 1));
   const v = ev(id, rereport(caseOf(id), truncate(violating, 2)));
   assert.equal(v.verdict, 'VIOLATION'); assert.equal(v.confirmed_violation, true); assert.ok(v.incomplete.includes('observation window not sealed'));
   const withError = rereport(caseOf(id), truncate(violating, 2)); withError.effects.push({ step: 2, kind: 'tool_commit', authority: 'a', execution: 'e1', target: null, seq: 0, provenance: ['sut_state'] });
@@ -167,7 +167,7 @@ test('partial runs keep confirmed findings: VIOLATION with incomplete, HARNESS_E
 test('ordering within a step: S4 under a premature terminal is a causally ordered VIOLATION; equal seq blocks only the order inference', () => {
   const id = 'sup-unobservable-pending-settlement';
   const base = obsOf(id);
-  const terminalFrom = (o: RuntimeObservation, k: number) => editProbes(o, k, s => { for (const x of s.executions) if (x.label === 'e1') x.state = 'terminal'; });
+  const terminalFrom = (o: RuntimeObservation, k: number) => editProbes(o, k, s => markTerminal(s, 'e1'));
   const firstEvent = base.probes.findIndex(p => p.step === 0 && p.point === 'event');
   const entry = probeIndex(base, 0, 'tool_entry');
   assert.ok(entry >= 0 && firstEvent > entry);
@@ -186,8 +186,8 @@ test('ordering within a step: S4 under a premature terminal is a causally ordere
   assert.ok(same.incomplete.some(x => x.startsWith('effect order not established at step 0')));
   // reversed: a terminal observed before the start in the same step is causally impossible
   const reversed = clone(base);
-  reversed.probes[entry].state.entries = []; reversed.probes[entry].state.executions = [{ label: 'e1', execution_id: 'exec-1', capability_id: Object.keys(base.identity.capabilities)[0], session_id: Object.keys(base.identity.sessions)[0], state: 'terminal', cancellation_acknowledged: false }];
-  for (const p of reversed.probes.slice(entry + 1)) for (const x of p.state.executions) x.state = 'terminal';
+  reversed.probes[entry].state.entries = [];
+  for (const p of reversed.probes.slice(entry)) markTerminal(p.state, 'e1');
   const rev = ev(id, rereport(caseOf(id), reversed));
   assert.ok(rev.errors.some(x => x.code === 'causally_impossible'), JSON.stringify(rev.errors));
 });
@@ -241,5 +241,134 @@ test('CLI run-adapter fails closed before any runtime: wrong profile binding, mi
     assert.equal(wrong.status, 2); assert.match(wrong.stderr, /not the profile bound by the lock/);
     assert.equal(run('run-adapter', '--lock', LOCK, '--out', join(dir, 'y')).status, 2);
     assert.equal(run('mutants', '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'z'), '--only', 'M99').status, 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const firstTerminalProbe = (o: RuntimeObservation, label: string) => o.probes.findIndex(p => p.state.executions.some(x => x.label === label && x.state === 'terminal'));
+const firstCommitProbe = (o: RuntimeObservation, key: string) => o.probes.findIndex(p => p.state.managed.some(m => m.key === key));
+const inconsistent = (e: Evidence, text: string) => e.incomplete.some(x => x.startsWith('inconsistent state evidence') && x.includes(text));
+
+test('terminal evidence: state terminal without the snapshot record is incomplete, never PASS; other findings stay', () => {
+  const id = 'start-before-cut';
+  const base = obsOf(id);
+  const noRecord = editProbes(base, firstTerminalProbe(base, 'e1'), s => { for (const x of s.executions) x.terminal = null; });
+  const e = ev(id, rereport(caseOf(id), noRecord));
+  assert.equal(e.verdict, 'UNASSESSABLE'); assert.deepEqual(e.errors, []); assert.ok(inconsistent(e, 'no terminal record in the snapshot'), JSON.stringify(e.incomplete));
+  // A violating commit in the same case stays a confirmed finding.
+  const withCommit = editProbes(noRecord, probeIndex(noRecord, 2, 'barrier_complete'), s => writeCommit(s, 'e1', 1));
+  const v = ev(id, rereport(caseOf(id), withCommit));
+  assert.equal(v.verdict, 'VIOLATION'); assert.deepEqual(findings(v), ['unexpected_tool_commit@2']); assert.ok(inconsistent(v, 'no terminal record'));
+});
+
+test('terminal evidence: state terminal without its terminals() entry is incomplete, never PASS', () => {
+  const id = 'start-before-cut';
+  const base = obsOf(id);
+  const e = ev(id, rereport(caseOf(id), editProbes(base, 0, s => { s.terminals = []; })));
+  assert.equal(e.verdict, 'UNASSESSABLE'); assert.deepEqual(e.errors, []); assert.ok(inconsistent(e, '0 entries in terminals()'), JSON.stringify(e.incomplete));
+});
+
+test('terminal evidence: a record or terminal-log entry bound to another execution is incomplete, never PASS', () => {
+  const id = 'session-in-flight-commit-fence';
+  const base = obsOf(id);
+  const other = (s: RuntimeObservation['probes'][number]['state'], label: string) => s.executions.find(x => x.label !== label)!.execution_id;
+  const wrongRecord = editProbes(base, firstTerminalProbe(base, 'e1'), s => { const x = s.executions.find(y => y.label === 'e1')!; x.terminal = { execution_id: other(s, 'e1'), outcome: 'completed' }; });
+  const a = ev(id, rereport(caseOf(id), wrongRecord));
+  assert.notEqual(a.verdict, 'PASS'); assert.deepEqual(a.errors, []); assert.ok(inconsistent(a, "terminal record names"), JSON.stringify(a.incomplete));
+  const wrongLog = editProbes(base, firstTerminalProbe(base, 'e1'), s => { const x = s.executions.find(y => y.label === 'e1')!; s.terminals = s.terminals.map(t => (t.execution_id === x.execution_id ? { ...t, execution_id: 'exec-999' } : t)); });
+  const b = ev(id, rereport(caseOf(id), wrongLog));
+  assert.notEqual(b.verdict, 'PASS'); assert.deepEqual(b.errors, []); assert.ok(inconsistent(b, 'exec-999'), JSON.stringify(b.incomplete));
+});
+
+test('commit evidence: a key without its written value, with another value, or without version growth is incomplete, never PASS', () => {
+  const id = 'commit-before-cut';
+  const base = obsOf(id);
+  const from = firstCommitProbe(base, 'ace:e1#1');
+  for (const [name, edit, text] of [
+    ['undefined value', (s: RuntimeObservation['probes'][number]['state']) => { for (const m of s.managed) m.value_json = null; }, 'get(key) returned undefined'],
+    ['other value', (s: RuntimeObservation['probes'][number]['state']) => { for (const m of s.managed) m.value_json = '{"x":1}'; }, 'not the written value'],
+    ['no version growth', (s: RuntimeObservation['probes'][number]['state']) => { s.managed_version = 0; }, 'managed_version 0 -> 0'],
+  ] as const) {
+    const e = ev(id, rereport(caseOf(id), editProbes(base, name === 'no version growth' ? 0 : from, edit)));
+    assert.notEqual(e.verdict, 'PASS', name); assert.deepEqual(e.errors, [], name); assert.ok(inconsistent(e, text), `${name}: ${JSON.stringify(e.incomplete)}`);
+    assert.ok(!e.effect_findings.some(f => f.reason === 'missing_tool_commit'), `${name}: contradictory evidence is not a missing commit`);
+  }
+});
+
+test('commit evidence: an API receipt or exception neither replaces nor removes the state observation', () => {
+  // A denied commit (CommitRejectedError) with a complete state write is a confirmed effect violation.
+  const id = 'in-flight-before-commit';
+  const base = obsOf(id);
+  const full = ev(id, rereport(caseOf(id), editProbes(base, probeIndex(base, 3, 'barrier_complete'), s => writeCommit(s, 'e1', 1))));
+  assert.deepEqual([full.verdict, findings(full)], ['VIOLATION', ['unexpected_tool_commit@3']]);
+  // The same denial with only a key (no value) is contradictory evidence: incomplete, not hidden and not PASS.
+  const partial = ev(id, rereport(caseOf(id), editProbes(base, probeIndex(base, 3, 'barrier_complete'), s => { s.managed.push({ key: 'ace:e1#1', label: 'e1', n: 1, value_json: null }); })));
+  assert.notEqual(partial.verdict, 'PASS'); assert.deepEqual(partial.errors, []); assert.ok(inconsistent(partial, 'ace:e1#1'));
+  // An allowed commit (receipt) whose state shows no write is a missing effect, not a PASS.
+  const noState = editProbes(obsOf('commit-shift-across-cut'), 0, s => { s.managed = []; s.managed_version = 0; });
+  const r = ev('commit-shift-across-cut', rereport(caseOf('commit-shift-across-cut'), noState));
+  assert.deepEqual([r.verdict, findings(r)], ['VIOLATION', ['missing_tool_commit@1']]);
+});
+
+const cliRun = (...args: string[]) => spawnSync(process.execPath, [join(root, 'dist/src/revocation-cli.js'), ...args], { cwd: root, encoding: 'utf8' });
+const FIXTURE = join(root, 'test/fixtures/revocation-runtime/a682e44-baseline-observations.json');
+const evaluateRecorded = (input: string, out: string) => cliRun('evaluate', '--observations', input, '--lock', LOCK, '--profile', lock.profile, '--out', out);
+
+test('evaluate --observations --profile --lock: the recorded baseline gives the same evidence, acceptance fields and exit 3 without the SUT', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rev-recorded-'));
+  try {
+    const r = evaluateRecorded(FIXTURE, join(dir, 'o'));
+    assert.equal(r.status, 3, r.stderr);
+    const report = JSON.parse(readFileSync(join(dir, 'o/report.json'), 'utf8'));
+    assert.deepEqual(validateProfileReport(report), []);
+    assert.equal(report.observation_source, 'recorded_runtime_adapter_observations');
+    assert.equal(report.sut.build_sha256, null);
+    const expectedReport = reportWith();
+    assert.equal(canonicalJsonLines(report.evidence), canonicalJsonLines(expectedReport.evidence));
+    assert.equal(canonicalJsonLines(report.supplement.cases), canonicalJsonLines(expectedReport.supplement.cases));
+    for (const k of ['counts', 'technically_valid', 'has_confirmed_violation', 'contract_acceptance_passed', 'profile_acceptance_passed', 'supplement_acceptance_passed'] as const) assert.deepEqual(report[k], expectedReport[k], k);
+    assert.equal(readFileSync(join(dir, 'o/observations.json'), 'utf8'), readFileSync(FIXTURE, 'utf8'));
+    const manifest = JSON.parse(readFileSync(join(dir, 'o/manifest.json'), 'utf8'));
+    assert.equal(manifest.input_observations_sha256, sha256Hex(readFileSync(FIXTURE)));
+    // The same evaluation path accepts any case order.
+    const shuffled = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+    shuffled.corpus.reverse(); shuffled.supplement.reverse();
+    writeFileSync(join(dir, 'shuffled.json'), JSON.stringify(shuffled));
+    assert.equal(evaluateRecorded(join(dir, 'shuffled.json'), join(dir, 's')).status, 3);
+    assert.equal(readFileSync(join(dir, 's/evidence.jsonl'), 'utf8'), readFileSync(join(dir, 'o/evidence.jsonl'), 'utf8'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('evaluate --observations --profile --lock: invalid recorded input fails closed with exit 2 and no report', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rev-recorded-bad-'));
+  try {
+    const base = () => JSON.parse(readFileSync(FIXTURE, 'utf8')) as { corpus: { case_id: string }[]; supplement: { case_id: string }[]; [k: string]: unknown };
+    const cases_: [string, string | ((o: ReturnType<typeof base>) => unknown), RegExp][] = [
+      ['not json', '{', /not valid JSON/],
+      ['array', '[]', /must be an object/],
+      ['missing supplement', o => { delete (o as Record<string, unknown>).supplement; return o; }, /exactly the fields/],
+      ['extra field', o => ({ ...o, extra: [] }), /exactly the fields/],
+      ['out-of-scope case', o => { o.corpus.push({ ...o.corpus[0], case_id: 'permit-single-use' }); return o; }, /OUT_OF_SCOPE case permit-single-use/],
+      ['missing in-profile case', o => { o.corpus.pop(); return o; }, /one corpus observation per IN_PROFILE case/],
+      ['duplicate case', o => { o.corpus[1] = o.corpus[0]; return o; }, /one corpus observation per IN_PROFILE case/],
+      ['unknown supplement case', o => { o.supplement[0] = { ...o.supplement[0], case_id: 'sup-unknown' }; return o; }, /one observation per supplement case/],
+      ['item without case_id', o => { o.supplement[0] = {} as { case_id: string }; return o; }, /has no case_id/],
+    ];
+    cases_.forEach(([name, make, message], i) => {
+      const file = join(dir, `in-${i}.json`);
+      writeFileSync(file, typeof make === 'string' ? make : JSON.stringify(make(base())));
+      const r = evaluateRecorded(file, join(dir, `out-${i}`));
+      assert.equal(r.status, 2, name); assert.match(r.stderr, message, name);
+      assert.throws(() => statSync(join(dir, `out-${i}`)), name);
+    });
+    const wrongProfile = cliRun('evaluate', '--observations', FIXTURE, '--lock', LOCK, '--profile', lock.supplement, '--out', join(dir, 'wp'));
+    assert.equal(wrongProfile.status, 2); assert.match(wrongProfile.stderr, /not the profile bound by the lock/);
+    assert.equal(cliRun('evaluate', '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'no-obs')).status, 2);
+    // A schema-invalid observation is evaluated as a HARNESS_ERROR of that case (report written, exit 2).
+    const broken = base(); delete (broken.corpus[0] as Record<string, unknown>).probes;
+    writeFileSync(join(dir, 'broken.json'), JSON.stringify(broken));
+    const r = evaluateRecorded(join(dir, 'broken.json'), join(dir, 'broken-out'));
+    assert.equal(r.status, 2);
+    const report = JSON.parse(readFileSync(join(dir, 'broken-out/report.json'), 'utf8'));
+    assert.equal(report.evidence.find((e: { case_id: string }) => e.case_id === broken.corpus[0].case_id).verdict, 'HARNESS_ERROR');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

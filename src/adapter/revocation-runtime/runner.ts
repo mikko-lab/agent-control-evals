@@ -10,6 +10,7 @@
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import type { Authority, CallRecord, Diagnostic, Effect, Expected, IdentityMapping, Probe, ProbePoint, ProbeState, RuntimeDecision, RuntimeEffect, RuntimeObservation, RuntimeTarget, Step } from "../../spec/revocation/model";
 import { decisionFromCall, derive, DECISION_PROVENANCE, EFFECT_PROVENANCE } from "../../spec/revocation/runtime-observation";
+import { canonicalJson } from "../../util/canonical-json";
 import type { RevocationSut } from "./sut";
 
 export type DoubleVariant = "default" | "returns_unobservable_pending_promise";
@@ -187,14 +188,19 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
     const executions: ProbeState["executions"] = [];
     for (const e of entries) {
       const s = executor.getExecution(e.execution_id);
-      if (s) executions.push({ label: e.label, execution_id: e.execution_id, capability_id: s.capability_id, session_id: s.session_id, state: s.state, cancellation_acknowledged: s.cancellation_acknowledged });
+      if (s) executions.push({ label: e.label, execution_id: e.execution_id, capability_id: s.capability_id, session_id: s.session_id, state: s.state, cancellation_acknowledged: s.cancellation_acknowledged, terminal: s.terminal ? { execution_id: String(s.terminal.execution_id), outcome: String(s.terminal.outcome) } : null });
     }
-    const managed = (executor.managedState.keys() as string[]).map((key) => {
+    const terminals = (executor.terminals() as { execution_id: unknown; outcome: unknown }[]).map((t) => ({ execution_id: String(t.execution_id), outcome: String(t.outcome) }));
+    const view = executor.managedState;
+    const managed = (view.keys() as string[]).map((key) => {
       const m = /^ace:(.+)#(\d+)$/.exec(key);
-      return m ? { key, label: m[1], n: Number(m[2]) } : { key, label: "?", n: 1 };
+      const value = view.get(key);
+      let value_json: string | null = null;
+      if (value !== undefined) { try { value_json = canonicalJson(value); } catch { value_json = JSON.stringify(value) ?? "unserializable"; } }
+      return m ? { key, label: m[1], n: Number(m[2]), value_json } : { key, label: "?", n: 1, value_json };
     });
     const deliveries = [...publics].filter(([label, p]) => delivered(label, p)).map(([label]) => ({ label }));
-    return { receipts: receipts.map((r) => ({ step: r.step, target: { ...r.target } })), entries: entries.map((e) => ({ ...e })), executions, managed, deliveries };
+    return { receipts: receipts.map((r) => ({ step: r.step, target: { ...r.target } })), entries: entries.map((e) => ({ ...e })), executions, terminals, managed, managed_version: Number(view.version), deliveries };
   };
   const probe = (point: ProbePoint) => { if (!closed) probes.push({ index: probes.length, step: current, point, state: snapshot() }); };
 
