@@ -366,6 +366,51 @@ test('scoped evidence gaps: contradictory commit evidence still leaves that comm
   assert.ok(inconsistent(l, 'commit:ace:e1#1'), JSON.stringify(l.incomplete));
 });
 
+/** commit-shift-across-cut without any commit, plus a key without its value first shown at probe `at` (and kept). */
+const commitShiftWithLateKey = (at: number) => {
+  const id = 'commit-shift-across-cut';
+  const noCommit = editProbes(obsOf(id), 0, s => { s.managed = []; s.managed_version = 0; });
+  return rereport(caseOf(id), editProbes(noCommit, at, s => { s.managed.push({ key: 'ace:e1#1', label: 'e1', n: 1, value_json: null }); }));
+};
+
+test('barrier-bounded evidence gaps: a contradiction first shown after a window\'s closing barrier does not reopen it (exit 2)', () => {
+  const id = 'commit-shift-across-cut';
+  const base = obsOf(id);
+  // Step 1's barrier closes with no commit; the contradictory key is first shown at step 2's pre_action.
+  assert.equal(base.probes[probeIndex(base, 2, 'pre_action') - 1].point, 'barrier_complete');
+  for (const [name, at] of [['step 2 pre_action', probeIndex(base, 2, 'pre_action')], ['seal_settle', probeIndex(base, 5, 'seal_settle')]] as const) {
+    const e = ev(id, commitShiftWithLateKey(at));
+    assert.deepEqual([e.verdict, findings(e), e.errors, e.confirmed_violation], ['VIOLATION', ['missing_tool_commit@1'], [], true], name);
+    assert.ok(inconsistent(e, `(probe ${at}): commit:ace:e1#1: key listed but get(key) returned undefined`), `${name}: ${JSON.stringify(e.incomplete)}`);
+    assert.ok(!e.incomplete.includes('expected effect not confirmed: tool_commit at step 1'), name);
+    const r = reportWith(new Map([[id, e]]));
+    assert.deepEqual([r.technically_valid, r.has_confirmed_violation, profileExitCode(r)], [false, true, 2], name);
+  }
+  // A terminal contradiction first shown at seal_settle is after the terminal window's last barrier (step 4): the
+  // terminal stays missing evidence for that window, not reopened as unconfirmed.
+  const t = editProbes(base, probeIndex(base, 4, 'event'), s => { for (const x of s.executions) { x.state = 'running'; x.terminal = null; } s.terminals = []; });
+  const atSeal = editProbes(t, probeIndex(t, 5, 'seal_settle'), s => { for (const x of s.executions) x.state = 'terminal'; });
+  const te = ev(id, rereport(caseOf(id), atSeal));
+  assert.ok(inconsistent(te, 'term:e1: state terminal, but no terminal record'), JSON.stringify(te.incomplete));
+  assert.ok(te.incomplete.includes('terminal evidence missing for e1 in window 2..5'), JSON.stringify(te.incomplete));
+  assert.ok(!te.incomplete.includes('expected effect not confirmed: e1 in window 2..5'), JSON.stringify(te.incomplete));
+});
+
+test('barrier-bounded evidence gaps: a contradiction shown while the window is open leaves that effect unconfirmed', () => {
+  const id = 'commit-shift-across-cut';
+  const base = obsOf(id);
+  // Up to and including step 1's closing barrier, and before the window opens (a flagged fact is never seen again).
+  for (const [name, at] of [['step 0 barrier', probeIndex(base, 0, 'barrier_complete')], ['step 1 pre_action', probeIndex(base, 1, 'pre_action')], ['step 1 closing barrier', probeIndex(base, 1, 'barrier_complete')]] as const) {
+    const e = ev(id, commitShiftWithLateKey(at));
+    assert.deepEqual([e.verdict, findings(e), e.errors, e.confirmed_violation], ['UNASSESSABLE', [], [], false], name);
+    assert.ok(e.incomplete.includes('expected effect not confirmed: tool_commit at step 1'), `${name}: ${JSON.stringify(e.incomplete)}`);
+  }
+  // A terminal contradiction inside the terminal window (step 4 event) leaves the terminal unconfirmed.
+  const te = ev(id, rereport(caseOf(id), editProbes(base, probeIndex(base, 4, 'event'), noTerminalRecord('e1'))));
+  assert.notEqual(te.verdict, 'PASS');
+  assert.ok(te.incomplete.includes('expected effect not confirmed: e1 in window 2..5'), JSON.stringify(te.incomplete));
+});
+
 const cliRun = (...args: string[]) => spawnSync(process.execPath, [join(root, 'dist/src/revocation-cli.js'), ...args], { cwd: root, encoding: 'utf8' });
 const FIXTURE = join(root, 'test/fixtures/revocation-runtime/a682e44-baseline-observations.json');
 const evaluateRecorded = (input: string, out: string) => cliRun('evaluate', '--observations', input, '--lock', LOCK, '--profile', lock.profile, '--out', out);
@@ -438,6 +483,9 @@ test('evaluate --observations: a scoped evidence gap keeps the recorded finding 
     const scenarios = [
       ['missing commit + terminal contradiction', rereport(caseOf(id), editProbes(noCommit, firstTerminalProbe(noCommit, 'e1'), noTerminalRecord('e1'))), 'VIOLATION', ['missing_tool_commit@1'], true],
       ['contradictory expected commit', rereport(caseOf(id), editProbes(obsOf(id), firstCommitProbe(obsOf(id), 'ace:e1#1'), keyWithoutValue('e1'))), 'UNASSESSABLE', [], false],
+      ['missing commit + key first shown after the closing barrier', commitShiftWithLateKey(probeIndex(obsOf(id), 2, 'pre_action')), 'VIOLATION', ['missing_tool_commit@1'], true],
+      ['missing commit + key first shown at seal_settle', commitShiftWithLateKey(probeIndex(obsOf(id), 5, 'seal_settle')), 'VIOLATION', ['missing_tool_commit@1'], true],
+      ['key first shown while the window is open', commitShiftWithLateKey(probeIndex(obsOf(id), 1, 'pre_action')), 'UNASSESSABLE', [], false],
     ] as const;
     scenarios.forEach(([name, o, verdict, expectedFindings, confirmed], i) => {
       const recorded = JSON.parse(readFileSync(FIXTURE, 'utf8')) as { corpus: RuntimeObservation[] };

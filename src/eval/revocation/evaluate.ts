@@ -1,5 +1,5 @@
 import { canonicalJson } from '../../util/canonical-json';
-import { Case, Decision, Effect, EffectKind, Evidence, Expected, ExpectedEffect, RuntimeObservation } from '../../spec/revocation/model';
+import { Case, Decision, DRIFT_POINTS, Effect, EffectKind, Evidence, Expected, ExpectedEffect, RuntimeObservation } from '../../spec/revocation/model';
 import { observationIssues, runtimeObservationIssues } from '../../report/revocation/validate';
 import { decisionFromCall, derive, effectSlot, probeLogIssues, DECISION_PROVENANCE, EFFECT_PROVENANCE } from '../../spec/revocation/runtime-observation';
 
@@ -21,13 +21,13 @@ export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps
 
 /**
  * Contradictory state evidence of one fact (probe_seq mode): the effect kind and execution it concerns (null when the
- * fact names no observed execution) and the steps between which it can have occurred (from the probe before its first
- * contradictory probe to that probe). It leaves unconfirmed only expected effects of that kind and execution whose
- * window meets those steps; it is never evidence about any other effect.
+ * fact names no observed execution) and the index of the first probe that shows it. The fact arose after the probe
+ * before that one, and a contradictory fact is never observed again as an effect, so it concerns every occurrence of
+ * that kind and execution that was still open at that probe; never one whose window had already closed, nor any
+ * other kind or execution.
  */
-export interface EvidenceGap { kind: EffectKind; execution: string | null; from: number; to: number }
-const gapCovers = (g: EvidenceGap, kind: EffectKind, execution: string | null, earliest: number, latest: number) =>
-  g.kind === kind && (g.execution === null || g.execution === execution) && g.from <= latest && g.to >= earliest;
+export interface EvidenceGap { kind: EffectKind; execution: string | null; probe: number }
+const gapConcerns = (g: EvidenceGap, kind: EffectKind, execution: string | null) => g.kind === kind && (g.execution === null || g.execution === execution);
 
 const sameIdentity = (f: Effect, x: ExpectedEffect) => f.kind === x.kind && f.authority === x.authority && f.execution === x.execution && canonicalJson(f.target) === canonicalJson(x.target);
 const executionKey = (f: Effect) => `${f.authority}/${f.execution}`;
@@ -54,7 +54,8 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
   const unsupported = new Set<string>();
   let seqTrusted = true;
   let gaps: EvidenceGap[] = [];
-  if (probeMode) ({ seqTrusted, gaps } = checkRuntimeReport(c, o as unknown as RuntimeObservation, malformed, unsupported, control, e, error));
+  let windowClose = (_latest: number) => Infinity;
+  if (probeMode) ({ seqTrusted, gaps, windowClose } = checkRuntimeReport(c, o as unknown as RuntimeObservation, malformed, unsupported, control, e, error));
 
   // Decisions: one per step; duplicates and out-of-range steps are not guessed between.
   const decisions = new Map<number, Decision[]>();
@@ -112,9 +113,9 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
     const commits = byStep.filter(y => y.f.kind === 'tool_commit' && !rejected.has(y.path) && executionKey(y.f) === executionKey(x.f)).map(y => y.f);
     if (commits.some(y => before(y, x.f))) continue;
     if (commits.some(y => unordered(y, x.f))) { orderUnknown(x.f, 'its commit'); continue; }
-    // A commit of this execution whose state evidence is contradictory up to the delivery is unconfirmed, not absent:
-    // the delivery is not impossible.
-    if (gaps.some(g => gapCovers(g, 'tool_commit', x.f.execution, 0, x.f.step))) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
+    // A commit of this execution whose contradictory state evidence was first shown no later than the delivery is
+    // unconfirmed, not absent: the delivery is not impossible.
+    if (gaps.some(g => gapConcerns(g, 'tool_commit', x.f.execution) && g.probe <= seqOf(x.f))) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
     rejected.add(x.path); error('causally_impossible', x.path, `output_delivery at step ${x.f.step} precedes every observed commit of ${x.f.execution}`);
   }
   const terminals = new Map<string, string[]>();
@@ -150,9 +151,11 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
   }
   for (const { x } of open.filter(m => !m.used)) {
     const at = x.kind === 'execution_terminal' ? `${x.execution} in window ${x.earliest}..${x.latest}` : `${x.kind} at step ${x.earliest}`;
-    // Contradictory state evidence (probe_seq mode) leaves the expected effect it concerns unconfirmed, never missing;
-    // it does not touch the expected effects of other kinds, executions or windows.
-    const gap = gaps.some(g => gapCovers(g, x.kind, x.execution, x.earliest, x.latest));
+    // Contradictory state evidence (probe_seq mode) leaves an expected effect of its kind and execution unconfirmed,
+    // never missing, when it was first shown while that effect's window was still open (at or before the window's
+    // closing barrier probe). A window closed by its barrier without the effect stays closed: a contradiction first
+    // shown after it (the next pre_action, a later step, seal_settle) does not reopen it.
+    const gap = gaps.some(g => gapConcerns(g, x.kind, x.execution) && g.probe <= windowClose(x.latest));
     if (!o.complete || effectsExcluded || gap) e.incomplete.push(`expected effect not confirmed: ${at}`);
     else if (x.kind === 'execution_terminal') e.incomplete.push(`terminal evidence missing for ${at}`);
     else e.effect_findings.push({ step: x.earliest, reason: `missing_${x.kind}` });
@@ -179,9 +182,10 @@ type ErrorSink = (code: string, path: string, message: string) => void;
  * Reported items without that evidence are excluded and reported as errors; evidence the report omits is an error.
  *  - every fact whose state evidence is contradictory (a terminal without its record and terminal-log entry, a commit
  *    key without its written value or version growth) is incomplete evidence, never an effect.
- * Returns whether seq can be trusted for ordering within a step, and the scope of each contradictory fact.
+ * Returns whether seq can be trusted for ordering within a step, the scope of each contradictory fact, and the probe
+ * at which an expected window closes.
  */
-function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): { seqTrusted: boolean; gaps: EvidenceGap[] } {
+function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): { seqTrusted: boolean; gaps: EvidenceGap[]; windowClose: (latest: number) => number } {
   const logIssues = probeLogIssues(o.probes);
   for (const issue of logIssues) error('sequence_inconsistent', '/probes', issue);
   const derived = derive(o.probes, o.identity);
@@ -218,9 +222,14 @@ function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<strin
   for (const call of o.calls) {
     if (call.step < c.steps.length && !control.has(call.step) && !reported.has(call.step) && decisionFromCall(c.steps[call.step], call) !== undefined) error('decision_not_reported', '/decisions', `the SUT call of step ${call.step} is recorded, but its decision is not reported`);
   }
-  // A contradictory fact can have occurred between the probe before its first contradictory probe and that probe.
-  const gaps = derived.inconsistent.map(x => ({ kind: x.kind, execution: x.execution, from: o.probes[x.probe - 1]?.step ?? o.probes[x.probe].step, to: o.probes[x.probe].step }));
-  return { seqTrusted: logIssues.length === 0 && derived.regressions.length === 0, gaps };
+  const gaps = derived.inconsistent.map(x => ({ kind: x.kind, execution: x.execution, probe: x.probe }));
+  // A window ending at step `latest` closes at the last barrier-bound probe of a step <= latest: an effect first shown
+  // after it is drift or belongs to a later step (derive()). Without such a probe the window never closed.
+  const windowClose = (latest: number) => {
+    for (let k = o.probes.length - 1; k >= 0; k--) if (o.probes[k].step <= latest && !DRIFT_POINTS.includes(o.probes[k].point)) return k;
+    return Infinity;
+  };
+  return { seqTrusted: logIssues.length === 0 && derived.regressions.length === 0, gaps, windowClose };
 }
 
 function finish(e: Evidence): Evidence {
