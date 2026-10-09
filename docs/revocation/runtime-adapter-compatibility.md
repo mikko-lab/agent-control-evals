@@ -1,8 +1,12 @@
 # Runtime adapter compatibility — revocation track, `acs-guardrail-demo` @ `a682e44`
 
-Status: **specification for review (revision 2)**. This document defines how a pinned runtime adapter would be evaluated against the revocation contract. It changes no adapter, schema, corpus, version number or pin. It also prepares the `revocation-0.4.0` contract changes the adapter needs. The integration work order follows only after this document has been reviewed.
+Status: **specification for review (revision 3)**. This document defines how a pinned runtime adapter would be evaluated against the revocation contract. It changes no adapter, schema, corpus, version number or pin. It also prepares the `revocation-0.4.0` contract changes the adapter needs. The integration work order follows only after this document has been reviewed.
 
-Revision 2 makes five changes after review of revision 1:
+Revision 3 makes two changes after review of revision 2:
+- **Ordering within a step (§4.6).** Runtime-adapter observations carry a probe-bound sequence index (`seq`). An effect can therefore be ordered after another effect of the same step when the adapter actually observed that order. With `seq`, the M11 trace in S4 (a start, then a premature terminal, both in step 0) is a causally ordered `unexpected_execution_terminal`, so the case is a VIOLATION and not `causally_impossible`. Observations without `seq` keep the unchanged 0.3.0 step-only semantics.
+- **Verdict precedence for partial runs (§2.1, §2.5, §4.3, §9).** The verdict precedence is the evaluator's actual one: `HARNESS_ERROR → VIOLATION → UNASSESSABLE → PASS`. A confirmed finding plus an incomplete window is a VIOLATION that keeps its `incomplete` list. A harness error makes it a HARNESS_ERROR that keeps its findings. The exit codes are aligned with this.
+
+Revision 2 made five changes after review of revision 1:
 - **Full acceptance (§2.4–2.5).** It now requires every requirement of every case to be assessed, including `finish`/`seal` decisions. A declared profile never reaches exit 0.
 - **No replay construction.** Every start uses a fresh signed request id under the authority's original capability, and `clearSession()` is never used. As a result `permit-single-use` is `OUT_OF_SCOPE`, and the gap between the `issued_permit` family name and what is actually tested is reported (§3.2, §5).
 - **One runtime session per `(tenant, session)` pair.** Authorities in the same pair share that session and keep distinct capability ids (§3.1).
@@ -92,8 +96,14 @@ A report whose `sut.commit` differs from the lock, or whose profile or supplemen
 |---|---|
 | `PASS` | All assessed requirements were observed as the contract requires. |
 | `VIOLATION` | Confirmed decision or effect findings. |
-| `UNASSESSABLE` | The case is in the profile, but required evidence is missing: an UNKNOWN decision, a barrier timeout, an unsealed or drifting observation, an aborted adapter step, or a missing terminal (including `unobservable`, §4.5). |
+| `UNASSESSABLE` | The case is in the profile and has no confirmed finding and no error, but required evidence is missing: an UNKNOWN decision, a barrier timeout, an unsealed or drifting observation, an aborted adapter step, an effect order not established within a step (§4.6), or a missing terminal (including `unobservable`, §4.5). |
 | `HARNESS_ERROR` | The harness or adapter broke the contract: schema violation, unattributable effect, causally impossible trace, a decision reported for a control step, an observation supplied for an `OUT_OF_SCOPE` case, a failed case setup, or a profile/lock binding mismatch. |
+
+**Precedence (unchanged from the 0.3.0 evaluator):** `HARNESS_ERROR → VIOLATION → UNASSESSABLE → PASS`. The verdict is HARNESS_ERROR if the case has any error. Otherwise it is VIOLATION if it has any confirmed finding, otherwise UNASSESSABLE if it has any incompleteness, otherwise PASS. The verdict never discards the lower-ranked evidence:
+- a VIOLATION case keeps its `incomplete` list;
+- a HARNESS_ERROR case keeps its findings (`confirmed_violation: true`) and its `incomplete` list.
+
+Incompleteness alone never hides a confirmed finding, and a confirmed finding never hides incompleteness.
 
 `OUT_OF_SCOPE` is not `UNASSESSABLE`. The first means the runtime lacks the capability, as declared before the run. The second means a capability the runtime offers left no evidence in this run. A case never moves between the two because of what happened during the run.
 
@@ -161,10 +171,12 @@ Supplement results (§6) are reported in their own section, with their own count
 
 | Exit | Condition |
 |---|---|
-| 2 | Input, usage, lock or profile binding error. Also a technically invalid or incomplete corpus evaluation (any HARNESS_ERROR or UNASSESSABLE `IN_PROFILE` case), also when confirmed violations were retained. Also a supplement case whose result differs from its declared expectation without a confirmed violation. |
-| 1 | Technically valid, with at least one confirmed violation in the corpus or in the supplement |
-| 3 | Declared-profile mode: profile accepted and supplement accepted. **Not a contract pass.** |
+| 2 | **Not technically valid.** Any of the following:<br>• an input, usage, lock or profile binding error;<br>• any corpus case with a non-empty `errors` list (verdict HARNESS_ERROR);<br>• any corpus case with a non-empty `incomplete` list, **whatever its verdict**, including a VIOLATION case that kept an incomplete window;<br>• any supplement case with an error, or with incompleteness outside its declared expected incompleteness (§6).<br>Exit 2 is returned also when confirmed violations were retained; `has_confirmed_violation` in the report says whether they were. |
+| 1 | Technically valid (none of the exit-2 conditions) and at least one confirmed finding in the corpus or in the supplement |
+| 3 | Declared-profile mode: technically valid, no confirmed finding, every `IN_PROFILE` case PASS, and every supplement case exactly as declared. **Not a contract pass.** |
 | 0 | `contract_acceptance_passed` (full-contract mode only) |
+
+"Technically valid" is the 0.3.0 notion: no case has errors or incompleteness. For the supplement it is relaxed in exactly one way. A supplement case's **declared** expected incompleteness (S4's missing terminal) does not count against validity, but any incompleteness beyond the declaration does. An exit code never depends on the verdict alone. A VIOLATION with an incomplete window is exit 2 with `has_confirmed_violation: true`, not exit 1.
 
 Exit 0 means the whole contract was assessed and passed, so a CI gate written for 0.3.0 cannot mistake a declared profile for a contract pass. `self-test` keeps its 0.3.0 semantics (full-contract mode).
 
@@ -295,9 +307,9 @@ Steps run strictly in order. Each step has an action and an explicit completion 
 - the public Promise states;
 - the tool doubles' logs.
 
-It snapshots again immediately before the next action, and once more at `seal`. A difference means an effect occurred outside any step's barrier. Its occurrence step cannot be established, so the observation is reported as `complete: false` (UNASSESSABLE), and the drifted item is kept as a diagnostic. A fixed number of microtask turns is never used as a barrier.
+It snapshots again immediately before the next action, and once more at `seal`. A difference means an effect occurred outside any step's barrier. Its occurrence step cannot be established, so the observation is reported as `complete: false` (incomplete evidence), and the drifted item is kept as a diagnostic. A fixed number of microtask turns is never used as a barrier.
 
-**Watchdog.** Each asynchronous barrier has a fixed wall-clock bound, proposed as 2000 ms and declared in the profile. When it expires, the step's decision is UNKNOWN and the observation is `complete: false`. A timeout can only lower a case to UNASSESSABLE. It never produces ALLOW, DENY or an effect, so it cannot change a verdict to PASS or VIOLATION.
+**Watchdog.** Each asynchronous barrier has a fixed wall-clock bound, proposed as 2000 ms and declared in the profile. When it expires, the step's decision is UNKNOWN and the observation is `complete: false`. A timeout only adds incompleteness. It never produces ALLOW, DENY or an effect, so it can neither create a finding nor turn a case into PASS. Findings already confirmed before the timeout are kept (§4.3).
 
 ### 4.3 Seal, completeness and partial runs
 
@@ -308,7 +320,12 @@ It snapshots again immediately before the next action, and once more at `seal`. 
 - it records the failing step and the error as diagnostics;
 - any remaining steps are not run.
 
-The evaluator then retains every confirmed finding beside the incompleteness, as 0.3.0 already does for findings beside errors. `confirmed_violation` and `has_confirmed_violation` stay true even though the case is UNASSESSABLE (or HARNESS_ERROR). An adapter failure never discards an observation.
+The evaluator then applies the unchanged precedence (§2.1):
+- With a confirmed finding and no error, the case is **VIOLATION** and keeps its `incomplete` list.
+- With an error, it is **HARNESS_ERROR** and keeps its findings and its `incomplete` list.
+- Only without findings and errors is it UNASSESSABLE.
+
+`confirmed_violation` and `has_confirmed_violation` stay true in every one of these cases. Because of the incompleteness the run is not technically valid, so it exits with code 2 (§2.5). An adapter failure never discards an observation.
 
 After the observation is frozen, the adapter releases any remaining harness locks for cleanup. Effects of cleanup are not observed.
 
@@ -323,13 +340,64 @@ The adapter's behaviour must not depend on a case's `id` or `family` (as in 0.3.
 
 ### 4.5 `unobservable` and `whenTerminal()`
 
-A managed execution in state `unobservable` (`mikko-lab/acs-guardrail-demo#10`) is an applicable execution whose terminal evidence is missing. It is UNASSESSABLE, never OUT_OF_SCOPE, and never a `failed` terminal. The adapter:
+A managed execution in state `unobservable` (`mikko-lab/acs-guardrail-demo#10`) is an applicable execution whose terminal evidence is missing. That is incompleteness (UNASSESSABLE when nothing else is found), never OUT_OF_SCOPE, and never a `failed` terminal. The adapter:
 - does not await `whenTerminal()` without a bound;
 - treats the runtime's `unobservable` state as the end of the `finish` barrier (§4.2), so the run is not prolonged into a watchdog timeout;
 - records `state: "unobservable"` as a diagnostic;
 - reports no `execution_terminal`.
 
 The corpus construction's Promises are always observable, so this state is reached only in supplement case S4 (§6) or through a SUT defect or mutant.
+
+### 4.6 Ordering within a step (`seq`)
+
+The 0.3.0 evaluator orders effects by occurrence step only. It requires an execution's start at a strictly earlier step than any commit, delivery, cancellation acknowledgement or terminal of that execution, a commit at an earlier step than a delivery, and a terminal at an earlier step than a "commit/delivery after terminal" finding. A runtime can legitimately produce two related effects within one contract step. The case that matters is S4 under M11: the runtime starts the tool and then records a premature `failed` terminal before the step's barrier completes. The current evaluator rejects that trace as `causally_impossible` (HARNESS_ERROR), although the adapter observed a causally ordered and forbidden behaviour.
+
+**Probes.** The adapter takes **probes**: synchronous snapshots of the full observable state (§4.2 drift-check contents), each with a strictly increasing probe index within the case. Probes are taken at fixed points:
+- immediately before each step's action;
+- **synchronously inside the tool double's entry function**, before it returns to the runtime;
+- synchronously inside every harness callback that ends a barrier wait (public Promise settled, terminal wake-up);
+- at barrier completion;
+- immediately before the next action (the drift check);
+- at seal.
+
+The probe log is part of the observation bundle. Each entry records its index, step, probe point, and the canonical set of effect identities present in that probe.
+
+**`seq`.** Every effect in a `pinned_runtime_adapter` observation carries `seq`: the index of the **first probe at which the effect was present**. Because every probe records the whole observable state, the effect was absent from every earlier probe. Therefore `seq(E1) < seq(E2)` proves that `E1` had occurred and `E2` had not yet occurred at probe `seq(E1)`: `E1` is before `E2`. Equal `seq` proves no order.
+
+Examples:
+- **Tool start.** A tool start is observed by the probe inside the double's entry function. That probe also records the execution's state at that instant (`running`, no terminal).
+- **S4 under M11.** The premature terminal appears only at a later probe of step 0 (the public-Promise callback or barrier completion). So `seq(execution_started) < seq(execution_terminal)` holds within step 0, as the adapter actually observed it.
+
+**What `seq` is not.** It is never taken from the oracle, the corpus, the order of the `effects` array, or any sorting of effects after the run. An adapter may not renumber effects. `seq` must be the probe index recorded when the effect was first observed.
+
+**Validation (HARNESS_ERROR `sequence_inconsistent` when violated):**
+- `seq` values are non-negative integers, and every effect has one (mixing effects with and without `seq` is a schema violation);
+- an effect with a higher step never has a lower or equal `seq` than an effect with a lower step;
+- every `seq` refers to a probe in the probe log whose step equals the effect's step;
+- the effect is present in that probe and absent in the probe before it.
+
+**Evaluator rule with `seq` (0.4.0, `pinned_runtime_adapter` only).** Every "earlier/later" comparison of the causal and after-terminal checks uses the lexicographic order `(step, seq)` instead of `step` alone:
+
+| Check | 0.3.0 (no `seq`) | 0.4.0 with `seq` |
+|---|---|---|
+| Execution effect needs a start of its execution | start at a strictly earlier step | start strictly earlier in `(step, seq)` |
+| Delivery needs a commit | commit at a strictly earlier step | commit strictly earlier in `(step, seq)` |
+| Commit/delivery after the observed terminal | terminal at a strictly earlier step | terminal strictly earlier in `(step, seq)` |
+| Every observed start needs a later terminal | terminal at a strictly later step | terminal strictly later in `(step, seq)` |
+
+- **Equal `(step, seq)`.** When two related effects have the same step and the same `seq`, their order is **not established**. This is not proof of impossibility. The dependent effect is excluded from matching, and the case records the incompleteness `effect order not established at step i: <kind> of <execution>`. A coarse probe can therefore only lower a case to incompleteness. It can never create a HARNESS_ERROR or a VIOLATION, and never a PASS.
+- **Strictly later in `(step, seq)`.** A dependent effect observed strictly *before* every start in `(step, seq)` order remains `causally_impossible`.
+- **Windows are unchanged.** Expected-effect windows stay in steps, and `withinWindow` is unchanged. `seq` orders effects; it never moves an effect into or out of a window.
+
+**0.3.0 path unchanged.** Observations without `seq` (`synthetic_harness_trace`, `external_adapter_declared_unverified`) are evaluated exactly as in 0.3.0: step-only ordering, same messages, same verdicts. Byte-identical self-test and regression outputs prove this, apart from the version string (§9).
+
+**S4 under M11 with `seq`.** The trace is start (step 0, seq p) and terminal (step 0, seq q > p):
+- Both are accepted: the terminal is causally after the start.
+- The terminal lies outside its window `[1..2]`, so the evaluator reports `unexpected_execution_terminal`@0.
+- The in-window terminal stays unconfirmed: incomplete `terminal evidence missing for e1 in window 1..2`.
+- The start has a later terminal, so `execution not observed terminal` is **not** reported.
+
+The verdict is VIOLATION, with `confirmed_violation: true` and that one incomplete entry.
 
 ## 5. Case matrix (27 cases)
 
@@ -409,11 +477,21 @@ The supplement is a small, separate set of cases for capabilities that this runt
 | S1 | `sup-pending-approval-revoked` | `a` initial `pending`, approval-requiring tool. Setup: `process(R_a)` must return `status: "pending"`. | 0 revoke `a` (capability); 1 approve `a` (`resolveApproval` with a valid signed grant for `R_a`; the label of the execution it would start is `e1`); 2 finish `a/e1`; 3 seal | Contract oracle: ack@0; approve DENY@1; no other effect | **PASS**: approve DENY (`AuthorityRevokedError`), tool double never invoked, no execution record, no terminal |
 | S2 | `sup-pending-approval-control` | as S1 | 0 approve `a`; 1 finish `a/e1`; 2 seal | **Runtime-specific**: approve ALLOW with `execution_started a/e1`@0, because approval and start are one runtime operation; terminal ∈[1..2]. The contract would expect `approval_granted` instead. | **PASS**: non-vacuity control for S1, showing that the approval path with this setup starts the tool |
 | S3 | `sup-commit-after-terminal-no-revocation` | `a` initial `issued`; default double | 0 start `a/e1`; 1 commit `a/e1` (key 1); 2 finish `a/e1`; 3 commit `a/e1` (key 2, retained context); 4 seal | Contract oracle: commit ALLOW@1; commit DENY@3 (oracle reasons `finish_requested+already_committed`; this runtime has no once-only rule, so its DENY is explained by the terminal alone); terminal ∈[2..4] | **PASS**: commit@1 changes the state (non-vacuity), commit@3 is denied with runtime reason `execution_terminal`, and the state is unchanged. No revocation masks the terminal fence. |
-| S4 | `sup-unobservable-pending-settlement` | `a` initial `issued`; double `returns_unobservable_pending_promise`: the tool returns a pending native Promise with a non-configurable `constructor` accessor and registers no work | 0 start `a/e1`; 1 finish `a/e1` (harness resolves the hidden Promise); 2 seal | Contract oracle: start ALLOW + `execution_started`@0; terminal ∈[1..2] | **UNASSESSABLE**, exactly: incomplete = missing `execution_terminal a/e1`; no findings, no errors. The runtime fails the call, holds the execution in `unobservable`, and never records a terminal, including after the Promise settles at step 1. |
+| S4 | `sup-unobservable-pending-settlement` | `a` initial `issued`; double `returns_unobservable_pending_promise`: the tool returns a pending native Promise with a non-configurable `constructor` accessor and registers no work | 0 start `a/e1`; 1 finish `a/e1` (harness resolves the hidden Promise); 2 seal | Contract oracle: start ALLOW + `execution_started`@0; terminal ∈[1..2] | **UNASSESSABLE**, exactly: incomplete = {`terminal evidence missing for e1 in window 1..2`, `execution not observed terminal: e1`}; no findings, no errors. These are the strings the current evaluator produces for this trace. The runtime fails the call, holds the execution in `unobservable`, and never records a terminal, including after the Promise settles at step 1. |
 
 `approve` uses the same decision mapping as `start`: ALLOW when the runtime invoked the tool double; DENY when `resolveApproval()` rejected with `AuthorityRevokedError` before any invocation; UNKNOWN otherwise.
 
-S4 is a control run whose correct outcome is missing terminal evidence. **A PASS for S4 would itself be a failure of the supplement**: it would mean a terminal was reported for an unobserved settlement. Under mutant M11 the runtime records a `failed` terminal during step 0, before the terminal window opens at `finish`. The evaluator then reports `unexpected_execution_terminal`@0, so S4 becomes a confirmed VIOLATION. That is detected both as a mismatch with the declared UNASSESSABLE and as `has_confirmed_violation`.
+S4 is a control run whose correct outcome is missing terminal evidence. **A PASS for S4 would itself be a failure of the supplement**: it would mean a terminal was reported for an unobserved settlement.
+
+Under mutant M11 the runtime records a `failed` terminal during step 0, after the tool start and before the terminal window opens at `finish`. The probe inside the double's entry function records the start with no terminal present, and the terminal first appears at a later probe of step 0. With `seq` (§4.6) the evaluator reports:
+- `unexpected_execution_terminal`@0;
+- verdict **VIOLATION**;
+- `confirmed_violation: true`;
+- incomplete = {`terminal evidence missing for e1 in window 1..2`}.
+
+The incompleteness is within S4's declared expected incompleteness, so the run is technically valid. The confirmed finding gives exit 1 (§2.5), and the mismatch with the declared UNASSESSABLE fails `supplement_acceptance_passed`.
+
+Without `seq`, the current 0.3.0 evaluator rejects this trace as `causally_impossible` (HARNESS_ERROR, exit 2). That is why §4.6 is required for M11's witness.
 
 ## 7. Proposed capability profile
 
@@ -464,9 +542,9 @@ The corpus and its golden SHA are unchanged. Full-contract semantics are unchang
 |---|---|
 | Model (`src/spec/revocation/model.ts`) | Add the `Applicability` type (`IN_PROFILE`, `OUT_OF_SCOPE`), `Profile` and `Supplement` types, `control_ops`, and the requirement classes `D`/`C`/`O`/`K` |
 | Classifier (new) | A pure function `(corpus, oracle, profile rules) → applicability`, with a golden test against the committed profile. It never imports observation or report code (extends `check:oracle-boundary`). |
-| Observation schema | `observation_source: "pinned_runtime_adapter"`. Per-item `provenance` (`sut_api` / `sut_state` / `harness_observation`), required for that source. Optional `diagnostics` (`sut_reason`, API/state disagreements, drift items, aborted step, unobservable state) that never feed the verdict. Decisions at control steps must be absent in declared-profile mode. |
-| Evaluator | Profile-aware. Skips K decisions and counts them as `not_assessed_requirements`; a supplied K decision → HARNESS_ERROR `decision_at_control_step`. An observation for an `OUT_OF_SCOPE` case → input error. `OUT_OF_SCOPE` evidence entries carry `verdict: null`. Confirmed findings are retained in incomplete or partial observations (already true in 0.3.0; covered by new tests for adapter partial runs). |
-| Supplement evaluation | The same evaluator, with the supplement's golden expectations; comparison against each case's declared expected verdict, findings, incompleteness and errors |
+| Observation schema | `observation_source: "pinned_runtime_adapter"`. Per-item `provenance` (`sut_api` / `sut_state` / `harness_observation`), and per-effect `seq` with the probe log (§4.6), both required for that source and absent for the 0.3.0 sources. Optional `diagnostics` (`sut_reason`, API/state disagreements, drift items, aborted step, unobservable state) that never feed the verdict. Decisions at control steps must be absent in declared-profile mode. |
+| Evaluator | `(step, seq)` ordering for the causal and after-terminal checks when `seq` is present; `sequence_inconsistent` validation; "effect order not established" incompleteness for equal `(step, seq)`; step-only 0.3.0 behaviour when `seq` is absent (§4.6). Profile-aware. Skips K decisions and counts them as `not_assessed_requirements`; a supplied K decision → HARNESS_ERROR `decision_at_control_step`. An observation for an `OUT_OF_SCOPE` case → input error. `OUT_OF_SCOPE` evidence entries carry `verdict: null`. Verdict precedence unchanged (`HARNESS_ERROR → VIOLATION → UNASSESSABLE → PASS`); findings and incompleteness are both retained whatever the verdict (already true in 0.3.0; covered by new tests for adapter partial runs). |
+| Supplement evaluation | The same evaluator, with the supplement's golden expectations; comparison against each case's declared expected verdict, findings, incompleteness and errors; declared expected incompleteness is excluded from the technical-validity check (§2.5) |
 | Report schema and summary | `sut`, `profile` and `supplement` blocks; `applicability`, `out_of_scope`, `not_assessed_requirements`, `tested_property` and `family_caveat` per entry; the split counts of §2.4; `contract_acceptance_passed` (every requirement assessed and passed), `profile_acceptance_passed` and `supplement_acceptance_passed`; a separate supplement section; the fixed non-contract statement; a list of uncovered design fences |
 | CLI | `run-adapter --lock FILE --profile FILE --out DIR` (drives the pinned runtime over the `IN_PROFILE` cases and the supplement); `evaluate --profile FILE --lock FILE` for imported observations; the exit codes of §2.5. The self-test stays in full-contract mode. |
 | Manifest | Adds the lock, profile, supplement, adapter modules and compiled SUT module hashes |
@@ -487,7 +565,7 @@ The corpus and its golden SHA are unchanged. Full-contract semantics are unchang
    - Full-contract self-test acceptance still gives exit 0.
 6. **Baseline at `a682e44`, declared-profile mode.**
    - All 14 `IN_PROFILE` cases PASS, and the run is technically valid.
-   - The supplement matches its declarations: S1–S3 PASS, and S4 UNASSESSABLE with exactly the missing terminal.
+   - The supplement matches its declarations: S1–S3 PASS, and S4 UNASSESSABLE with exactly the two declared incomplete entries and no findings or errors.
    - The exit code is 3.
    - The report lists all 27 cases, with coverage 14/27, pass rate 14/14, the not-assessed count, `contract_acceptance_passed: false`, the fixed statement, and the supplement in its own section.
 7. **Request discipline.**
@@ -496,7 +574,7 @@ The corpus and its golden SHA are unchanged. Full-contract semantics are unchang
 8. **Session discipline.** Authorities of one `(tenant, session)` pair share one runtime session and have distinct `capability_id`s. This is checked from the runtime records of `active-session`, `sibling-isolation` and `session-in-flight-commit-fence`.
 9. **Determinism.** Two consecutive runs produce byte-identical `observations.json`, `evidence.jsonl` and `report.json`. This requires no timestamps in observations and a fixed clock.
 10. **Barrier discipline.**
-    - Tests show that a delayed effect after a barrier is caught by the drift check (UNASSESSABLE), and that a watchdog timeout yields UNKNOWN and never ALLOW or DENY.
+    - Tests show that a delayed effect after a barrier is caught by the drift check (incomplete), and that a watchdog timeout yields UNKNOWN and never ALLOW or DENY.
     - S4 completes its `finish` barrier on the runtime's `unobservable` state without a timeout.
     - No barrier is implemented as a fixed count of microtask turns (enforced by review).
 11. **No back-filling.**
@@ -510,10 +588,19 @@ The corpus and its golden SHA are unchanged. Full-contract semantics are unchang
       - a receipt without a state change;
       - a tool invocation followed by a rejected `process()`.
     - In these tests, a DENY together with a state change yields `unexpected_tool_commit`.
-13. **Partial runs.** An adapter abort or watchdog timeout after a confirmed violating effect yields `complete: false`, the case UNASSESSABLE (or HARNESS_ERROR), and `confirmed_violation: true`, with the earlier observations present in the bundle.
-14. **Binding.** Every attributed effect is attributed from the runtime's binding. A test injects a mismatched binding and expects an attribution error or a finding, never a PASS.
-15. **`cancel_ack` divergence.** A conformance test pins `acknowledgeCancellation() === false` for an already-terminal execution, with that behaviour documented as `cancel_ack_after_runtime_terminal` (R4).
-16. **Mutants.**
+13. **Partial runs.** Each of the following has its own test, with the earlier observations present in the bundle and exit 2 with `has_confirmed_violation: true`:
+    - An adapter abort or watchdog timeout after a confirmed violating effect yields `complete: false`, verdict **VIOLATION**, `confirmed_violation: true`, and an `incomplete` list that contains the unsealed window.
+    - The same with an additional harness error yields verdict **HARNESS_ERROR**, with the finding and the incompleteness both retained.
+    - A partial run without any finding or error yields UNASSESSABLE.
+14. **Ordering within a step (§4.6).**
+    - **M11 trace.** The M11 S4 trace with `seq` (start at a lower `seq` than the terminal, both at step 0) yields VIOLATION `unexpected_execution_terminal`@0, not `causally_impossible`.
+    - **Equal `seq`.** The same two effects with equal `seq` yield the incompleteness "effect order not established", neither HARNESS_ERROR nor VIOLATION.
+    - **Reversed `seq`.** A terminal with a lower `seq` than its start in the same step yields `causally_impossible`.
+    - **Validation.** A `seq` that contradicts step order, a `seq` that points at a probe where the effect is absent, and a `seq` whose predecessor probe already contains the effect each yield `sequence_inconsistent`.
+    - **0.3.0 path.** The synthetic self-test, `check:revocation-regressions` and every existing evaluator test produce byte-identical evidence for observations without `seq`, apart from the version string.
+15. **Binding.** Every attributed effect is attributed from the runtime's binding. A test injects a mismatched binding and expects an attribution error or a finding, never a PASS.
+16. **`cancel_ack` divergence.** A conformance test pins `acknowledgeCancellation() === false` for an already-terminal execution, with that behaviour documented as `cancel_ack_after_runtime_terminal` (R4).
+17. **Mutants.**
     - Every SUT mutant of §10 is detected by its fixed witness, as stated in its row.
     - Mutants must typecheck in the SUT (`tsc --noEmit`). Each is applied to a fresh checkout and never committed.
     - Witnesses are fixed in the profile review, before any mutant is run.
@@ -535,7 +622,7 @@ The corpus and its golden SHA are unchanged. Full-contract semantics are unchang
 | M8 | The approval-stage and start-stage revocation checks are removed (the request-stage check stays) | S1 @1: `false_allow`, `unexpected_execution_started` | supplement |
 | M9 | The request-stage and start-stage revocation checks are removed | `cut-before-start` @1: `false_allow`, `unexpected_execution_started` | corpus |
 | M10 | `#maybeTerminal` never records a terminal | `start-before-cut`: missing terminal → UNASSESSABLE, exit 2 (incompleteness witness) | corpus |
-| M11 | Restores the pre-`mikko-lab/acs-guardrail-demo#10` premature `failed` terminal for an unobservable settlement | S4 @0: `unexpected_execution_terminal`, a confirmed VIOLATION instead of the declared UNASSESSABLE | supplement |
+| M11 | Restores the pre-`mikko-lab/acs-guardrail-demo#10` premature `failed` terminal for an unobservable settlement | S4 @0: `unexpected_execution_terminal` with the start before the terminal in `(step, seq)` (§4.6); verdict VIOLATION with incomplete {`terminal evidence missing for e1 in window 1..2`}; exit 1; `supplement_acceptance_passed: false` | supplement |
 
 The revision 1 mutant M8 (replay guard disabled) is dropped: the replay construction no longer exists, and no requirement of this profile depends on the replay guard.
 
@@ -545,12 +632,14 @@ The revision 1 mutant M8 (replay guard disabled) is dropped: the replay construc
 |---|---|---|
 | AM1 | Fills a missing decision from the oracle | Back-filling test (§9.11) |
 | AM2 | Reports a decision for `finish` or `seal` | HARNESS_ERROR `decision_at_control_step` |
-| AM3 | Attributes effects to the intended authority instead of the runtime binding | Binding test (§9.14) |
-| AM4 | Uses a fixed microtask count instead of the `deliver` barrier | Drift or timeout test (§9.10), UNASSESSABLE |
-| AM5 | Treats `whenTerminal()` resolution, or the lock release, as terminal evidence | Test with M10 applied: the result must stay UNASSESSABLE, not PASS. S4 must stay UNASSESSABLE. |
+| AM3 | Attributes effects to the intended authority instead of the runtime binding | Binding test (§9.15) |
+| AM4 | Uses a fixed microtask count instead of the `deliver` barrier | Drift or timeout test (§9.10): incompleteness |
+| AM5 | Treats `whenTerminal()` resolution, or the lock release, as terminal evidence | Test with M10 applied: the result must stay UNASSESSABLE, not PASS. S4 must stay UNASSESSABLE with its two declared incomplete entries. |
 | AM6 | Drops a commit effect when the commit call threw | Effect-independence test (§9.12) |
 | AM7 | Re-submits a signed request or calls `clearSession()` | Request-discipline test (§9.7) |
 | AM8 | Gives each authority its own runtime session | Session-discipline test (§9.8); M6 and M7 would no longer be killed |
+| AM9 | Assigns `seq` after the run (by array order, by effect kind, or from the corpus order) instead of from the first probe that observed the effect | Probe-log validation (§4.6, §9.14): `sequence_inconsistent` |
+| AM10 | Takes no probe inside the tool double's entry function, so start and premature terminal share a `seq` | M11 on S4 yields "effect order not established" instead of VIOLATION, which fails M11's witness |
 
 ## 11. Review decisions
 
