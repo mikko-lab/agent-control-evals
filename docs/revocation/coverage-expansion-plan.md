@@ -101,6 +101,7 @@ Notation: steps are corpus step indices. Expected decisions and effects are the 
   - M15 "tenant not checked at the commit fence". Witness: this case → `false_allow@4`, `false_allow@5`, `unexpected_tool_commit@4`, `unexpected_tool_commit@5`.
   - M16 "tenant revocation over-reaches to every tenant" (matching on session name instead of tenant). Witness: `tenant-isolation` (§3.10) → `false_deny@2`, `missing_execution_started@2`.
 - **Forbidden emulation.** The adapter must not translate a tenant revoke into one session revoke per known session. That is harness enumeration, and it would miss sessions that appear after the cut.
+- **Fences this case does not reach.** Approval, delivery and the cancellation signal under tenant revocation are covered by supplement S7 and S9 (§7.3). The binding rules are in §7.5.
 
 ### 3.5 `late-commit-after-terminal` (family `in_flight_before_commit`)
 
@@ -164,7 +165,7 @@ Notation: steps are corpus step indices. Expected decisions and effects are the 
   - start, approve and issue DENY;
   - no `execution_started`, `approval_granted` or `permit_issued`;
   - PASS.
-- **Proving mutant.** M20 "ancestry not walked at start". Witness: this case → `false_allow@1`, `unexpected_execution_started@1`.
+- **Proving mutant.** M20 "ancestry not walked at request and start". Its package-1 witness is supplement S5 (§7.4), because this case needs G3 and stays `OUT_OF_SCOPE` after package 1. Once G3 lands, this case becomes a second witness → `false_allow@1`, `unexpected_execution_started@1`.
 - **Forbidden emulation.** The adapter must not revoke each descendant capability separately.
 
 ### 3.9 `derived-in-flight-ancestor-revoked` (family `descendant_scope`)
@@ -181,6 +182,7 @@ Notation: steps are corpus step indices. Expected decisions and effects are the 
   - terminal of `e2` in window 1..4;
   - PASS.
 - **Proving mutant.** M21 "ancestry not walked at the commit fence". Witness: this case → `false_allow@2`, `unexpected_tool_commit@2`.
+- **Fences this case does not reach.** Approval, delivery and the cancellation signal under ancestor revocation, and over-reach, are covered by supplement S8 and S10 and by `sibling-isolation` (§7.3).
 
 ### 3.10 `tenant-isolation` (family `scope_isolation`)
 
@@ -254,13 +256,13 @@ Notation: steps are corpus step indices. Expected decisions and effects are the 
 | `pending-approval` | G3 | both | M12 |
 | `issue-after-cut` | G3 | both | M13 |
 | `fresh-id-retry-unused-permit` | G3 | both | M14 |
-| `tenant-multi-session-in-flight` | G1 | both | M15, M16 |
+| `tenant-multi-session-in-flight` | G1 | both | M15, M16; fence matrix §7.3 |
 | `late-commit-after-terminal` | G6 | both | M17 |
 | `retry-after-revocation` | G5(b) | both | M18 |
 | `cancel-is-not-rollback` | G6 | both | M19 (rollback: open point §3.7) |
-| `derived-authority` | G2 + G3 | both | M20 |
-| `derived-in-flight-ancestor-revoked` | G2 | both | M21 |
-| `tenant-isolation` | G1 | both | M16, M22 |
+| `derived-authority` | G2 + G3 | both | M20 (package-1 witness: supplement S5) |
+| `derived-in-flight-ancestor-revoked` | G2 | both | M21; fence matrix §7.3 |
+| `tenant-isolation` | G1 | both | M16, M22; fence matrix §7.3 |
 | `execution-id-reuse` | G5(a) + G5(b) | both | M23, M18 |
 | `permit-single-use` | G4 (G3 if the permit object is shared) | both | M24 |
 | `approval-before-cut` | G3 | both | M25 |
@@ -319,43 +321,191 @@ The K requirements are a different gap from the 13 cases. Moving all 13 cases in
 
 **Package 1 — revocation reach: G1 tenant scope, then G2 descendant coverage.**
 
-**Why this package first:**
+### 7.1 Why this package first
 
 - **Safety benefit.** Both close the most serious class of gap the contract defines: a revocation that does not reach authority it covers, so that start, commit and delivery stay allowed after the cut (`false_allow` plus unexpected effects). G3–G7 refine *when* and *where* fences apply. G1/G2 decide *whether* the cut reaches the authority at all.
-- **Dependencies.** Neither depends on another group. Both extend the one existing check (`AuthorityRevocationRegistry.check()` at the existing request, approval, start, commit and delivery fences). Neither needs a new operation type or a change to the registered-work construction, and the evaluator semantics are unchanged.
+- **Dependencies.** Neither depends on another group. Both extend the one existing check (`AuthorityRevocationRegistry.check()` at the existing request, approval, start, commit and delivery fences) and the existing cancellation fan-out in `revoke()`. Neither needs a new operation type or a change to the registered-work construction, and the evaluator semantics are unchanged.
 - **Effort.**
-  - **Runtime:** small to medium, covering the grant schema, target parsing, registry, cancellation fan-out and their own tests.
-  - **Adapter:** limited to mapping (tenant and parent identity, tenant target and receipt) plus a versioned schema variant for the tenant target.
-- **Coverage.** 14 → 17 `IN_PROFILE` (`tenant-multi-session-in-flight`, `tenant-isolation`, `derived-in-flight-ancestor-revoked`). The design fences `start (tenant, descendant)` and `commit (tenant, descendant)` become covered.
+  - **Runtime:** small to medium. It covers a new grant version, target parsing, the registry, the execution binding, chain verification, the cancellation fan-out and the runtime's own tests.
+  - **Adapter:** mapping (tenant and parent identity, the issuer-signed chain, the tenant target and receipt) plus a versioned schema variant for the tenant target.
+- **Corpus coverage.** 14 → 17 `IN_PROFILE`: `tenant-multi-session-in-flight`, `tenant-isolation` and `derived-in-flight-ancestor-revoked`. `derived-authority` still needs G3 and stays `OUT_OF_SCOPE`, so corpus coverage is **17/27**.
 
-**Proposed sequence.** Each step needs its own authorization.
+### 7.2 Three kinds of evidence
 
-1. Runtime PR in `acs-guardrail-demo`, 1a tenant scope:
-   - signed `tenant_id` in the grant, the `tenant` revocation target, the check at every fence, the receipt and the cancellation fan-out;
-   - runtime tests, including the runtime's own mutants for M15, M16 and M22.
-2. Runtime PR, 1b descendant coverage:
-   - a signed parent link, bound at first sight, with cycle and depth limits;
-   - ancestry checked at every fence, and cancellation fan-out;
-   - runtime tests, including the mutants for M20 and M21.
-3. A runtime release containing 1a and 1b.
-4. Eval PR:
-   - a new `sut.revocation.lock.json` pin and a new profile version;
+The package gate keeps three kinds of evidence apart. Only the first counts toward corpus coverage.
+
+| Evidence | Where it lives | What it can show | What it counts toward |
+|---|---|---|---|
+| **Corpus** | The 17 `IN_PROFILE` cases, evaluated against the oracle | Contract decisions and effects through the runtime's public API and state | `corpus_coverage` 17/27, `profile_acceptance_passed` |
+| **Supplement** | New cases S5–S10 in the profile's supplement file (golden-hashed, own expectations, own section of the report) | Runtime-specific checks in contract vocabulary for fences the corpus cases do not reach | `supplement_acceptance_passed` only; never corpus coverage |
+| **Runtime-own tests** | `acs-guardrail-demo` test suite, pinned through the lock's SUT baseline (suite and test counts) | Internal check points and input validation that the contract cannot express: individual check points that mask one another, grant and chain validation, binding conflicts | The lock's baseline verification; the runtime-test mutants of §7.6. Never the profile or supplement results |
+
+### 7.3 Fence matrix
+
+The three new corpus cases do not reach every fence:
+- `tenant-multi-session-in-flight` covers the commit fence and the cross-tenant delivery (non-coverage).
+- `tenant-isolation` covers the request fence and over-reach at start, commit and delivery.
+- `derived-in-flight-ancestor-revoked` covers the commit fence.
+
+The corpus does not reach the delivery fence and the cancellation signal under tenant or ancestor revocation, nor the approval fence. These get supplement witnesses (§7.4).
+
+The start guard (`beforeInvoke`, stage `start`) is reachable only through a revocation that takes effect inside one `process()` call, between the request checks and the tool invocation. No contract step can place one there. Its evidence is a runtime-own test; corpus and supplement claim nothing about it.
+
+Each runtime check point has its own runtime test, because:
+- the request stage checks twice (before capability resolution and after verification);
+- a start after the cut that passed the request checks, or an approval that passed the approval re-verification, would still be stopped by the start guard (`resolveApproval()` runs the same start path);
+- delivery checks twice (early check in result processing and the hand-over);
+
+and a mutant that removes only one of these check points is masked by the others at the contract level. The contract witnesses therefore show each fence as a whole. M20 and M22 remove the check at the request checks and the start guard together, and M26 and M34 remove it at the approval re-verification and the start guard together.
+
+| Fence | Tenant revocation (G1) | Ancestor revocation (G2) |
+|---|---|---|
+| **Request** (`process()`; stage `request`) | **Corpus** `tenant-isolation` step 1: start DENY, no `execution_started`. Mutant **M22** "tenant not checked at request and start" → `false_allow@1`, `unexpected_execution_started@1`. Runtime test for each of the two request check points: **M27a**. | **Supplement S5** `sup-ancestor-revoked-child-start` step 1: start DENY. Mutant **M20** "ancestry not walked at request and start" → `false_allow@1`, `unexpected_execution_started@1`. Runtime test per check point: **M27b**. |
+| **Approval** (`resolveApproval()` re-verification; stage `approval`) | **Supplement S7** `sup-tenant-pending-approval-revoked`: approve DENY, tool never invoked. Mutant **M26** "tenant not checked at approval re-verification and start guard" → `false_allow@1`, `unexpected_execution_started@1`. The approval path also passes the start guard, so the approval check alone is masked; runtime test for it: **M26a**. | **Supplement S8** `sup-ancestor-pending-approval-revoked`: approve DENY. Mutant **M34** "ancestry not checked at approval re-verification and start guard" → `false_allow@1`, `unexpected_execution_started@1`. Runtime test for the approval check alone: **M34a**. |
+| **Start guard** (`beforeInvoke`; stage `start`) | **Runtime-own test only** (revocation from an injected hook between the request checks and the invocation). Runtime-test mutant **M27c**. | **Runtime-own test only.** Runtime-test mutant **M27d**. |
+| **Commit** (`ctx.commit()`) | **Corpus** `tenant-multi-session-in-flight` steps 4 and 5: DENY, no `tool_commit`. Mutant **M15** → `false_allow@4`, `false_allow@5`, `unexpected_tool_commit@4`, `unexpected_tool_commit@5`. **Supplement S9** step 2 is the non-vacuity commit before the cut. | **Corpus** `derived-in-flight-ancestor-revoked` step 2. Mutant **M21** → `false_allow@2`, `unexpected_tool_commit@2`. **Supplement S10** step 2 is the non-vacuity commit before the cut. |
+| **Delivery** (early check and hand-over) | **Supplement S9** `sup-tenant-fences-in-flight` step 6: deliver DENY (withheld, `tenant_revoked`), no `output_delivery`. Mutant **M28** "tenant not checked at delivery" → `false_allow@6`, `unexpected_output_delivery@6`. Runtime test per check point: **M28a/M28b**. | **Supplement S10** `sup-ancestor-fences-in-flight` step 6: deliver DENY. Mutant **M35** → `false_allow@6`, `unexpected_output_delivery@6`. Runtime test per check point: **M35a/M35b**. |
+| **Cancellation signal** (fan-out in `revoke()`) | **Supplement S9** step 5: `cancel_ack` ALLOW with `cancellation_ack@5`. The runtime returns `true` only when a cancellation was requested, so this observes the signal through the contract. Mutant **M29** "tenant revoke sends no cancellation" → `false_deny@5`, `missing_cancellation_ack@5`. Non-coverage of other tenants (no signal) is a runtime-own test, because the contract expects ALLOW for `cancel_ack` without a cancellation request, and this runtime's `false` is a declared unsupported class (§8). | **Supplement S10** step 5. Mutant **M36** "ancestor revoke sends no cancellation to descendants" → `false_deny@5`, `missing_cancellation_ack@5`. Non-coverage: runtime-own test. |
+| **Over-reach** (the cut must not reach outside its scope) | **Corpus** `tenant-isolation` steps 2–4 (other tenant starts, commits, delivers) and `tenant-multi-session-in-flight` steps 6–7. **Supplement S9** step 7 (other tenant's delivery ALLOW). Mutant **M16** "tenant revocation over-reaches to every tenant" → `false_deny@2`, `missing_execution_started@2` in `tenant-isolation`. | **Corpus** `sibling-isolation`: with G2 its parent links are mapped (§7.5), so it tests that revoking `child` reaches neither its parent `a` nor its sibling. **Supplement S10** step 7 (unrelated authority's delivery ALLOW). Mutant **M37** "revocation propagates to parent or siblings" → `false_deny@2`, `missing_execution_started@2` in `sibling-isolation`. |
+| **Non-vacuity** | The other tenant's ALLOWs above. | **Supplement S6** `sup-ancestor-control`: a child grant with a verified chain starts without any revocation (ALLOW). This shows that S5's DENY is caused by the ancestor revocation, not by a chain rejection. |
+
+### 7.4 New supplement cases (package 1)
+
+Each case has fresh state, its own expectations in contract vocabulary, a finish for every start, and one seal. Its finish/seal decisions are K, as for S1–S4. The ASK-based cases S7 and S8 reuse the setup of S1: a pending runtime approval created before step 0.
+
+| Case | Authorities | Steps | Expected |
+|---|---|---|---|
+| S5 `sup-ancestor-revoked-child-start` | `a` issued; `child` issued, parent `a` (same tenant, same session) | revoke `a`; start `child/e2`; finish `child/e2`; seal | revoke ALLOW, `revocation_ack@0`; start DENY; no `execution_started`. No approve or issue operation. |
+| S6 `sup-ancestor-control` | as S5 | start `child/e2`; finish `child/e2`; seal | start ALLOW, `execution_started@0`; terminal in window 1..2 |
+| S7 `sup-tenant-pending-approval-revoked` | `a` in tenant `t1`; pending runtime approval of `a` | revoke tenant `t1`; approve `a`; finish `a/e1`; seal | revoke ALLOW, `revocation_ack@0`; approve DENY; no `execution_started` |
+| S8 `sup-ancestor-pending-approval-revoked` | `a`; `child` with parent `a`; pending runtime approval of `child` | revoke `a`; approve `child`; finish `child/e2`; seal | revoke ALLOW; approve DENY; no `execution_started` |
+| S9 `sup-tenant-fences-in-flight` | `a` (t1,s1); `b` (t2,s1), with distinct runtime sessions | 0 start `a/e1`; 1 start `b/e2`; 2 commit `a/e1`; 3 commit `b/e2`; 4 revoke tenant `t1`; 5 `cancel_ack a/e1`; 6 deliver `a/e1`; 7 deliver `b/e2`; 8 finish `a/e1`; 9 finish `b/e2`; 10 seal | starts and commits ALLOW (`tool_commit@2`, `tool_commit@3`); `revocation_ack@4`; `cancel_ack` ALLOW, `cancellation_ack@5`; deliver `a` DENY (no `output_delivery`); deliver `b` ALLOW, `output_delivery@7`; terminal `e1` in 4..10, `e2` in 9..10 |
+| S10 `sup-ancestor-fences-in-flight` | `a`; `child` with parent `a`; `peer` without a parent (same tenant and session) | 0 start `child/e2`; 1 start `peer/e3`; 2 commit `child/e2`; 3 commit `peer/e3`; 4 revoke `a`; 5 `cancel_ack child/e2`; 6 deliver `child/e2`; 7 deliver `peer/e3`; 8 finish `child/e2`; 9 finish `peer/e3`; 10 seal | as S9, with `child` covered and `peer` not |
+
+The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage.
+
+### 7.5 Tenant binding: security bounds (G1)
+
+- **Trusted source.** The tenant comes only from the signed capability grant: a new grant version with a required `tenant_id`, covered by the issuer signature and by the capability fingerprint. It never comes from:
+  - request metadata;
+  - `agent_id`;
+  - a session-id prefix;
+  - adapter state.
+- **Request and grant correspondence.**
+  - The request's signed metadata may carry `tenant_id` (a reserved ACS field). If present, it must equal the grant's tenant. A mismatch is rejected before the guardian (`capability_rejected`, reason `tenant_mismatch`), and no execution starts. If absent, the grant's tenant applies.
+  - The existing grant-to-request session match stays.
+  - A pending approval keeps its grant snapshot, and re-verification fails when the re-resolved grant differs in any field, including the tenant.
+- **Execution binding.** At start, the managed execution binds `tenant_id` together with `capability_id` and `session_id`. The commit, delivery and cancellation checks use this start-time binding, never a re-resolved grant.
+- **Session namespace.**
+  - A runtime `session_id` is unique within the runtime instance and bound to exactly one tenant at the first verified grant that names it. The binding is monotonic, like the capability binding.
+  - A grant naming a session already bound to another tenant is rejected (`session_tenant_conflict`).
+  - So a session revocation can never cross tenants, and a tenant revocation reaches a session through its binding, not through its name.
+  - The early request check (before capability resolution) uses the binding for sessions already bound; the check after verification uses the grant's tenant.
+  - The adapter keeps one distinct runtime session per contract `(tenant, session)` pair, as today, but the runtime's safety must not rely on naming.
+- **Tenant revocation record.** A tenant revocation is monotonic and keyed by `tenant_id`. It is checked at use time. It covers every grant, session and execution bound to the tenant, including grants first seen after the revocation. Nothing is enumerated in advance.
+- **Several records apply at once.** A use is denied if any applicable record matches: session, capability, tenant, or (with G2) an ancestor capability. A capability revocation by id stays in force whatever tenant a later grant claims.
+- **Legacy tenantless grants.**
+  - In a runtime instance with tenancy enabled, a grant without `tenant_id` (`CapabilityGrantV1`) is rejected (fail closed, `MISSING_TENANT`). There is no default tenant, and no "null tenant" namespace that tenant revocation does not reach.
+  - If the runtime keeps a legacy mode, that mode offers no tenant revocation at all, is recorded in the lock, and its profile keeps tenant cases `OUT_OF_SCOPE`.
+  - A mixed mode that accepts both versions at once is not acceptable.
+- **Tenant switch under the same `capability_id`.**
+  - The capability fingerprint covers `tenant_id`, so a second grant with the same `capability_id` and another tenant is rejected (`capability_id_conflict`), whichever is seen first.
+  - Executions bound to the first grant keep their tenant binding.
+  - So re-issuing an id under another tenant cannot escape either a tenant revocation of the original tenant or a capability revocation of the id.
+- **Runtime-test mutants** (evidence: runtime-own tests):
+
+  | Mutant | Removed or broken safeguard |
+  |---|---|
+  | M30 | tenant taken from request metadata instead of the signed grant |
+  | M31 | tenantless grant accepted with tenancy enabled |
+  | M32 | session not bound to one tenant (a second tenant can claim the same session) |
+  | M33 | fingerprint excludes `tenant_id` (same id re-bound to another tenant) |
+  | M33b | execution re-resolves its tenant at commit or delivery instead of using the start-time binding |
+
+- **Adapter mutant.** AM12 "two contract tenants mapped onto one runtime session" must be detected by the adapter's identity-mapping check before the run.
+
+### 7.6 Parent link: meaning and verification (G2)
+
+- **Meaning.**
+  - In package 1 the parent link is **issuer-attested derivation**. The trusted issuer signs a child grant that names its parent.
+  - The runtime enforces both:
+    - **revocation dependency**: the child can be used only while no capability in its chain is revoked;
+    - **attenuation**: the child's `allowed_tools` are a subset of the parent's, its validity window lies within the parent's, and its tenant equals the parent's. Without attenuation, "descendant" would be a label rather than derived authority.
+  - Holder-to-holder delegation, where a child is signed by the parent holder's key, is out of scope. It needs holder keys and a separate design and review.
+- **Source of the verified chain.**
+  - The child grant carries a signed reference `parent: { capability_id, fingerprint }`, where the fingerprint is that of the parent grant's body.
+  - The capability provider returns the leaf grant together with its **complete ancestor chain** up to a root grant without a parent. Each grant in the chain is signed by the trusted issuer.
+  - The runtime verifies every chain member: signature, structure, validity, fingerprint link to its child, attenuation and tenant. Only then does it accept the leaf.
+  - The runtime never uses grants it has seen earlier as the source of a chain. It binds only grants seen in use, so the chain's availability cannot be assumed and must come with the request. Earlier bindings serve only as conflict checks.
+- **Missing parent.** A grant that names a parent which the supplied chain does not contain, or a chain that does not end in a root, is rejected (`MALFORMED_CHAIN`, fail closed). It is never treated as a root.
+- **Cycles.** A repeated `capability_id` anywhere in the chain is rejected. Fingerprint linkage makes a cycle infeasible as well, but the runtime does not rely on that.
+- **Depth.** The chain is limited to a fixed maximum, provisionally 8 grants including the leaf. The constant is part of the runtime release and recorded in the lock. A longer chain is rejected, not truncated.
+- **Tenant conflict.** Every chain member must have the leaf's `tenant_id`; otherwise the grant is rejected (`tenant_chain_mismatch`). Sessions may differ within the tenant. A session revocation covers only executions bound to that session; descendant coverage applies to capability-scope revocation.
+- **Later link change.**
+  - The fingerprint of every chain member covers its parent reference, and each member's `capability_id` is bound at first sight with the existing `bindCapability`. A chain that presents different content for an already bound id, including a different parent, is rejected (`capability_id_conflict`).
+  - A running execution keeps the chain bound at its start (immutable). Its later fences check revocation of every id in that bound chain.
+  - Revocation is by id, so it covers the id whatever content is presented later.
+- **Ancestor never seen in use.** Revoking an ancestor id that the runtime has not seen yet still works, because the registry is keyed by id. The revocation covers any later chain that contains the id.
+- **Cancellation fan-out.** `revoke()` requests cancellation for every running execution whose bound chain contains the revoked id. Today's direct match is extended; nothing else in the fan-out changes.
+- **Adapter mapping.**
+  - The harness acts as issuer, as it already does for grants. It signs child grants with parent references, and its capability provider returns the full chain.
+  - Every contract `parent` link is mapped once the runtime supports chains. This replaces compatibility spec §3.4's rule that unrelated parent links are not modelled, so `sibling-isolation` becomes a real tree test.
+  - Adapter mutant **AM13** "parent links dropped (independent grants)" is detected by S5 (start would be ALLOW) and by the identity-mapping check.
+- **Runtime-test mutants** (evidence: runtime-own tests):
+
+  | Mutant | Removed or broken safeguard |
+  |---|---|
+  | M38 | missing parent accepted as a root |
+  | M39 | depth not limited |
+  | M40 | repeated id accepted |
+  | M41 | tenant mismatch in the chain accepted |
+  | M42 | chain re-resolved at a later fence instead of using the start-time binding, or an already bound ancestor id re-bound to new content |
+  | M43 | attenuation not enforced (child tool outside the parent's `allowed_tools`, or child validity beyond the parent's) |
+
+### 7.7 Mutants by evidence type
+
+| Evidence | Mutants | Gate |
+|---|---|---|
+| Corpus witness | M15, M16, M21, M22, M37 | The eval repo's mutation gate (typechecked patches, fixed witness, findings, exit) |
+| Supplement witness | M20 (S5), M26 (S7), M34 (S8), M28 and M29 (S9), M35 and M36 (S10) | The same gate. The findings appear in the supplement section. |
+| Runtime-own tests | M26a, M27a–d, M28a/b, M34a, M35a/b, M30–M33b, M38–M43 | A new gate step applies each patch to the pinned runtime and requires the runtime's own test suite to fail. It is reported separately from the contract mutants and never counted as corpus or supplement evidence. |
+| Adapter | AM11 (tenant revoke expanded to session revokes), AM12, AM13 | The adapter-mutant checks, as for AM1–AM10 |
+
+### 7.8 Acceptance criteria for package 1
+
+- **Profile:** the classifier, from capability rules alone, yields 17 `IN_PROFILE` and 10 `OUT_OF_SCOPE` cases, golden-checked. `derived-authority` stays `OUT_OF_SCOPE` (needs G3).
+- **Baseline run:**
+  - 17/17 PASS, `corpus_coverage` 17/27;
+  - supplement S1–S10 exactly as declared (S4 with its declared incompleteness only);
+  - exit 3 and `contract_acceptance_passed: false`.
+- **K count:** `not_assessed_requirements` rises from 34 to 43 (+4 `tenant-multi-session-in-flight`, +3 `tenant-isolation`, +2 `derived-in-flight-ancestor-revoked`).
+- **Mutants:**
+  - every corpus-witness and supplement-witness mutant in §7.7 is detected with its stated witness and findings;
+  - every runtime-test mutant makes the pinned runtime's own suite fail;
+  - AM11–AM13 are detected;
+  - M1–M11 and AM1–AM10 are still detected with their current witnesses.
+- **Fence matrix:** every cell of §7.3 has its stated evidence. No cell is claimed by a kind of evidence that cannot reach it; in particular, the start guard is claimed by runtime-own tests only.
+- **No emulation:** no tenant or ancestor revoke is expressed by the adapter as several capability or session revokes. AM11 must be detected, for example by a probe-log check that the receipt target is the tenant. The adapter never infers coverage from the parent links it knows.
+- **Determinism:** two runs are byte-identical and equal to the new fixture, and the recorded `evaluate` re-evaluation is identical.
+
+### 7.9 Proposed sequence
+
+Each step needs its own authorization.
+
+1. **Runtime PR 1a, tenant scope** in `acs-guardrail-demo`: everything in §7.5, plus the runtime tests and runtime-test mutants for G1.
+2. **Runtime PR 1b, descendant coverage:** everything in §7.6, plus the runtime tests and runtime-test mutants for G2.
+3. **A runtime release** containing 1a and 1b.
+4. **Eval PR:**
+   - a new `sut.revocation.lock.json` pin (including the new SUT baseline counts and the chain-depth constant) and a new profile version;
    - classifier rules for tenant and descendant scope;
+   - supplement S5–S10;
    - adapter mapping and the versioned runtime-observation schema revision (tenant target, identity tenants and parents);
-   - typechecked mutants M15, M16, M20, M21 and M22 with fixed witnesses;
-   - CI unchanged in shape.
+   - the mutants of §7.7 and the runtime-test mutant gate step;
+   - CI otherwise unchanged in shape.
 
-**Acceptance criteria for package 1:**
+### 7.10 Deferred after package 1
 
-- The classifier, from capability rules alone, yields 17 `IN_PROFILE` cases (the 14 current plus the three above) and 10 `OUT_OF_SCOPE`, golden-checked.
-- The baseline run gives 17/17 PASS and S1–S4 as declared, with exit 3 and `contract_acceptance_passed: false`. `not_assessed_requirements` rises from 34 to 43, the K count of the 17 cases (+4 for `tenant-multi-session-in-flight`, +3 for `tenant-isolation`, +2 for `derived-in-flight-ancestor-revoked`).
-- M15, M16, M20, M21 and M22 are each detected with the stated witness, findings and exit. M1–M11 and AM1–AM10 are still detected with their current witnesses.
-- Two runs are byte-identical and equal to the new fixture. The recorded `evaluate` re-evaluation is identical.
-- No tenant or descendant revoke is expressed as several capability or session revokes by the adapter (an adapter mutant AM11 "tenant revoke expanded to session revokes" must be detected, for example by a probe-log check that the receipt target is the tenant).
-
-**Deferred after package 1.**
-
-- **G3, then G4:** the largest remaining coverage gain (five cases), but a lifecycle redesign that needs its own spec review.
+- **G3, then G4:** the largest remaining coverage gain (five cases, including `derived-authority`), but a lifecycle redesign that needs its own spec review.
 - **G5 and G6:** both require a decision by the runtime owner on the addressable operation surface and the delivery model.
 - **G7 and the K work (§5):** these follow G5(b) and G6.
 
