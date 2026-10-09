@@ -1,13 +1,20 @@
 # Runtime adapter compatibility — revocation track, `acs-guardrail-demo` @ `a682e44`
 
-Status: **specification for review**. This document defines how a pinned runtime adapter would be evaluated against the revocation contract. It changes no adapter, schema, corpus, version number or pin. It also prepares the `revocation-0.4.0` contract changes the adapter needs. The integration work order follows only after this document has been reviewed.
+Status: **specification for review (revision 2)**. This document defines how a pinned runtime adapter would be evaluated against the revocation contract. It changes no adapter, schema, corpus, version number or pin. It also prepares the `revocation-0.4.0` contract changes the adapter needs. The integration work order follows only after this document has been reviewed.
+
+Revision 2 makes five changes after review of revision 1:
+- **Full acceptance (§2.4–2.5).** It now requires every requirement of every case to be assessed, including `finish`/`seal` decisions. A declared profile never reaches exit 0.
+- **No replay construction.** Every start uses a fresh signed request id under the authority's original capability, and `clearSession()` is never used. As a result `permit-single-use` is `OUT_OF_SCOPE`, and the gap between the `issued_permit` family name and what is actually tested is reported (§3.2, §5).
+- **One runtime session per `(tenant, session)` pair.** Authorities in the same pair share that session and keep distinct capability ids (§3.1).
+- **Effect observations do not depend on API responses.** Partial runs keep confirmed findings (§3.6, §4.1, §4.3).
+- **Supplement of runtime-specific cases (§6).** It covers approval revocation, the terminal commit fence on its own, and an unobservable settlement. Its results are reported apart from corpus coverage and the profile pass rate.
 
 | | |
 |---|---|
 | Contract today | `revocation-0.3.0` (`docs/revocation/evaluation-spec.md`), corpus of 27 cases, golden `corpus/revocation/smoke.sha256` |
 | Runtime target | `mikko-lab/acs-guardrail-demo` commit `a682e4479dbccd1cd5f665f5d4879bd3dddb8b47` (merge of `mikko-lab/acs-guardrail-demo#10` into `b48f482`), tree `1346e92e64aff16183df84ea126271644498190a`, `package.json` version `0.4.0` |
 | Runtime capabilities used | A1 authority revocation (`GuardedExecutor.revoke`, `RevocationReceiptV1`, request/approval/start/delivery fences) and A2 cooperative containment (`ExecutionContext`, `ctx.commit`, `ctx.track`, `acknowledgeCancellation`, `getExecution`, `terminals`, `whenTerminal`, `managedState`) |
-| Unchanged | `sut.lock.json` (ACS track, `403d315`), `reports/v0.1/`, the ACS adapter and its accepted baseline, the synthetic revocation self-test |
+| Unchanged | `sut.lock.json` (ACS track, `403d315`), `reports/v0.1/`, the ACS adapter and its accepted baseline, the synthetic revocation self-test, the 27-case corpus |
 
 ## 1. Pinning: `sut.revocation.lock.json`
 
@@ -28,6 +35,7 @@ The revocation track gets its own lock. `sut.lock.json` remains the lock of the 
   "approved_via": "mikko-lab/acs-guardrail-demo#10 merge commit; technical approval of head e3e2746",
   "baseline_at_pin": { "test_suites": 28, "tests": 553, "ci_node_versions": [22, 24], "verify_command": "npm run verify" },
   "profile": "profiles/revocation/acs-guardrail-demo-a682e44.profile.json",
+  "supplement": "profiles/revocation/acs-guardrail-demo-a682e44.supplement.json",
   "follow_upstream": false
 }
 ```
@@ -49,7 +57,7 @@ The loader follows the existing ACS pattern (`src/sut/checkout.ts`, `src/sut/loc
    - the `package.json` version equals `sut_version`.
 5. **Install and build.** Run `npm ci` and the SUT's own TypeScript build in the checkout. The SHA-256 of every compiled SUT module the adapter loads is recorded.
 6. **Verify the baseline (optional).** `npm run verify` must reproduce `baseline_at_pin`. A mismatch is reported and blocks acceptance.
-7. **Load the SUT.** Only these exports are loaded: `GuardedExecutor`, `AuthorityRevokedError`, `ReplayGuard`, `ReplayGuardError`, `ManagedStateStore` types, `CommitRejectedError`, `CancellationError`, the `tools` registry, and the signing, verification and audit classes needed to build signed requests. The adapter never patches, re-exports or extends SUT modules.
+7. **Load the SUT.** Only these exports are loaded: `GuardedExecutor`, `AuthorityRevokedError`, `ReplayGuard`, `ReplayGuardError`, `CommitRejectedError`, `CancellationError`, the `tools` registry, and the signing, verification and audit classes needed to build signed requests and approval grants. The adapter never patches, re-exports or extends SUT modules.
 
 ### 1.3 Binding into the report and manifest
 
@@ -59,13 +67,13 @@ Every runtime-adapter report records a `sut` block with:
 - `build_sha256`: a hash over the loaded compiled modules;
 - `baseline_verified`: true or false.
 
-It also records a `profile` block with `id` and `sha256`, the `harness_commit`, and `observation_source: "pinned_runtime_adapter"`. The manifest's implementation list additionally covers:
+It also records `profile` and `supplement` blocks (`id`, `sha256`), the `harness_commit`, and `observation_source: "pinned_runtime_adapter"`. The manifest's implementation list additionally covers:
 - the lock file;
-- the profile file;
+- the profile and supplement files;
 - the adapter modules;
 - the compiled SUT module hashes.
 
-A report whose `sut.commit` differs from the lock, or whose profile hash differs from the committed profile, is refused by validation.
+A report whose `sut.commit` differs from the lock, or whose profile or supplement hash differs from the committed file, is refused by validation.
 
 ## 2. Capability profile and applicability
 
@@ -78,20 +86,20 @@ A report whose `sut.commit` differs from the lock, or whose profile hash differs
 | `IN_PROFILE` | Every SUT requirement of the case (§2.3) is expressible against the runtime, either directly or through a declared harness construction (§3). |
 | `OUT_OF_SCOPE` | At least one SUT requirement of the case needs a capability the runtime does not offer. The case has **no verdict**, is never PASS, and is never executed against the SUT in 0.4.0. |
 
-**Verdicts** apply only to `IN_PROFILE` cases, and keep the `revocation-0.3.0` meaning:
+**Verdicts** apply only to `IN_PROFILE` cases (and to supplement cases, §6). They keep the `revocation-0.3.0` meaning:
 
 | Verdict | Meaning |
 |---|---|
 | `PASS` | All assessed requirements were observed as the contract requires. |
 | `VIOLATION` | Confirmed decision or effect findings. |
-| `UNASSESSABLE` | The case is in the profile, but required evidence is missing: an UNKNOWN decision, a barrier timeout, an unsealed or drifting observation, or a missing terminal (including `unobservable`, §4.5). |
-| `HARNESS_ERROR` | The harness or adapter broke the contract: schema violation, unattributable effect, causally impossible trace, a decision reported for a control step, an observation supplied for an `OUT_OF_SCOPE` case, or a profile/lock binding mismatch. |
+| `UNASSESSABLE` | The case is in the profile, but required evidence is missing: an UNKNOWN decision, a barrier timeout, an unsealed or drifting observation, an aborted adapter step, or a missing terminal (including `unobservable`, §4.5). |
+| `HARNESS_ERROR` | The harness or adapter broke the contract: schema violation, unattributable effect, causally impossible trace, a decision reported for a control step, an observation supplied for an `OUT_OF_SCOPE` case, a failed case setup, or a profile/lock binding mismatch. |
 
 `OUT_OF_SCOPE` is not `UNASSESSABLE`. The first means the runtime lacks the capability, as declared before the run. The second means a capability the runtime offers left no evidence in this run. A case never moves between the two because of what happened during the run.
 
 ### 2.2 How the profile is fixed
 
-- **Versioned file.** The profile is a committed, versioned file (§6), bound to one lock (`sut_commit`) and one contract version.
+- **Versioned file.** The profile is a committed, versioned file (§7), bound to one lock (`sut_commit`) and one contract version.
 - **Deterministic classifier.** Applicability is computed by a classifier that reads only the corpus, the oracle's expectations and the profile's capability rules, never observations or reports. The committed per-case list in the profile is golden-checked against that output. A disagreement fails the build.
 - **Changes need a new profile.** Any change to the capability rules or the case list is a new profile version and requires review. It cannot be changed by a CLI flag or by an observation file.
 - **Order of operations.** The CLI computes applicability, then all oracle expectations, before it invokes the adapter or reads observations, as `revocation-cli.ts` already does for the oracle.
@@ -105,55 +113,60 @@ Every expected decision and every expected effect of a case is one requirement, 
 - **O (out of scope):** the runtime has no corresponding capability. A single O requirement makes the whole case `OUT_OF_SCOPE`.
 - **K (harness control):** the decision of a `finish` or `seal` step. In this profile these steps are harness commands, not SUT operations (§3.2), so the SUT cannot make a decision for them. K decisions are **not assessed**. They are listed per case in the report, and the adapter must not report them (§4.1).
 
-Treating K as "not assessed" rather than O is a deliberate, uniform reduction declared in the profile. It is the reason a profile result is never a contract result. A stricter reading would treat K as O, which would make all 27 cases `OUT_OF_SCOPE`, because every case has a `finish` and a `seal`. This choice is open review decision **R1** (§10).
+K is a declared reduction of the profile, not a requirement the runtime passed. A K requirement is never counted as assessed, so **any run that skips a K decision cannot be a contract pass** (§2.4). A case that is partially implementable is `OUT_OF_SCOPE` as a whole. Its expressible requirements are listed but not evaluated, so they can never add up to a PASS.
 
-A case that is partially implementable is `OUT_OF_SCOPE` as a whole. Its expressible requirements are listed but not evaluated, so they can never add up to a PASS.
-
-### 2.4 Report content (both modes)
+### 2.4 Report content and acceptance flags
 
 The report always lists **all 27 corpus cases**. Each entry carries:
 - `applicability`;
 - for `OUT_OF_SCOPE` cases, `out_of_scope` as a list of `{ step, requirement, capability_class, reason }`;
-- `not_assessed_control_steps`;
+- `not_assessed_requirements`: the K steps;
+- `tested_property`, plus a `family_caveat` where the family name describes a concept the runtime does not have (§5.1);
 - the existing evidence fields, with `verdict: null` for `OUT_OF_SCOPE`.
 
 Counts:
 
 ```
-corpus_total            27
-in_profile              N
-out_of_scope            27 - N
+corpus_total                 27
+in_profile                   N
+out_of_scope                 27 - N
+not_assessed_requirements    number of K requirements skipped across all executed cases
 PASS / VIOLATION / UNASSESSABLE / HARNESS_ERROR   over in_profile only
-corpus_coverage         N / 27
-profile_pass_rate       PASS / N
-contract_acceptance_passed   PASS == 27        (always false while any case is OUT_OF_SCOPE)
-profile_acceptance_passed    PASS == N, N > 0, technically valid
-has_confirmed_violation      as in 0.3.0
+corpus_coverage              N / 27
+profile_pass_rate            PASS / N
 ```
 
-`summary.md` starts with a fixed statement whenever `out_of_scope > 0`:
+Acceptance flags:
 
-> Declared-profile result for `<profile id>` on `<sut>@<commit>`: N of 27 cases in profile, PASS P of N. **This is not a revocation-0.4.0 contract pass.** 27 − N cases are OUT_OF_SCOPE, and finish/seal decisions are not assessed.
+- `contract_acceptance_passed`: `out_of_scope == 0`, `not_assessed_requirements == 0`, every case has verdict `PASS`, and the run is technically valid. Every requirement of every case must have been assessed and passed. **In declared-profile mode it is always false**, because the profile itself declares K reductions. This holds even if a future profile classified all 27 cases `IN_PROFILE`.
+- `profile_acceptance_passed`: `N > 0`, every `IN_PROFILE` case `PASS`, and technically valid.
+- `has_confirmed_violation`: as in 0.3.0, including findings retained in incomplete or HARNESS_ERROR cases.
+
+Supplement results (§6) are reported in their own section, with their own counts and `supplement_acceptance_passed`. They never enter `corpus_coverage`, `profile_pass_rate` or the acceptance flags above.
+
+`summary.md` starts with a fixed statement in declared-profile mode:
+
+> Declared-profile result for `<profile id>` on `<sut>@<commit>`: N of 27 corpus cases in profile, PASS P of N; R requirements (finish/seal decisions) not assessed. **This is not a revocation-0.4.0 contract pass.** Supplement: S of T runtime-specific checks as expected (reported separately; not part of corpus coverage).
 
 ### 2.5 Full-contract mode vs declared-profile mode
 
-| | Full-contract mode (default) | Declared-profile mode (`--profile FILE` together with `--lock FILE`) |
+| | Full-contract mode (default) | Declared-profile mode (`run-adapter`, or `evaluate --profile FILE --lock FILE`) |
 |---|---|---|
 | Who uses it | Synthetic self-test and any adapter claiming the whole contract | A runtime adapter with an explicitly selected, committed profile |
-| Cases requiring observations | All 27 | Exactly the `IN_PROFILE` cases. An observation for an `OUT_OF_SCOPE` case is an input error. |
-| Control-step decisions | Required (as in 0.3.0) | Must be absent. If present, the case is a HARNESS_ERROR (`decision_at_control_step`). |
-| Acceptance | `contract_acceptance_passed` | `profile_acceptance_passed`. `contract_acceptance_passed` is still reported. |
+| Cases requiring observations | All 27 | Exactly the `IN_PROFILE` cases, plus the supplement cases. An observation for an `OUT_OF_SCOPE` case is an input error. |
+| Control-step decisions | Required and assessed (as in 0.3.0) | Must be absent. If present, the case is a HARNESS_ERROR (`decision_at_control_step`). |
+| Can reach exit 0 | Yes, if every requirement of all 27 cases is assessed and passes | **Never** |
 
-**`evaluate` exit codes (0.4.0)**, applied in the order listed:
+**`evaluate` / `run-adapter` exit codes (0.4.0)**, applied in the order listed:
 
 | Exit | Condition |
 |---|---|
-| 2 | Input, usage, lock or profile binding error; or a technically invalid or incomplete evaluation (any HARNESS_ERROR or UNASSESSABLE case), also when confirmed violations were retained |
-| 1 | Technically valid with at least one VIOLATION |
-| 3 | Declared-profile mode: profile accepted (all `IN_PROFILE` cases PASS) but at least one `OUT_OF_SCOPE` case. **Not a contract pass.** |
-| 0 | All 27 cases assessed and PASS. Possible in full-contract mode, or in a profile with no `OUT_OF_SCOPE` case. |
+| 2 | Input, usage, lock or profile binding error. Also a technically invalid or incomplete corpus evaluation (any HARNESS_ERROR or UNASSESSABLE `IN_PROFILE` case), also when confirmed violations were retained. Also a supplement case whose result differs from its declared expectation without a confirmed violation. |
+| 1 | Technically valid, with at least one confirmed violation in the corpus or in the supplement |
+| 3 | Declared-profile mode: profile accepted and supplement accepted. **Not a contract pass.** |
+| 0 | `contract_acceptance_passed` (full-contract mode only) |
 
-Exit 0 is reserved for full-contract acceptance, so a CI gate written for 0.3.0 cannot mistake a partial profile for a contract pass. `self-test` keeps its 0.3.0 semantics (full-contract mode).
+Exit 0 means the whole contract was assessed and passed, so a CI gate written for 0.3.0 cannot mistake a declared profile for a contract pass. `self-test` keeps its 0.3.0 semantics (full-contract mode).
 
 ## 3. Command and effect correspondence
 
@@ -161,19 +174,22 @@ Exit 0 is reserved for full-contract acceptance, so a CI gate written for 0.3.0 
 
 | Contract identity | Runtime identity | Class |
 |---|---|---|
-| Tenant/session pair `(t, s)` | One runtime `session_id` per pair, unique within the case | C (the runtime has no tenant. Tenants are only a namespace for session ids.) |
-| Authority `x` (initial `issued`) | One signed capability grant with its own `capability_id`, valid for the whole case under a fixed clock, bound to the authority's session and one tool. **One signed tool-call request** `R_x` is bound to that grant. | C |
-| Authority with initial `pending` | none | O |
+| Tenant/session pair `(t, s)` | Exactly **one** runtime `session_id` per pair, unique within the case. All authorities of the pair share that session. | C (the runtime has no tenant. Tenants are only a namespace for session ids.) |
+| Authority `x` (initial `issued`) | One signed capability grant with its own `capability_id`, bound to the runtime session of `x`'s pair and to one tool, valid for the whole case under a fixed clock. Authorities in the same pair have **distinct** `capability_id`s in the **same** session. | C |
+| Authority with initial `pending` | none in the corpus (the supplement uses a pending approval of its own, §6) | O |
 | Authority `parent` link | none (no derived authority in the runtime) | O when a revocation's coverage depends on it (§3.4) |
+| Each `start` attempt of `x` | A **fresh** signed tool-call request with a new `request_id`, under `x`'s original capability grant. The capability provider resolves every request id of `x` to the identical grant object. `clearSession()` is never called, and no request is ever re-submitted. | D |
 | Execution label `e` | The runtime `execution_id` (`exec-<n>`) delivered to the tool double as `ctx.execution_id` when the runtime starts the execution. The adapter records `label → execution_id` only from this runtime-issued value. | D (runtime-assigned) |
 | A label never started by the runtime | No runtime identity | Operations on it other than `finish` are O |
 
+**Why one session per pair.** Session-scope revocation and session isolation are meaningful only if authorities of one contract session really share one runtime session. Then a session cut must reach all of them (`active-session`), and a capability cut must reach only one capability within a shared session (`sibling-isolation`, mutant M7). Giving every authority its own session would turn both into tests of something else.
+
 **Authority–capability binding.** The runtime binds a managed execution to the `capability_id` it was authorised under, and binds each `capability_id` to the content of the first grant seen with it (A1 `capability_id_conflict`). The adapter:
-- gives every authority a distinct `capability_id` and session;
-- returns the identical grant object from the capability provider for every resolution of that authority's request;
+- gives every authority a distinct `capability_id`;
+- resolves every one of its requests to the same grant;
 - uses a fixed clock and grant lifetimes that cover the whole case, so expiry can never masquerade as revocation.
 
-On every observation of an execution (start, each later step, terminal), the adapter checks that the runtime snapshot's `capability_id` and `session_id` equal the authority's original grant. Effects are attributed from the **runtime's** binding (`capability_id → authority`), never from the authority the harness intended. A binding naming no known capability is an unattributable effect (HARNESS_ERROR). A binding naming another known authority is reported under that authority and judged by the evaluator.
+On every observation of an execution (start, each later step, terminal), the adapter records the runtime snapshot's `capability_id` and `session_id`. Effects are attributed from the **runtime's** binding (`capability_id → authority`), never from the authority the harness intended. A binding naming no known capability is an unattributable effect (HARNESS_ERROR for that item; the other items are still evaluated). A binding naming another known authority is reported under that authority and judged by the evaluator. A change of binding between observations of one execution is reported as a diagnostic, and every effect is attributed to the binding observed at its own occurrence.
 
 ### 3.2 Commands
 
@@ -184,15 +200,15 @@ On every observation of an execution (start, each later step, terminal), the ada
 | `revoke` tenant-scope | none (the runtime rejects tenant scope) | none | O |
 | `approve` | none as a separate operation. The runtime's approval (`resolveApproval`) also starts the execution, in the same call. | none | O |
 | `issue` | none. Permits are minted inside the runtime's start path (`ExecutionGate.mintPermit`) and are not observable or invocable separately. **The adapter must not mint, simulate or report a permit itself.** | none | O |
-| `start x/e` (first start of `x`) | `executor.process(R_x)` with a tool that needs no approval | ALLOW: the runtime invoked the tool double with a fresh `ExecutionContext`, **and** `getExecution(ctx.execution_id)` exists. DENY: `process()` rejected with `AuthorityRevokedError` or `ReplayGuardError` before the double was invoked. Any other outcome (`status: "pending"`, another error type, a watchdog timeout) → UNKNOWN, with the runtime error class and message recorded as a diagnostic. | D |
-| `start x/e'` (later start of `x`, fresh label) | Re-submit the **same** signed request `R_x` | as above. The runtime's replay guard (or an earlier revocation) is what denies it. | C: request-level single use; see R2 |
+| `start x/e` | `executor.process(R)` with a fresh signed request `R` under `x`'s capability, for a tool that needs no approval | ALLOW: the runtime invoked the tool double. DENY: `process()` rejected with `AuthorityRevokedError` before the double was invoked. Any other outcome (`status: "pending"`, another error type, a watchdog timeout) → UNKNOWN, with the runtime error class and message recorded as a diagnostic. | D |
+| A start that the contract denies **only** because the authority's permit was consumed (`permit_consumed` without `revoked`) | none. A capability in this runtime is reusable for any number of requests, and the runtime has no per-authority single-use permit. | none | O (`single_use_permit`) |
 | `start y/e` with a label already in use by `x` | none (the runtime assigns execution ids itself) | none | O |
-| `commit x/e` (label started by the runtime) | The harness calls the retained `ctx.commit(key(e), value)` synchronously, at the step | `CommitReceipt` → ALLOW; `CommitRejectedError` → DENY (the runtime reason is recorded as a diagnostic); `TypeError` → HARNESS_ERROR (an adapter defect) | D. Calling the retained context after the tool function has settled is C (detached-work pattern, as in the runtime's C13). |
+| `commit x/e` (label started by the runtime) | The harness calls the retained `ctx.commit(key(e, n), value)` synchronously at the step, where `n` is the commit attempt number | `CommitReceipt` → ALLOW; `CommitRejectedError` → DENY (the runtime reason is recorded as a diagnostic); any other throw → UNKNOWN (diagnostic) | D. Calling the retained context after the tool function has settled is C (detached-work pattern, as in the runtime's C13). |
 | `commit` on a label the runtime never started | none (there is no context) | none | O |
 | `deliver x/e` before `finish x/e` | The harness fulfils the tool double's returned Promise with the per-execution output nonce `out(e)`. That makes the runtime process the result and reach its delivery fence. | Public promise of `process()` fulfils with `exit_status: "success"` carrying `out(e)` → ALLOW. Fulfils with `exit_status: "blocked"` and code `session_revoked` or `capability_revoked` → DENY. Anything else → UNKNOWN. | C (trigger), D (decision) |
 | `deliver x/e` after `finish x/e` | none. The tool function has already settled at `finish`, and the runtime has no later delivery operation. | none | O |
 | `cancel_ack x/e` | The harness calls the retained `ctx.acknowledgeCancellation()` at the step | `true` → ALLOW; `false` → DENY, with the snapshot (`cancellation_requested`, `cancellation_acknowledged`, `state`) recorded as a diagnostic | D within the construction; see §3.5 |
-| `finish x/e` | Harness control: release the execution's registered-work lock, and if the tool function's Promise is still pending, reject it with the harness error `HarnessFinish` | none. **K: no SUT decision is reported.** | K (decision), C (timing of the terminal) |
+| `finish x/e` | Harness control: release the execution's registered-work lock, and if the tool function's Promise is still pending, settle it (reject with the harness error `HarnessFinish`, or resolve it for the supplement's unobservable variant, §6) | none. **K: no SUT decision is reported.** | K (decision), C (timing of the terminal) |
 | `seal` | Harness control: final quiescence check (§4.3) | none. K. | K |
 
 ### 3.3 The registered-work construction (terminal timing)
@@ -218,11 +234,12 @@ Both Promises are plain intrinsic Promises, so the runtime can observe them.
 
 ### 3.4 Revocation coverage and descendants
 
-The contract's authority-scope revocation covers the target and all its descendants. The runtime's capability-scope revocation covers exactly one `capability_id`. An authority-scope revoke is therefore D only when its target has **no descendants** in the case's predeclared authority tree (checked by the classifier). Otherwise it is O. Parent links that no revocation depends on (for example the parent of a revoked leaf in `sibling-isolation`) are not modelled. Such a case then shows isolation between independent capabilities, not tree semantics (R3).
+The contract's authority-scope revocation covers the target and all its descendants. The runtime's capability-scope revocation covers exactly one `capability_id`. An authority-scope revoke is therefore D only when its target has **no descendants** in the case's predeclared authority tree (checked by the classifier). Otherwise it is O. Parent links that no revocation depends on (for example the parent of a revoked leaf in `sibling-isolation`) are not modelled. Such a case then shows isolation between independent capabilities in one shared runtime session, not tree semantics (R3).
 
 ### 3.5 Specifics requested for review
 
-- **`issue`:** O for this runtime. The adapter never mints or reports a permit, and never presents a harness action as a runtime decision. Initial `issued` authorities are expressed only as a valid grant plus an unsent request, which corresponds to the grant states `issued` and `consumed`. No `approved`-but-not-`issued` state exists.
+- **`issue`:** O for this runtime. The adapter never mints or reports a permit, and never presents a harness action as a runtime decision. Initial `issued` authorities are expressed only as a valid capability grant. The runtime has no permit object, no `approved`-but-not-`issued` state, and no consumed state.
+- **Single use:** no construction substitutes for it. Each start is a fresh request under the original capability, so the runtime answers it as it would any new request. A case whose required denial rests on `permit_consumed` alone is `OUT_OF_SCOPE`.
 - **`finish`:** releasing the lock is a harness command with no SUT decision (K). The terminal is a separately observed runtime state: `getExecution().state === "terminal"`, an entry in `terminals()`. It is never inferred from the lock release.
 - **`deliver`:** the fulfilment of the public Promise and the execution terminal are independent runtime events, and their order is not fixed. With the construction, a `deliver` before `finish` fulfils the public Promise while the execution is still `draining`, and the terminal follows at `finish`. When `finish` comes without `deliver`, both events happen in the `finish` step, in either order. The tool double's rejection means the public Promise carries no output nonce, so no `output_delivery` is observed. The adapter binds each event to the step whose barrier it appeared in (§4.2), never to its order relative to the other.
 - **`cancel_ack`:** within the construction, every `cancel_ack` in an `IN_PROFILE` case reaches an execution that is running or draining, after a covering revocation, and before `finish`. There the runtime's `acknowledgeCancellation()` returns `true` exactly when the contract expects ALLOW. **A direct correspondence is not established in general:**
@@ -230,18 +247,20 @@ The contract's authority-scope revocation covers the target and all its descenda
   - The runtime returns `false` when no cancellation was requested. The contract does not require a prior revocation.
 
   Neither situation is reachable in the construction or in the corpus. Both are declared in the profile as unsupported capability classes, `cancel_ack_after_runtime_terminal` and `cancel_ack_without_cancellation_request`. Integration adds one adapter conformance test that pins the runtime's `false` for an already-terminal execution, so the divergence is documented rather than assumed (R4).
-- **Authority–capability binding:** see §3.1. Each authority keeps one original grant for the whole case. Re-submitting `R_x` reuses that grant, and the runtime's execution record must show the same `capability_id` at every observation.
+- **Authority–capability binding:** see §3.1. Each authority keeps one original grant for the whole case. Every request of the authority resolves to that grant, and every observed effect is attributed from the runtime's own binding at its occurrence.
 
 ### 3.6 Effects
+
+Effects are observed from SUT state and independent harness observation. They are **never** derived from, or suppressed by, the API response of the same step. When an API response and an observed effect disagree, both are reported: the decision from the response and the effect from the observation. The evaluator judges them separately (for example, a DENY together with an observed commit is an effect violation). A disagreement is recorded as a diagnostic and is **not** by itself a HARNESS_ERROR.
 
 | Contract effect | Observation | Source | Class |
 |---|---|---|---|
 | `revocation_ack` (target) | The receipt returned by `revoke()`, `status` `revoked` or `already_revoked`. Its `target` is mapped back (`capability_id → authority`, `session_id → (t, s)`). A receipt target that maps back to a different contract target is reported as such. | `sut_api` | D |
 | `approval_granted`, `permit_issued` | none | none | O |
-| `execution_started` | Tool double invoked with a fresh context (`harness_observation`) **and** `getExecution(id)` exists with the authority's binding (`sut_state`) | both | D |
-| `tool_commit` | `managedState.version` increments and `managedState.get(key(e))` holds the value (`sut_state`). Cross-checked against the returned `CommitReceipt.execution_id` (`sut_api`). A state change without a receipt, or a receipt without a state change, is a HARNESS_ERROR (inconsistent evidence). | `sut_state` primary | D |
+| `execution_started` | The tool double was invoked with a fresh context (`harness_observation`), whatever `process()` later returned. Attribution comes from the runtime record `getExecution(ctx.execution_id)` (`sut_state`). If that record is absent, attribution comes from the request marker passed through the tool arguments, with a diagnostic. | `harness_observation` + `sut_state` | D |
+| `tool_commit` | A change of `managedState` (version increment, `get(key(e, n))` holds the value), observed in the step's barrier (`sut_state`). It is reported whether the call returned a receipt, threw `CommitRejectedError`, or threw anything else. Attribution comes from the runtime binding of the context whose call was in progress. A state change during a step with no harness commit call is attributed by its key and flagged as a diagnostic. | `sut_state` | D |
 | `output_delivery` | Public `process()` promise fulfilled with `exit_status: "success"` and `out(e)` | `sut_api` | C (trigger), D (effect) |
-| `cancellation_ack` | `acknowledgeCancellation()` returned `true` **and** the snapshot's `cancellation_acknowledged` flipped from false to true within the step | `sut_api` and `sut_state` | D |
+| `cancellation_ack` | The snapshot's `cancellation_acknowledged` flipped from false to true within the step (`sut_state`). The method's return value is the decision, not the effect. | `sut_state` | D |
 | `execution_terminal` | `getExecution(id).state === "terminal"` with a terminal record, and an entry in `terminals()`. The occurrence step is the step in whose barrier the state first appeared. `whenTerminal()` is used only as a bounded wake-up, never as the evidence itself. | `sut_state` | D (state), C (timing) |
 
 The audit stream is the runtime's own report. It is kept in the bundle as diagnostics and is **not** evidence for any decision or effect, matching the runtime's own A2 test discipline.
@@ -250,10 +269,11 @@ The audit stream is the runtime's own report. It is kept in the bundle as diagno
 
 ### 4.1 Provenance and no back-filling
 
-- **Expectations** come only from the oracle (`expected(c)`), computed before the adapter runs.
+- **Expectations** come only from the oracle (`expected(c)`), computed before the adapter runs. The supplement's declared expectations are covered in §6.
 - **Observed decisions and effects** come only from the SUT's API return values or exceptions (`sut_api`), the SUT's inspectable state (`sut_state`), or independent harness observation of the tool doubles and public Promises (`harness_observation`). Each observed item carries its provenance.
-- **No back-filling.** The adapter never derives a decision or effect from the oracle or the corpus design. It never fills a missing observation, and never reports a decision for a K step. Anything it cannot observe is UNKNOWN or absent and becomes incomplete evidence.
-- **Runtime reasons are diagnostics only.** Examples are `AuthorityRevokedError.reason`, `CommitRejectedError.reason`, the withheld `code` and the `ReplayGuardError` class. They are recorded as `sut_reason` diagnostics and never feed the verdict. The contract compares decisions, not reasons, so overdetermined oracle denials (for example `revoked + already_committed`) are matched by any runtime DENY.
+- **No back-filling.** The adapter never derives a decision or effect from the oracle, the corpus design or the supplement expectations. It never fills a missing observation, and never reports a decision for a K step. Anything it cannot observe is UNKNOWN or absent and becomes incomplete evidence.
+- **Decisions and effects are independent.** A missing or contradictory API response never removes an observed effect, and an observed effect never changes a reported decision (§3.6).
+- **Runtime reasons are diagnostics only.** Examples are `AuthorityRevokedError.stage` and `.reason`, `CommitRejectedError.reason`, and the withheld `code`. They are recorded as `sut_reason` diagnostics and never feed the verdict. The contract compares decisions, not reasons, so overdetermined oracle denials (for example `revoked + already_committed`) are matched by any runtime DENY.
 
 ### 4.2 Step binding and explicit barriers
 
@@ -262,9 +282,10 @@ Steps run strictly in order. Each step has an action and an explicit completion 
 | Op | Barrier (step complete when) |
 |---|---|
 | `revoke`, `commit`, `cancel_ack` | The synchronous call has returned or thrown. Cancellation listeners run synchronously inside `revoke()`. |
-| `start` | The double's entry latch has fired, **or** the public `process()` Promise has settled (whichever event comes first) |
-| `deliver` | The public `process()` Promise has settled |
-| `finish` | The execution's terminal is present in `getExecution()`, **and** the public Promise has settled if it was still pending |
+| `start` | The double's entry latch has fired, **or** the public `process()` Promise has settled (whichever event comes first). For a declared double variant that does not hold the tool function's Promise for a later step (`returns_unobservable_pending_promise`, S4), the barrier also requires the public Promise to have settled, because the runtime fails such a call within the step. |
+| `approve` (supplement only) | Same rule as `start`, applied to the `resolveApproval()` Promise |
+| `deliver` | The public Promise has settled |
+| `finish` | The execution's terminal is present in `getExecution()`, **or** the execution is in the runtime's own stable state `unobservable` (in which the runtime never records a terminal, §4.5). In either case the public Promise must also have settled if it was still pending. |
 | `seal` | One macrotask turn (`setImmediate`) has completed after the last step, followed by the drift check |
 
 **Drift check.** The adapter snapshots the observable state when each barrier completes:
@@ -278,9 +299,18 @@ It snapshots again immediately before the next action, and once more at `seal`. 
 
 **Watchdog.** Each asynchronous barrier has a fixed wall-clock bound, proposed as 2000 ms and declared in the profile. When it expires, the step's decision is UNKNOWN and the observation is `complete: false`. A timeout can only lower a case to UNASSESSABLE. It never produces ALLOW, DENY or an effect, so it cannot change a verdict to PASS or VIOLATION.
 
-### 4.3 Seal and completeness
+### 4.3 Seal, completeness and partial runs
 
-`complete: true` only if every step's barrier completed, no drift was detected, and the seal quiescence check found no change. After the observation is frozen, the adapter releases any remaining harness locks for cleanup. Effects of cleanup are not observed.
+`complete: true` only if every step's barrier completed, no drift was detected, and the seal quiescence check found no change.
+
+**Partial runs keep their evidence.** If a barrier times out, a step's action throws in the adapter, or the adapter aborts a case for any reason:
+- the adapter still emits every decision and effect already observed, with `complete: false`;
+- it records the failing step and the error as diagnostics;
+- any remaining steps are not run.
+
+The evaluator then retains every confirmed finding beside the incompleteness, as 0.3.0 already does for findings beside errors. `confirmed_violation` and `has_confirmed_violation` stay true even though the case is UNASSESSABLE (or HARNESS_ERROR). An adapter failure never discards an observation.
+
+After the observation is frozen, the adapter releases any remaining harness locks for cleanup. Effects of cleanup are not observed.
 
 ### 4.4 Fresh state per case
 
@@ -289,16 +319,17 @@ Each case gets:
 - a fixed clock and a fresh capability provider;
 - per-case tool doubles installed in the SUT's `tools` registry, restored afterwards; `executionCounters` reset.
 
-The adapter's behaviour must not depend on a case's `id` or `family` (as in 0.3.0). It receives only `authorities` and `steps` together with the identity mapping.
+The adapter's behaviour must not depend on a case's `id` or `family` (as in 0.3.0). It receives only `authorities`, `steps`, the identity mapping and, for supplement cases, the declared setup and tool-double variant (§6).
 
 ### 4.5 `unobservable` and `whenTerminal()`
 
-A managed execution in state `unobservable` (`mikko-lab/acs-guardrail-demo#10`) is an `IN_PROFILE` execution whose terminal evidence is missing. It is UNASSESSABLE, never OUT_OF_SCOPE, and never a `failed` terminal. The adapter:
-- does not await `whenTerminal()` without a bound (the `finish` barrier uses the watchdog);
+A managed execution in state `unobservable` (`mikko-lab/acs-guardrail-demo#10`) is an applicable execution whose terminal evidence is missing. It is UNASSESSABLE, never OUT_OF_SCOPE, and never a `failed` terminal. The adapter:
+- does not await `whenTerminal()` without a bound;
+- treats the runtime's `unobservable` state as the end of the `finish` barrier (§4.2), so the run is not prolonged into a watchdog timeout;
 - records `state: "unobservable"` as a diagnostic;
 - reports no `execution_terminal`.
 
-With the construction, the harness's own Promises are always observable, so this state can only be reached through a SUT defect or a mutant.
+The corpus construction's Promises are always observable, so this state is reached only in supplement case S4 (§6) or through a SUT defect or mutant.
 
 ## 5. Case matrix (27 cases)
 
@@ -307,66 +338,104 @@ Step numbers refer to the committed corpus. Abbreviations:
 - **D / C / O / K** as defined in §2.3;
 - **K-steps** are the `finish` and `seal` decisions that are not assessed. `seal` is the last step of every case and is always K.
 
-**Summary:** 15 `IN_PROFILE`, 12 `OUT_OF_SCOPE`. Corpus coverage is 15/27.
+**Summary:** 14 `IN_PROFILE`, 13 `OUT_OF_SCOPE`. Corpus coverage is 14/27.
 
 | # | Case | Family | Applicability | D requirements | C requirements | O requirements (reason) | K-steps (besides seal) |
 |---|---|---|---|---|---|---|---|
 | 1 | `pending-approval` | pending_approval | OUT_OF_SCOPE | ack@0 | — | initial `pending`; `approve`@1, `issue`@2 (no separate approval/permit operation) | finish@4 |
 | 2 | `issue-after-cut` | pending_approval | OUT_OF_SCOPE | ack@1 | — | `approve`@0, `issue`@2 | finish@4 |
-| 3 | `issued-permit` | issued_permit | IN_PROFILE | ack@0; start DENY@1 | start DENY@2 (re-submitted `R_a`) | — | finish@3, finish@4 (DENY unbound not assessed) |
+| 3 | `issued-permit` | issued_permit | IN_PROFILE (caveat) | ack@0; start DENY@1; start DENY@2 (fresh request id, same capability; denied by revocation) | — | — | finish@3, finish@4 (DENY unbound not assessed) |
 | 4 | `fresh-id-retry-unused-permit` | issued_permit | OUT_OF_SCOPE | ack@3 | — | initial `pending`; start DENY `permit_not_issued`@0 (no not-yet-issued state); `approve`@1, `issue`@2 | finish@5, finish@6 |
-| 5 | `cut-before-start` | issued_permit | IN_PROFILE | ack@0; start DENY@1 | — | — | finish@2 |
-| 6 | `duplicate-revocation` | issued_permit | IN_PROFILE | ack@0; ack@1 (`already_revoked`); start DENY@2 | — | — | finish@3 |
-| 7 | `active-session` | active_session | IN_PROFILE | session ack@0; start a DENY@1; start b DENY@2 | — | — | finish@3, finish@4 |
+| 5 | `cut-before-start` | issued_permit | IN_PROFILE (caveat) | ack@0; start DENY@1 | — | — | finish@2 |
+| 6 | `duplicate-revocation` | issued_permit | IN_PROFILE (caveat) | ack@0; ack@1 (`already_revoked`); start DENY@2 | — | — | finish@3 |
+| 7 | `active-session` | active_session | IN_PROFILE | session ack@0; start a DENY@1; start b DENY@2 (a and b share one runtime session, distinct capabilities) | — | — | finish@3, finish@4 |
 | 8 | `session-in-flight-commit-fence` | active_session | IN_PROFILE | start a@0, start o@1 (+started); session ack@2; commit a DENY@3; commit o ALLOW@4 (+commit) | deliver o ALLOW@5 (+delivery); terminal a ∈[2..8] at finish@6; terminal o at finish@7 | — | finish@6, finish@7 |
 | 9 | `session-delivery-fence-after-commit` | active_session | IN_PROFILE | start@0; commit@1; session ack@2 | deliver DENY@3 (withheld); terminal at finish@4 | — | finish@4 |
 | 10 | `tenant-multi-session-in-flight` | active_session | OUT_OF_SCOPE | starts@0–2; commit c@6 | deliver c@7 | tenant-scope revoke@3 and its fences@4–5 | finish@8–10 |
 | 11 | `start-before-cut` | in_flight_before_commit | IN_PROFILE | start@0; ack@1; commit DENY@2 | terminal at finish@3 (tool Promise rejected by harness, no output) | — | finish@3 |
 | 12 | `in-flight-before-commit` | in_flight_before_commit | IN_PROFILE | start@0; ack@1; cancel_ack ALLOW@2 (+cancellation_ack); commit DENY@3 | deliver DENY@4 (withheld; oracle reasons `revoked+not_committed`, runtime explains by revocation); terminal at finish@5 | — | finish@5 |
 | 13 | `late-commit-after-terminal` | in_flight_before_commit | OUT_OF_SCOPE | start@0; ack@1 | commit DENY@3 (retained context after terminal) | `deliver`@4 after `finish` (no runtime delivery operation after the tool function settled) | finish@2 |
-| 14 | `retry-after-revocation` | in_flight_before_commit | OUT_OF_SCOPE | start@0; ack@1 | start DENY@3 (re-submitted `R_a`) | `commit a/retry`@4 on an execution the runtime never started | finish@2, finish@5 |
+| 14 | `retry-after-revocation` | in_flight_before_commit | OUT_OF_SCOPE | start@0; ack@1; start DENY@3 (fresh request; revoked) | — | `commit a/retry`@4 on an execution the runtime never started | finish@2, finish@5 |
 | 15 | `in-flight-after-commit` | in_flight_after_commit | IN_PROFILE | start@0; commit@1; ack@2; cancel_ack@3; commit DENY@5 (oracle `revoked+already_committed`; the runtime has no once-only commit rule, so revocation explains it) | deliver DENY@4 (withheld); terminal at finish@6 | — | finish@6 |
 | 16 | `commit-before-cut` | in_flight_after_commit | IN_PROFILE | start@0; commit@1; ack@3 (cancellation requested while draining) | deliver ALLOW@2 (+delivery, execution stays draining); terminal ∈[3..5] at finish@4 | — | finish@4 |
 | 17 | `commit-shift-across-cut` | in_flight_after_commit | IN_PROFILE | start@0; commit@1; ack@2; cancel_ack@3 | terminal at finish@4 | — | finish@4 |
 | 18 | `cancel-is-not-rollback` | in_flight_after_commit | OUT_OF_SCOPE | start@0; commit@1; ack@2; cancel_ack@3 | — | `deliver`@5 after `finish` | finish@4 |
 | 19 | `derived-authority` | descendant_scope | OUT_OF_SCOPE | — | — | revoke of `a` must cover descendants `child`, `pending-child`; `approve`@2, `issue`@3 | finish@4 |
 | 20 | `derived-in-flight-ancestor-revoked` | descendant_scope | OUT_OF_SCOPE | start child@0 | — | revoke of `a`@1 must fence `child`'s commit@2 (descendant coverage) | finish@3 |
-| 21 | `sibling-isolation` | scope_isolation | IN_PROFILE (R3) | ack@0 (target `child` has no descendants); start child DENY@1; start sibling@2; commit sibling@3; start a@7 | deliver sibling@4; terminal sibling at finish@5; terminal a at finish@8 (no output) | — (parent links not modelled) | finish@5, finish@6, finish@8 |
+| 21 | `sibling-isolation` | scope_isolation | IN_PROFILE (R3) | ack@0 (target `child` has no descendants); start child DENY@1; start sibling@2; commit sibling@3; start a@7 (all three in one runtime session) | deliver sibling@4; terminal sibling at finish@5; terminal a at finish@8 (no output) | — (parent links not modelled) | finish@5, finish@6, finish@8 |
 | 22 | `session-isolation` | scope_isolation | IN_PROFILE | session ack@0; start a DENY@1; start other@2; commit other@3 | deliver other@4; terminal other at finish@5 | — | finish@5, finish@6 |
 | 23 | `tenant-isolation` | scope_isolation | OUT_OF_SCOPE | starts/commit of `other`@2–3 | deliver other@4 | tenant-scope revoke@0 and its fence@1 | finish@5, finish@6 |
 | 24 | `execution-id-reuse` | identity | OUT_OF_SCOPE | start a@0; commit a@4 | — | `start b/e1`@1 (client-chosen execution id); `commit b/e1`@2 on an execution the runtime never started | finish@3, finish@5 |
-| 25 | `permit-single-use` | control | IN_PROFILE (R2) | start@0; commit@2 | start DENY@1 (re-submitted `R_a`, replay guard); deliver@3; terminal at finish@4 | — | finish@4, finish@5 |
+| 25 | `permit-single-use` | control | OUT_OF_SCOPE | start@0; commit@2 | deliver@3 | start DENY `permit_consumed`@1 without revocation: a fresh request under the same capability is admitted by this runtime, which has no single-use permit (`single_use_permit`) | finish@4, finish@5 |
 | 26 | `approval-before-cut` | control | OUT_OF_SCOPE | ack@6 | — | initial `pending`; `approve`@0, `issue`@1 | finish@5 |
 | 27 | `deferred-terminal-before-seal` | observation_timing | IN_PROFILE | start@0; ack@1; cancel_ack@2 | terminal ∈[1..5] at finish@3; commit DENY@4 (retained context; runtime reason `execution_terminal`, oracle `revoked+finish_requested`) | — | finish@3 |
 
 Requirements listed in the D and C columns of an `OUT_OF_SCOPE` row are informational only. They are not run and not evaluated in 0.4.0 (R5).
 
-**Coverage of the design claims within the profile:**
-- **Sole-revocation fences:** start (authority, session), commit (authority, session) and delivery (authority, session).
-- **Not covered:** approve, issue, the descendant and tenant fences, and the identity fences.
+### 5.1 Family names vs tested properties
 
-The report lists these uncovered fences explicitly, next to the coverage ratio.
+`family` is the scenario's design intent in the contract. For this runtime some family names describe concepts the runtime does not have. Each `IN_PROFILE` case therefore carries a `tested_property` in the profile, and a `family_caveat` where the two differ. Both appear in the report next to the family.
 
-## 6. Proposed capability profile
+| Case | Family | Tested property on this runtime | Family caveat |
+|---|---|---|---|
+| `issued-permit` | issued_permit | A revoked capability denies two fresh requests under it before any execution | The runtime has no permit object. Neither "unused permit" nor "fresh-ID retry on an unused permit" is tested; both denials are explained by revocation of the capability. |
+| `cut-before-start` | issued_permit | A capability revoked before its first request is denied at the start | No permit; as above |
+| `duplicate-revocation` | issued_permit | A repeated capability revocation is acknowledged (`already_revoked`) and still denies a request | No permit; as above |
+| `sibling-isolation` | scope_isolation | A capability cut leaves two other capabilities in the same runtime session usable | Parent/child links are not modelled; no tree semantics (R3) |
+| all other `IN_PROFILE` cases | — | As the family names it, restricted to capability and session scopes | — |
+
+No case in the `issued_permit` family tests a permit property on this runtime. The report shows the `issued_permit` family as covered only in the sense of these tested properties.
+
+### 5.2 Coverage of the design claims within the profile
+
+- **Sole-revocation fences covered:** start (authority, session), commit (authority, session) and delivery (authority, session).
+- **Not covered by the corpus profile:** approve, issue, the descendant and tenant fences, single use and the identity fences.
+- **Added by the supplement (§6), reported separately:** the approval fence on a pending runtime approval, the terminal commit fence without revocation, and an unobservable settlement.
+
+## 6. Runtime-specific supplement
+
+The supplement is a small, separate set of cases for capabilities that this runtime does have, but that the 27-case corpus cannot express or only reaches in an overdetermined way. It does **not** change the corpus, its golden SHA or the contract oracle.
+
+**File and binding.** It lives in `profiles/revocation/acs-guardrail-demo-a682e44.supplement.json`, is versioned and golden-hashed, and is bound to the same lock. Each case is written in the contract `Case` format, plus two declared fields:
+- `setup`: an action the adapter performs before step 0 (for example, submit an approval-requiring request and require `status: "pending"`). A setup that does not produce its declared result is a HARNESS_ERROR (`setup_failed`).
+- `double`: the tool-double variant. The default is the §3.3 construction; `returns_unobservable_pending_promise` is the S4 variant below.
+
+**Expectations.** Where the contract model fits, the expected decisions and effects are those of the unchanged contract oracle, golden-checked in the supplement file. Where this runtime's semantics differ from the contract model by design, the supplement declares a **runtime-specific expectation**, marked as such and reviewed with the file. Either way, expectations are fixed before the run and never derived from observations.
+
+**Expected verdicts.** Each supplement case declares the verdict expected at the pin, together with the exact expected findings, incompleteness and errors. `supplement_acceptance_passed` is true only when every supplement case matches its declaration exactly. The section is reported apart from `corpus_coverage`, `profile_pass_rate`, `profile_acceptance_passed` and `contract_acceptance_passed`.
+
+| ID | Case | Authorities / setup / double | Steps | Expectation source | Expected at pin |
+|---|---|---|---|---|---|
+| S1 | `sup-pending-approval-revoked` | `a` initial `pending`, approval-requiring tool. Setup: `process(R_a)` must return `status: "pending"`. | 0 revoke `a` (capability); 1 approve `a` (`resolveApproval` with a valid signed grant for `R_a`; the label of the execution it would start is `e1`); 2 finish `a/e1`; 3 seal | Contract oracle: ack@0; approve DENY@1; no other effect | **PASS**: approve DENY (`AuthorityRevokedError`), tool double never invoked, no execution record, no terminal |
+| S2 | `sup-pending-approval-control` | as S1 | 0 approve `a`; 1 finish `a/e1`; 2 seal | **Runtime-specific**: approve ALLOW with `execution_started a/e1`@0, because approval and start are one runtime operation; terminal ∈[1..2]. The contract would expect `approval_granted` instead. | **PASS**: non-vacuity control for S1, showing that the approval path with this setup starts the tool |
+| S3 | `sup-commit-after-terminal-no-revocation` | `a` initial `issued`; default double | 0 start `a/e1`; 1 commit `a/e1` (key 1); 2 finish `a/e1`; 3 commit `a/e1` (key 2, retained context); 4 seal | Contract oracle: commit ALLOW@1; commit DENY@3 (oracle reasons `finish_requested+already_committed`; this runtime has no once-only rule, so its DENY is explained by the terminal alone); terminal ∈[2..4] | **PASS**: commit@1 changes the state (non-vacuity), commit@3 is denied with runtime reason `execution_terminal`, and the state is unchanged. No revocation masks the terminal fence. |
+| S4 | `sup-unobservable-pending-settlement` | `a` initial `issued`; double `returns_unobservable_pending_promise`: the tool returns a pending native Promise with a non-configurable `constructor` accessor and registers no work | 0 start `a/e1`; 1 finish `a/e1` (harness resolves the hidden Promise); 2 seal | Contract oracle: start ALLOW + `execution_started`@0; terminal ∈[1..2] | **UNASSESSABLE**, exactly: incomplete = missing `execution_terminal a/e1`; no findings, no errors. The runtime fails the call, holds the execution in `unobservable`, and never records a terminal, including after the Promise settles at step 1. |
+
+`approve` uses the same decision mapping as `start`: ALLOW when the runtime invoked the tool double; DENY when `resolveApproval()` rejected with `AuthorityRevokedError` before any invocation; UNKNOWN otherwise.
+
+S4 is a control run whose correct outcome is missing terminal evidence. **A PASS for S4 would itself be a failure of the supplement**: it would mean a terminal was reported for an unobserved settlement. Under mutant M11 the runtime records a `failed` terminal during step 0, before the terminal window opens at `finish`. The evaluator then reports `unexpected_execution_terminal`@0, so S4 becomes a confirmed VIOLATION. That is detected both as a mismatch with the declared UNASSESSABLE and as `has_confirmed_violation`.
+
+## 7. Proposed capability profile
 
 The profile would be committed in the integration phase as `profiles/revocation/acs-guardrail-demo-a682e44.profile.json`, with a golden SHA-256. Sketch:
 
 ```json
 {
-  "profile": "acs-guardrail-demo-a682e44/revocation-0.4.0/1",
+  "profile": "acs-guardrail-demo-a682e44/revocation-0.4.0/2",
   "contract": "revocation-0.4.0",
   "corpus_sha256": "<current golden corpus/revocation/smoke.sha256>",
   "sut_lock": { "file": "sut.revocation.lock.json", "sut_commit": "a682e4479dbccd1cd5f665f5d4879bd3dddb8b47" },
   "control_ops": ["finish", "seal"],
+  "identity": { "runtime_session": "one per (tenant, session) pair", "capability": "one per authority", "request": "fresh per start attempt", "clear_session": "never" },
   "supported": {
     "revoke": { "scopes": ["authority_without_descendants", "session"] },
-    "start": { "first_start": "process(R_x)", "later_start_same_authority": "resubmit R_x" },
+    "start": { "each_attempt": "fresh signed request under the authority's original capability" },
     "commit": { "on": "execution started by the runtime", "after_terminal": "retained context" },
     "deliver": { "before_finish": true },
     "cancel_ack": { "after_covering_revocation_before_finish": true }
   },
   "unsupported_classes": [
-    "initial_pending_authority", "approve", "issue",
+    "initial_pending_authority", "approve", "issue", "single_use_permit",
     "tenant_scope_revocation", "descendant_coverage",
     "client_chosen_execution_id", "operation_on_execution_unknown_to_runtime",
     "deliver_after_finish",
@@ -375,92 +444,122 @@ The profile would be committed in the integration phase as `profiles/revocation/
   ],
   "barrier_watchdog_ms": 2000,
   "cases": [
-    { "id": "issued-permit", "applicability": "IN_PROFILE", "not_assessed_control_steps": [3, 4, 5] },
-    { "id": "pending-approval", "applicability": "OUT_OF_SCOPE", "out_of_scope": [
-      { "step": 1, "requirement": "decision", "capability_class": "approve", "reason": "approval and start are one runtime operation" }
+    { "id": "issued-permit", "applicability": "IN_PROFILE", "not_assessed_requirements": [3, 4, 5],
+      "tested_property": "a revoked capability denies two fresh requests under it",
+      "family_caveat": "no permit object; neither unused-permit nor fresh-ID-retry semantics are tested" },
+    { "id": "permit-single-use", "applicability": "OUT_OF_SCOPE", "out_of_scope": [
+      { "step": 1, "requirement": "decision", "capability_class": "single_use_permit", "reason": "a fresh request under the same capability is admitted; the runtime has no single-use permit" }
     ] }
   ]
 }
 ```
 
-The `cases` list is truncated here. The full list has all 27 entries matching §5 and is golden-checked against the classifier. The last two unsupported classes are reached by no corpus case. They are declared so that a future corpus case with a sole `already_committed` or `not_committed` denial is classified `OUT_OF_SCOPE` instead of producing a false VIOLATION.
+The `cases` list is truncated here. The full list has all 27 entries matching §5 and §5.1 and is golden-checked against the classifier. The last two unsupported classes are reached by no corpus case. They are declared so that a future case with a sole `already_committed` or `not_committed` denial is classified `OUT_OF_SCOPE` instead of producing a false VIOLATION.
 
-## 7. Changes proposed for `revocation-0.4.0`
+## 8. Changes proposed for `revocation-0.4.0`
 
-The corpus and its golden SHA are unchanged. Full-contract semantics are unchanged from 0.3.0, apart from the version string.
+The corpus and its golden SHA are unchanged. Full-contract semantics are unchanged from 0.3.0, apart from the version string, the new flags and exit code 3.
 
 | Area | Change |
 |---|---|
-| Model (`src/spec/revocation/model.ts`) | Add the `Applicability` type (`IN_PROFILE`, `OUT_OF_SCOPE`), a `Profile` type, `control_ops`, and the requirement classes `D`/`C`/`O`/`K` |
+| Model (`src/spec/revocation/model.ts`) | Add the `Applicability` type (`IN_PROFILE`, `OUT_OF_SCOPE`), `Profile` and `Supplement` types, `control_ops`, and the requirement classes `D`/`C`/`O`/`K` |
 | Classifier (new) | A pure function `(corpus, oracle, profile rules) → applicability`, with a golden test against the committed profile. It never imports observation or report code (extends `check:oracle-boundary`). |
-| Observation schema | `observation_source: "pinned_runtime_adapter"`. Per-item `provenance` (`sut_api` / `sut_state` / `harness_observation`), required for that source. Optional `diagnostics` (`sut_reason`, drift items, unobservable state) that never feed the verdict. Decisions at control steps must be absent in declared-profile mode. |
-| Evaluator | Profile-aware. Skips K decisions; a supplied K decision → HARNESS_ERROR `decision_at_control_step`. An observation for an `OUT_OF_SCOPE` case → input error. `OUT_OF_SCOPE` evidence entries carry `verdict: null`. |
-| Report schema and summary | `sut` and `profile` blocks; `applicability`, `out_of_scope` and `not_assessed_control_steps` per entry; the split counts of §2.4; `contract_acceptance_passed` and `profile_acceptance_passed`; the fixed non-contract statement; a list of uncovered design fences |
-| CLI | `evaluate --profile FILE --lock FILE` (declared-profile mode) and a new `run-adapter` command that drives the pinned runtime. The exit codes of §2.5, including 3. The self-test stays in full-contract mode. |
-| Manifest | Adds the lock, profile, adapter modules and compiled SUT module hashes |
-| Limitations | Replace "no pinned ACS or production runtime integration" with a statement of the declared profile and its exclusions. Keep "not a production latency claim". State that terminal timing in the profile is harness-chosen, and that the audit stream is not evidence. |
+| Observation schema | `observation_source: "pinned_runtime_adapter"`. Per-item `provenance` (`sut_api` / `sut_state` / `harness_observation`), required for that source. Optional `diagnostics` (`sut_reason`, API/state disagreements, drift items, aborted step, unobservable state) that never feed the verdict. Decisions at control steps must be absent in declared-profile mode. |
+| Evaluator | Profile-aware. Skips K decisions and counts them as `not_assessed_requirements`; a supplied K decision → HARNESS_ERROR `decision_at_control_step`. An observation for an `OUT_OF_SCOPE` case → input error. `OUT_OF_SCOPE` evidence entries carry `verdict: null`. Confirmed findings are retained in incomplete or partial observations (already true in 0.3.0; covered by new tests for adapter partial runs). |
+| Supplement evaluation | The same evaluator, with the supplement's golden expectations; comparison against each case's declared expected verdict, findings, incompleteness and errors |
+| Report schema and summary | `sut`, `profile` and `supplement` blocks; `applicability`, `out_of_scope`, `not_assessed_requirements`, `tested_property` and `family_caveat` per entry; the split counts of §2.4; `contract_acceptance_passed` (every requirement assessed and passed), `profile_acceptance_passed` and `supplement_acceptance_passed`; a separate supplement section; the fixed non-contract statement; a list of uncovered design fences |
+| CLI | `run-adapter --lock FILE --profile FILE --out DIR` (drives the pinned runtime over the `IN_PROFILE` cases and the supplement); `evaluate --profile FILE --lock FILE` for imported observations; the exit codes of §2.5. The self-test stays in full-contract mode. |
+| Manifest | Adds the lock, profile, supplement, adapter modules and compiled SUT module hashes |
+| Limitations | Replace "no pinned ACS or production runtime integration" with a statement of the declared profile, its exclusions and its not-assessed control decisions. Keep "not a production latency claim". State that terminal timing in the profile is harness-chosen, that the audit stream is not evidence, and that supplement expectations marked runtime-specific are not contract expectations. |
 
-## 8. Integration acceptance criteria
+## 9. Integration acceptance criteria
 
-1. **Fail-closed pinning.** Pin verification fails closed on a wrong commit, a wrong tree, a dirty worktree, a mismatched `package-lock.json` hash, or a profile/lock mismatch. A test exists for each.
+1. **Fail-closed pinning.** Pin verification fails closed on a wrong commit, a wrong tree, a dirty worktree, a mismatched `package-lock.json` hash, or a profile/supplement/lock mismatch. A test exists for each.
 2. **ACS track untouched.** `sut.lock.json`, `reports/v0.1/` and the ACS adapter are byte-unchanged, and the existing ACS and automotive tests pass unchanged.
 3. **Self-test unchanged.** The synthetic revocation self-test passes in full-contract mode, the corpus golden SHA is unchanged, and all existing revocation tests and regressions pass (migrated to 0.4.0 only where the version string requires it).
 4. **Classifier and profile.**
-   - The classifier output equals the committed profile: 15 `IN_PROFILE` and 12 `OUT_OF_SCOPE` as in §5, unless review decisions R1–R3 change it.
+   - The classifier output equals the committed profile: 14 `IN_PROFILE` and 13 `OUT_OF_SCOPE` as in §5, unless review decisions R1, R3 or R4 change it.
+   - `tested_property` and `family_caveat` are present for every `IN_PROFILE` case of §5.1.
    - A test proves the classifier cannot read observations: it is called before the adapter, and nothing is passed from it.
-5. **Baseline at `a682e44`, declared-profile mode.**
-   - All 15 `IN_PROFILE` cases PASS, and the run is technically valid.
+5. **Acceptance arithmetic.**
+   - In declared-profile mode, a run in which every `IN_PROFILE` case and every supplement case match gives `contract_acceptance_passed: false` and exit 3, never 0.
+   - A synthetic test with a profile that marks all 27 cases `IN_PROFILE` but still skips K decisions also gives `contract_acceptance_passed: false` and exit 3.
+   - Full-contract self-test acceptance still gives exit 0.
+6. **Baseline at `a682e44`, declared-profile mode.**
+   - All 14 `IN_PROFILE` cases PASS, and the run is technically valid.
+   - The supplement matches its declarations: S1–S3 PASS, and S4 UNASSESSABLE with exactly the missing terminal.
    - The exit code is 3.
-   - The report lists all 27 cases, with coverage 15/27, pass rate 15/15, `contract_acceptance_passed: false` and the fixed statement.
-6. **Determinism.** Two consecutive runs produce byte-identical `observations.json`, `evidence.jsonl` and `report.json`. This requires no timestamps in observations and a fixed clock.
-7. **Barrier discipline.**
-   - Tests show that a delayed effect after a barrier is caught by the drift check (UNASSESSABLE), and that a watchdog timeout yields UNKNOWN and never ALLOW or DENY.
-   - No barrier is implemented as a fixed count of microtask turns (enforced by review).
-8. **No back-filling.**
-   - An adapter test double that copies an oracle decision for a missing observation is caught.
-   - A K decision supplied in an observation is a HARNESS_ERROR.
-   - Observations for `OUT_OF_SCOPE` cases are rejected.
-9. **Binding.** Every attributed effect's runtime `capability_id` and `session_id` equal the authority's original grant at every observation. A test injects a mismatched binding and expects an attribution error or finding, never a PASS.
-10. **`cancel_ack` divergence.** A conformance test pins `acknowledgeCancellation() === false` for an already-terminal execution, with that behaviour documented as `cancel_ack_after_runtime_terminal` (R4).
-11. **Mutants.** Every SUT mutant of §9 marked as a violation witness is killed by its fixed witness, and every one marked as an incompleteness witness yields UNASSESSABLE for its witness case and exit 2. Mutants marked masked or unreachable are listed in the report as coverage gaps, with no claim that they are detected.
+   - The report lists all 27 cases, with coverage 14/27, pass rate 14/14, the not-assessed count, `contract_acceptance_passed: false`, the fixed statement, and the supplement in its own section.
+7. **Request discipline.**
+   - Every start attempt uses a distinct `request_id` under the authority's original capability.
+   - Tests assert that `clearSession()` is never called and no signed request is submitted twice.
+8. **Session discipline.** Authorities of one `(tenant, session)` pair share one runtime session and have distinct `capability_id`s. This is checked from the runtime records of `active-session`, `sibling-isolation` and `session-in-flight-commit-fence`.
+9. **Determinism.** Two consecutive runs produce byte-identical `observations.json`, `evidence.jsonl` and `report.json`. This requires no timestamps in observations and a fixed clock.
+10. **Barrier discipline.**
+    - Tests show that a delayed effect after a barrier is caught by the drift check (UNASSESSABLE), and that a watchdog timeout yields UNKNOWN and never ALLOW or DENY.
+    - S4 completes its `finish` barrier on the runtime's `unobservable` state without a timeout.
+    - No barrier is implemented as a fixed count of microtask turns (enforced by review).
+11. **No back-filling.**
+    - An adapter test double that copies an oracle decision for a missing observation is caught.
+    - A K decision supplied in an observation is a HARNESS_ERROR.
+    - Observations for `OUT_OF_SCOPE` cases are rejected.
+12. **Effect independence.**
+    - Injected disagreements keep the observed effect and report it as such, never as HARNESS_ERROR from the disagreement alone:
+      - a managed state change with a thrown `CommitRejectedError`;
+      - a managed state change with a non-`CommitRejectedError` throw;
+      - a receipt without a state change;
+      - a tool invocation followed by a rejected `process()`.
+    - In these tests, a DENY together with a state change yields `unexpected_tool_commit`.
+13. **Partial runs.** An adapter abort or watchdog timeout after a confirmed violating effect yields `complete: false`, the case UNASSESSABLE (or HARNESS_ERROR), and `confirmed_violation: true`, with the earlier observations present in the bundle.
+14. **Binding.** Every attributed effect is attributed from the runtime's binding. A test injects a mismatched binding and expects an attribution error or a finding, never a PASS.
+15. **`cancel_ack` divergence.** A conformance test pins `acknowledgeCancellation() === false` for an already-terminal execution, with that behaviour documented as `cancel_ack_after_runtime_terminal` (R4).
+16. **Mutants.**
+    - Every SUT mutant of §10 is detected by its fixed witness, as stated in its row.
     - Mutants must typecheck in the SUT (`tsc --noEmit`). Each is applied to a fresh checkout and never committed.
     - Witnesses are fixed in the profile review, before any mutant is run.
+    - No mutant is left masked or unreachable; M3 and M11, masked or unreachable in revision 1, are now witnessed by the supplement.
 
-## 9. Planned mutants
+## 10. Planned mutants
 
-**SUT mutants** are type-safe edits applied to a fresh checkout of `a682e44`. The witnesses below are the expected ones and are to be confirmed when the integration review fixes them.
+**SUT mutants** are type-safe edits applied to a fresh checkout of `a682e44`. The witnesses are expected ones, to be confirmed when the integration review fixes them. "Corpus" witnesses count towards the corpus profile; "supplement" witnesses are reported in the supplement section.
 
-| ID | Mutation | Expected witness (case @ step: finding) | Kind |
+| ID | Mutation | Witness (case @ step: expected detection) | Where |
 |---|---|---|---|
-| M1 | `#maybeTerminal` ignores pending registered work (a premature terminal when the tool function settles) | `commit-before-cut` @2: `unexpected_execution_terminal` | violation |
-| M2 | The commit binding check skips `deps.revoked()` | `start-before-cut` @2: `false_allow`, `unexpected_tool_commit` | violation |
-| M3 | The commit entry and binding checks ignore the terminal state | None. The only `IN_PROFILE` commit after a terminal (`deferred-terminal-before-seal` @4) is also revoked, so the revocation fence still denies it. Declared **masked** (overdetermined), and recorded as a coverage gap: no `IN_PROFILE` case tests the terminal commit fence on its own. | masked (documented) |
-| M4 | `#handOver` and the result-processing delivery check skip revocation | `session-delivery-fence-after-commit` @3: `false_allow`, `unexpected_output_delivery` | violation |
-| M5 | `revoke()` does not request cancellation of covered executions | `in-flight-before-commit` @2: `false_deny`, `missing_cancellation_ack` | violation |
-| M6 | Session-scope revocation is checked against the capability only | `active-session` @1–2: `false_allow`, `unexpected_execution_started` | violation |
-| M7 | Capability-scope revocation also covers every capability of the same session (over-reach) | `sibling-isolation` @2: `false_deny`, `missing_execution_started` | violation |
-| M8 | The replay guard accepts a re-submitted request id | `permit-single-use` @1: `false_allow`, `unexpected_execution_started` | violation |
-| M9 | The start-path revocation checks (request and start stages) are removed | `cut-before-start` @1: `false_allow`, `unexpected_execution_started` | violation |
-| M10 | `#maybeTerminal` never records a terminal | `start-before-cut`: missing terminal → UNASSESSABLE, exit 2 | incompleteness |
-| M11 | Restores the pre-PR #10 premature terminal for an unobservable settlement | No `IN_PROFILE` case reaches it, because the construction's Promises are observable. Declared **unreachable** for the corpus; covered by the runtime's own C22b–C22f. | unreachable (documented) |
+| M1 | `#maybeTerminal` ignores pending registered work (a premature terminal when the tool function settles) | `commit-before-cut` @2: `unexpected_execution_terminal` | corpus |
+| M2 | The commit binding check skips `deps.revoked()` | `start-before-cut` @2: `false_allow`, `unexpected_tool_commit` | corpus |
+| M3 | The commit entry and binding checks ignore the terminal state | S3 @3: `false_allow`, `unexpected_tool_commit`. (In the corpus it is masked by revocation in `deferred-terminal-before-seal` @4.) | supplement |
+| M4 | `#handOver` and the result-processing delivery check skip revocation | `session-delivery-fence-after-commit` @3: `false_allow`, `unexpected_output_delivery` | corpus |
+| M5 | `revoke()` does not request cancellation of covered executions | `in-flight-before-commit` @2: `false_deny`, `missing_cancellation_ack` | corpus |
+| M6 | Session-scope revocation is checked against the capability only | `active-session` @1–2: `false_allow`, `unexpected_execution_started` (both authorities in the revoked shared session) | corpus |
+| M7 | Capability-scope revocation also covers every capability of the same runtime session (over-reach) | `sibling-isolation` @2 and @7: `false_deny`, `missing_execution_started` (sibling and parent share the revoked child's runtime session) | corpus |
+| M8 | The approval-stage and start-stage revocation checks are removed (the request-stage check stays) | S1 @1: `false_allow`, `unexpected_execution_started` | supplement |
+| M9 | The request-stage and start-stage revocation checks are removed | `cut-before-start` @1: `false_allow`, `unexpected_execution_started` | corpus |
+| M10 | `#maybeTerminal` never records a terminal | `start-before-cut`: missing terminal → UNASSESSABLE, exit 2 (incompleteness witness) | corpus |
+| M11 | Restores the pre-`mikko-lab/acs-guardrail-demo#10` premature `failed` terminal for an unobservable settlement | S4 @0: `unexpected_execution_terminal`, a confirmed VIOLATION instead of the declared UNASSESSABLE | supplement |
+
+The revision 1 mutant M8 (replay guard disabled) is dropped: the replay construction no longer exists, and no requirement of this profile depends on the replay guard.
 
 **Adapter mutants** are defects in the adapter itself. Each must be caught by the adapter's own tests:
 
 | ID | Defect | Expected detection |
 |---|---|---|
-| AM1 | Fills a missing decision from the oracle | Back-filling test (§8.8) |
+| AM1 | Fills a missing decision from the oracle | Back-filling test (§9.11) |
 | AM2 | Reports a decision for `finish` or `seal` | HARNESS_ERROR `decision_at_control_step` |
-| AM3 | Attributes effects to the intended authority instead of the runtime binding | Binding test (§8.9) |
-| AM4 | Uses a fixed microtask count instead of the `deliver` barrier | Drift or timeout test (§8.7), UNASSESSABLE |
-| AM5 | Treats `whenTerminal()` resolution, or the lock release, as terminal evidence | Test with M10 applied: the result must stay UNASSESSABLE, not PASS |
+| AM3 | Attributes effects to the intended authority instead of the runtime binding | Binding test (§9.14) |
+| AM4 | Uses a fixed microtask count instead of the `deliver` barrier | Drift or timeout test (§9.10), UNASSESSABLE |
+| AM5 | Treats `whenTerminal()` resolution, or the lock release, as terminal evidence | Test with M10 applied: the result must stay UNASSESSABLE, not PASS. S4 must stay UNASSESSABLE. |
+| AM6 | Drops a commit effect when the commit call threw | Effect-independence test (§9.12) |
+| AM7 | Re-submits a signed request or calls `clearSession()` | Request-discipline test (§9.7) |
+| AM8 | Gives each authority its own runtime session | Session-discipline test (§9.8); M6 and M7 would no longer be killed |
 
-## 10. Open review decisions
+## 11. Review decisions
 
-| ID | Decision | Recommendation | Consequence if not accepted |
+| ID | Decision | Status / recommendation | Consequence if not accepted |
 |---|---|---|---|
-| R1 | `finish` and `seal` decisions are K (harness control, not assessed), declared uniformly in the profile | Accept. These steps have no SUT operation in this runtime, and the report lists every not-assessed K step. | Under the strict reading every case is `OUT_OF_SCOPE`, so the profile is empty. |
-| R2 | A later `start` of the same authority re-submits the authority's single signed request, so the runtime's replay guard (request-level single use) answers it | Accept, with the caveat in the report that this shows request-level single use, not capability-level single use | `issued-permit` and `permit-single-use` become `OUT_OF_SCOPE` (13 in profile). |
-| R3 | `sibling-isolation` is `IN_PROFILE`, because its revocation target has no descendants; it shows isolation of independent capabilities | Accept, with the caveat | It becomes `OUT_OF_SCOPE` (14 in profile). |
+| R1 | `finish` and `seal` decisions are K (harness control, not assessed), declared uniformly in the profile and counted in `not_assessed_requirements` | Recommended. With revision 2 a K reduction can never yield `contract_acceptance_passed` or exit 0 (§2.4–2.5). | Under the strict reading every case is `OUT_OF_SCOPE`, so the profile is empty. |
+| R2 | Replay of the authority's request as a stand-in for single-use permits | **Withdrawn in revision 2.** Every start uses a fresh request under the original capability, and `permit-single-use` is `OUT_OF_SCOPE`. | — |
+| R3 | `sibling-isolation` is `IN_PROFILE`, because its revocation target has no descendants; it shows isolation of independent capabilities within one shared runtime session | Accept, with the caveat in §5.1 | It becomes `OUT_OF_SCOPE` (13 in profile), and M7 loses its corpus witness. |
 | R4 | `cancel_ack` after a runtime terminal, or without a cancellation request, is a declared unsupported class; the contract keeps ALLOW | Accept, and document the runtime's `false` with a conformance test | The contract would need to change `cancel_ack` semantics, which affects every runtime. |
-| R5 | `OUT_OF_SCOPE` cases are not executed in 0.4.0; no diagnostic partial runs | Accept for 0.4.0, and revisit if partial-run diagnostics are wanted. Retained findings from partial runs would then need their own report section. | — |
-| R6 | Exit code 3 for an accepted declared profile with incomplete coverage; exit 0 only for 27/27 | Accept | A partial profile could pass a 0.3.0-style CI gate. |
+| R5 | `OUT_OF_SCOPE` corpus cases are not executed in 0.4.0; no diagnostic partial runs | Accept for 0.4.0. Runtime-specific checks go into the reviewed supplement instead. | — |
+| R6 | Exit code 3 for an accepted declared profile; exit 0 only when every requirement of all 27 cases is assessed and passes | Accept | A declared profile could pass a 0.3.0-style CI gate. |
+| R7 | The supplement (S1–S4) with golden expectations; S2's expectation is runtime-specific; results are reported apart from corpus coverage and the profile pass rate | Accept | M3, M8 and M11 have no witness, and the approval fence is untested. |
