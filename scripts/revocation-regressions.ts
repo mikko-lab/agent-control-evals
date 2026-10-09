@@ -1,5 +1,5 @@
 /**
- * Evaluator self-regression check for revocation-0.3.0. Each mutant is a deliberate evaluator defect applied to a
+ * Evaluator self-regression check for the revocation evaluator (0.3.0 step path, unchanged in revocation-0.4.0). Each mutant is a deliberate evaluator defect applied to a
  * disposable copy of the compiled harness (the production evaluator is never changed). A mutant counts as caught only
  * by content: its patch applies exactly once, the copied suite loads and runs (other tests pass, none cancelled), and
  * the named sentinel tests fail with assertion errors; mutants that remove a gate signal must also fail the
@@ -65,7 +65,7 @@ function selfTest(dir: string, out: string): { exit: number | null; unkilled: st
 function copy(root: string, work: string, name: string): string {
   const dir = join(work, name);
   cpSync(join(root, 'dist'), join(dir, 'dist'), { recursive: true });
-  for (const link of ['corpus', 'node_modules', 'package-lock.json', 'package.json', 'schemas', 'scripts', 'src']) symlinkSync(join(root, link), join(dir, link));
+  for (const link of ['corpus', 'mutations', 'node_modules', 'package-lock.json', 'package.json', 'profiles', 'schemas', 'scripts', 'src', 'sut.lock.json', 'sut.revocation.lock.json', 'test']) symlinkSync(join(root, link), join(dir, link));
   return dir;
 }
 

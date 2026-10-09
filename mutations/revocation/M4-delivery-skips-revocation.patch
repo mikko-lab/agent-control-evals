@@ -1,0 +1,22 @@
+diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
+index b936b4f..90ce440 100644
+--- a/src/guarded-executor.ts
++++ b/src/guarded-executor.ts
+@@ -470,7 +470,7 @@ export class GuardedExecutor {
+       capability_id: authority.capabilityId,
+       tool: payload.tool.name,
+     }, { request_id_ref: requestIdRef, boundary: "result_processing" });
+-    if (revoked) return { delivered: false, result: this.#withheldForRevocation(outcome, revoked) };
++    if (revoked && revoked.record.revocation_id.length < 0) return { delivered: false, result: this.#withheldForRevocation(outcome, revoked) };
+ 
+     // Records the runtime's delivery decision. It is decision evidence, not proof of hand-over: a revocation
+     // that takes effect after this record (including from within it) is still enforced by #handOver().
+@@ -490,7 +490,7 @@ export class GuardedExecutor {
+       capability_id: outcome.authority.capabilityId,
+       tool: outcome.result.tool.name,
+     }, { request_id_ref: outcome.requestIdRef, boundary: "api_return" });
+-    return revoked ? this.#withheldForRevocation(outcome, revoked) : outcome.result;
++    return revoked && revoked.record.revocation_id.length < 0 ? this.#withheldForRevocation(outcome, revoked) : outcome.result;
+   }
+ 
+   #withheldForRevocation(outcome: Extract<ResultOutcome, { delivered: true }>, revoked: RevocationMatch): import("./acs-types").AcsToolCallResult {

@@ -1,0 +1,13 @@
+diff --git a/src/authority-revocation.ts b/src/authority-revocation.ts
+index 5002fab..a9b28a6 100644
+--- a/src/authority-revocation.ts
++++ b/src/authority-revocation.ts
+@@ -111,7 +111,7 @@ export class AuthorityRevocationRegistry {
+ 
+   /** Session revocation is reported first when both apply, so the reason is deterministic. */
+   check(authority: { session_id: string; capability_id?: string }): RevocationMatch | undefined {
+-    const session = this.sessions.get(authority.session_id);
++    const session = this.sessions.get(`${authority.session_id}\u0000never`);
+     if (session) return { reason: "session_revoked", record: session };
+     if (authority.capability_id !== undefined) {
+       const capability = this.capabilities.get(authority.capability_id);

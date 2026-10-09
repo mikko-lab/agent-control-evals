@@ -1,6 +1,7 @@
 import { canonicalJson } from '../../util/canonical-json';
-import { Case, Decision, Effect, Evidence, Expected, ExpectedEffect } from '../../spec/revocation/model';
-import { observationIssues } from '../../report/revocation/validate';
+import { Case, Decision, DRIFT_POINTS, Effect, EffectKind, Evidence, Expected, ExpectedEffect, RuntimeObservation } from '../../spec/revocation/model';
+import { observationIssues, runtimeObservationIssues } from '../../report/revocation/validate';
+import { decisionFromCall, derive, effectSlot, probeLogIssues, DECISION_PROVENANCE, EFFECT_PROVENANCE } from '../../spec/revocation/runtime-observation';
 
 const EXECUTION_KINDS = new Set(['execution_started', 'tool_commit', 'output_delivery', 'cancellation_ack', 'execution_terminal']);
 const NEEDS_START = new Set(['tool_commit', 'output_delivery', 'cancellation_ack', 'execution_terminal']);
@@ -11,6 +12,23 @@ export function withinWindow(step: number, expected: ExpectedEffect): boolean {
   return step >= expected.earliest && step <= expected.latest;
 }
 
+/**
+ * Evaluation options (revocation-0.4.0). `step` is the unchanged 0.3.0 path. `probe_seq` evaluates a pinned runtime
+ * adapter observation: effects are ordered by (step, seq), the report is checked against the probe log and call
+ * records, and the decisions of `controlSteps` (finish, seal) are harness control: not assessed and never reported.
+ */
+export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps?: readonly number[] }
+
+/**
+ * Contradictory state evidence of one fact (probe_seq mode): the effect kind and execution it concerns (null when the
+ * fact names no observed execution) and the index of the first probe that shows it. The fact arose after the probe
+ * before that one, and a contradictory fact is never observed again as an effect, so it concerns every occurrence of
+ * that kind and execution that was still open at that probe; never one whose window had already closed, nor any
+ * other kind or execution.
+ */
+export interface EvidenceGap { kind: EffectKind; execution: string | null; probe: number }
+const gapConcerns = (g: EvidenceGap, kind: EffectKind, execution: string | null) => g.kind === kind && (g.execution === null || g.execution === execution);
+
 const sameIdentity = (f: Effect, x: ExpectedEffect) => f.kind === x.kind && f.authority === x.authority && f.execution === x.execution && canonicalJson(f.target) === canonicalJson(x.target);
 const executionKey = (f: Effect) => `${f.authority}/${f.execution}`;
 
@@ -19,10 +37,12 @@ const executionKey = (f: Effect) => `${f.authority}/${f.execution}`;
  * Malformed or unattributable items and causally impossible traces are HARNESS_ERRORs, but every remaining
  * well-formed attributable item is still evaluated and its findings are retained beside the errors.
  */
-export function evaluate(c: Case, truth: Expected, input: unknown): Evidence {
+export function evaluate(c: Case, truth: Expected, input: unknown, options: EvaluateOptions = {}): Evidence {
+  const probeMode = options.ordering === 'probe_seq';
+  const control = new Set(options.controlSteps ?? []);
   const e: Evidence = { case_id: c.id, family: c.family, state_at_cut: truth.cuts, verdict: 'PASS', confirmed_violation: false, decision_findings: [], effect_findings: [], incomplete: [], errors: [] };
   const error = (code: string, path: string, message: string) => e.errors.push({ code, path, message });
-  const issues = observationIssues(input);
+  const issues = probeMode ? runtimeObservationIssues(input) : observationIssues(input);
   const fatal = issues.filter(i => !ITEM.test(i.path));
   if (fatal.length) { for (const i of fatal) error('malformed_observation', i.path || '/', i.message); return finish(e); }
   const o = input as { case_id: string; complete: boolean; decisions: unknown[]; effects: unknown[] };
@@ -30,12 +50,20 @@ export function evaluate(c: Case, truth: Expected, input: unknown): Evidence {
   const malformed = new Set<string>();
   for (const i of issues) { const [, list, index] = ITEM.exec(i.path)!; const path = `/${list}/${index}`; if (!malformed.has(path)) { malformed.add(path); error('malformed_item', path, i.message); } }
 
+  // Pinned runtime adapter: the reported items must be exactly what the probe log and the call records show.
+  const unsupported = new Set<string>();
+  let seqTrusted = true;
+  let gaps: EvidenceGap[] = [];
+  let windowClose = (_latest: number) => Infinity;
+  if (probeMode) ({ seqTrusted, gaps, windowClose } = checkRuntimeReport(c, o as unknown as RuntimeObservation, malformed, unsupported, control, e, error));
+
   // Decisions: one per step; duplicates and out-of-range steps are not guessed between.
   const decisions = new Map<number, Decision[]>();
   o.decisions.forEach((value, index) => {
-    if (malformed.has(`/decisions/${index}`)) return;
+    if (malformed.has(`/decisions/${index}`) || unsupported.has(`/decisions/${index}`)) return;
     const d = value as Decision;
     if (d.step >= c.steps.length) { error('decision_out_of_range', `/decisions/${index}`, `decision step ${d.step} is outside the case schedule`); return; }
+    if (control.has(d.step)) { error('decision_at_control_step', `/decisions/${index}`, `step ${d.step} (${c.steps[d.step].op}) is a harness control step; the SUT makes no decision there`); return; }
     decisions.set(d.step, [...(decisions.get(d.step) ?? []), d]);
   });
   for (const [step, list] of decisions) if (list.length > 1) error('duplicate_decision', '/decisions', `${list.length} decisions recorded for step ${step}; none is used`);
@@ -44,7 +72,7 @@ export function evaluate(c: Case, truth: Expected, input: unknown): Evidence {
   const attributable: { f: Effect; path: string }[] = [];
   o.effects.forEach((value, index) => {
     const path = `/effects/${index}`;
-    if (malformed.has(path)) return;
+    if (malformed.has(path) || unsupported.has(path)) return;
     const f = value as Effect;
     const item = canonicalJson(f);
     if (f.step >= c.steps.length) return error('effect_out_of_range', path, `effect ${item} is outside the case schedule`);
@@ -63,16 +91,32 @@ export function evaluate(c: Case, truth: Expected, input: unknown): Evidence {
   });
 
   // Causal consistency: an execution effect needs an earlier start, a delivery an earlier commit, one terminal per execution.
-  // Occurrence step orders the trace; the arrival order of records never does.
-  const byStep = attributable.map(x => ({ ...x, key: canonicalJson(x.f) })).sort((x, y) => x.f.step - y.f.step || (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
-  const startSteps = (key: string) => byStep.filter(x => x.f.kind === 'execution_started' && executionKey(x.f) === key).map(x => x.f.step);
+  // Occurrence step orders the trace; the arrival order of records never does. With a probe-bound seq (0.4.0 runtime
+  // observations) effects of one step are ordered by seq; equal (step, seq) establishes no order. That blocks only the
+  // order inference concerned (recorded as incompleteness); the effect still takes part in the step-based evaluation.
+  const seqOf = (f: Effect) => (f as Effect & { seq?: number }).seq ?? 0;
+  const before = (a: Effect, b: Effect) => a.step < b.step || (probeMode && seqTrusted && a.step === b.step && seqOf(a) < seqOf(b));
+  const unordered = (a: Effect, b: Effect) => probeMode && a.step === b.step && (!seqTrusted || seqOf(a) === seqOf(b));
+  const orderUnknown = (f: Effect, what: string) => e.incomplete.push(`effect order not established at step ${f.step}: ${f.kind} of ${f.execution} relative to ${what}`);
+  const byStep = attributable.map(x => ({ ...x, key: canonicalJson(x.f) })).sort((x, y) => x.f.step - y.f.step || (probeMode ? seqOf(x.f) - seqOf(y.f) : 0) || (x.key < y.key ? -1 : x.key > y.key ? 1 : 0));
+  const starts = (key: string) => byStep.filter(x => x.f.kind === 'execution_started' && executionKey(x.f) === key).map(x => x.f);
   const rejected = new Set<string>();
   for (const x of byStep) {
-    if (NEEDS_START.has(x.f.kind) && !startSteps(executionKey(x.f)).some(step => step < x.f.step)) { rejected.add(x.path); error('causally_impossible', x.path, `${x.f.kind} at step ${x.f.step} precedes every observed start of ${x.f.execution}`); }
+    if (!NEEDS_START.has(x.f.kind)) continue;
+    const s = starts(executionKey(x.f));
+    if (s.some(y => before(y, x.f))) continue;
+    if (s.some(y => unordered(y, x.f))) { orderUnknown(x.f, 'its start'); continue; }
+    rejected.add(x.path); error('causally_impossible', x.path, `${x.f.kind} at step ${x.f.step} precedes every observed start of ${x.f.execution}`);
   }
   for (const x of byStep) {
     if (x.f.kind !== 'output_delivery' || rejected.has(x.path)) continue;
-    if (!byStep.some(y => y.f.kind === 'tool_commit' && !rejected.has(y.path) && executionKey(y.f) === executionKey(x.f) && y.f.step < x.f.step)) { rejected.add(x.path); error('causally_impossible', x.path, `output_delivery at step ${x.f.step} precedes every observed commit of ${x.f.execution}`); }
+    const commits = byStep.filter(y => y.f.kind === 'tool_commit' && !rejected.has(y.path) && executionKey(y.f) === executionKey(x.f)).map(y => y.f);
+    if (commits.some(y => before(y, x.f))) continue;
+    if (commits.some(y => unordered(y, x.f))) { orderUnknown(x.f, 'its commit'); continue; }
+    // A commit of this execution whose contradictory state evidence was first shown no later than the delivery is
+    // unconfirmed, not absent: the delivery is not impossible.
+    if (gaps.some(g => gapConcerns(g, 'tool_commit', x.f.execution) && g.probe <= seqOf(x.f))) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
+    rejected.add(x.path); error('causally_impossible', x.path, `output_delivery at step ${x.f.step} precedes every observed commit of ${x.f.execution}`);
   }
   const terminals = new Map<string, string[]>();
   for (const x of byStep) if (x.f.kind === 'execution_terminal' && !rejected.has(x.path)) terminals.set(executionKey(x.f), [...(terminals.get(executionKey(x.f)) ?? []), x.path]);
@@ -83,6 +127,7 @@ export function evaluate(c: Case, truth: Expected, input: unknown): Evidence {
   // Policy decisions, compared separately from effects.
   if (!o.complete) e.incomplete.push('observation window not sealed');
   for (const d of truth.decisions) {
+    if (control.has(d.step)) continue;
     const list = decisions.get(d.step);
     if (!list || list.length !== 1) e.incomplete.push(`decision unavailable at step ${d.step}`);
     else if (list[0].decision === 'UNKNOWN') e.incomplete.push(`authority unknown at step ${d.step}`);
@@ -99,20 +144,92 @@ export function evaluate(c: Case, truth: Expected, input: unknown): Evidence {
   }
   // A side effect after its execution's observed terminal is a violation even where its step matches the corpus.
   for (const f of matched) {
-    if ((f.kind === 'tool_commit' || f.kind === 'output_delivery') && accepted.some(t => t.kind === 'execution_terminal' && executionKey(t) === executionKey(f) && t.step < f.step)) e.effect_findings.push({ step: f.step, reason: `${f.kind}_after_terminal` });
+    if (f.kind !== 'tool_commit' && f.kind !== 'output_delivery') continue;
+    const terminals = accepted.filter(t => t.kind === 'execution_terminal' && executionKey(t) === executionKey(f));
+    if (terminals.some(t => before(t, f))) e.effect_findings.push({ step: f.step, reason: `${f.kind}_after_terminal` });
+    else if (terminals.some(t => unordered(t, f))) orderUnknown(f, 'its terminal');
   }
   for (const { x } of open.filter(m => !m.used)) {
     const at = x.kind === 'execution_terminal' ? `${x.execution} in window ${x.earliest}..${x.latest}` : `${x.kind} at step ${x.earliest}`;
-    if (!o.complete || effectsExcluded) e.incomplete.push(`expected effect not confirmed: ${at}`);
+    // Contradictory state evidence (probe_seq mode) leaves an expected effect of its kind and execution unconfirmed,
+    // never missing, when it was first shown while that effect's window was still open (at or before the window's
+    // closing barrier probe). A window closed by its barrier without the effect stays closed: a contradiction first
+    // shown after it (the next pre_action, a later step, seal_settle) does not reopen it.
+    const gap = gaps.some(g => gapConcerns(g, x.kind, x.execution) && g.probe <= windowClose(x.latest));
+    if (!o.complete || effectsExcluded || gap) e.incomplete.push(`expected effect not confirmed: ${at}`);
     else if (x.kind === 'execution_terminal') e.incomplete.push(`terminal evidence missing for ${at}`);
     else e.effect_findings.push({ step: x.earliest, reason: `missing_${x.kind}` });
   }
   // Any observed start, including an unauthorized one, needs a later terminal observation.
   const acceptedStarts = accepted.filter(f => f.kind === 'execution_started');
   for (const started of acceptedStarts) {
-    if (!accepted.some(f => f.kind === 'execution_terminal' && executionKey(f) === executionKey(started) && f.step > started.step)) e.incomplete.push(`execution not observed terminal: ${started.execution}`);
+    const terminals = accepted.filter(f => f.kind === 'execution_terminal' && executionKey(f) === executionKey(started));
+    if (terminals.some(t => before(started, t))) continue;
+    if (terminals.some(t => unordered(started, t))) orderUnknown(started, 'its terminal');
+    else e.incomplete.push(`execution not observed terminal: ${started.execution}`);
   }
   return finish(e);
+}
+
+type ErrorSink = (code: string, path: string, message: string) => void;
+
+/**
+ * Checks a pinned runtime adapter observation against its own raw evidence (section 4.6):
+ *  - the probe log is well formed (otherwise no order within a step is trusted);
+ *  - every reported effect is exactly a fact's first presence in the probe log (step, seq, identity, provenance);
+ *  - every fact first present outside a step barrier is drift (incomplete), never an effect;
+ *  - every reported decision is the SUT answer recorded in the call of its step.
+ * Reported items without that evidence are excluded and reported as errors; evidence the report omits is an error.
+ *  - every fact whose state evidence is contradictory (a terminal without its record and terminal-log entry, a commit
+ *    key without its written value or version growth) is incomplete evidence, never an effect.
+ * Returns whether seq can be trusted for ordering within a step, the scope of each contradictory fact, and the probe
+ * at which an expected window closes.
+ */
+function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): { seqTrusted: boolean; gaps: EvidenceGap[]; windowClose: (latest: number) => number } {
+  const logIssues = probeLogIssues(o.probes);
+  for (const issue of logIssues) error('sequence_inconsistent', '/probes', issue);
+  const derived = derive(o.probes, o.identity);
+  for (const r of derived.regressions) error('sequence_inconsistent', '/probes', r);
+  for (const d of derived.drift) e.incomplete.push(`effect observed outside a step barrier (probe ${d.probe}, ${d.point}): ${d.key}`);
+  for (const x of derived.inconsistent) e.incomplete.push(`inconsistent state evidence (probe ${x.probe}): ${x.key}: ${x.reason}`);
+  const open = derived.effects.map(x => ({ slot: effectSlot(x.effect), kind: x.effect.kind, step: x.effect.step, key: x.key, used: false }));
+  o.effects.forEach((f, index) => {
+    const path = `/effects/${index}`;
+    if (malformed.has(path)) return;
+    const slot = effectSlot(f);
+    const match = open.find(m => !m.used && m.slot === slot);
+    if (!match) {
+      unsupported.add(path);
+      const sameStep = open.some(m => !m.used && m.kind === f.kind && m.step === f.step);
+      return error(sameStep ? 'sequence_inconsistent' : 'effect_without_probe_evidence', path, `reported effect ${slot} is not the first presence of any fact in the probe log`);
+    }
+    match.used = true;
+    if (canonicalJson([...f.provenance].sort()) !== canonicalJson([...EFFECT_PROVENANCE[f.kind]].sort())) error('provenance_mismatch', path, `${f.kind} must carry provenance ${EFFECT_PROVENANCE[f.kind].join('+')}`);
+  });
+  for (const m of open.filter(x => !x.used)) error('effect_not_reported', '/effects', `probe log shows ${m.key} first at ${m.slot}, but the observation does not report it`);
+  const calls = new Map<number, number>();
+  o.calls.forEach(call => calls.set(call.step, (calls.get(call.step) ?? 0) + 1));
+  for (const [step, n] of calls) if (n > 1) error('duplicate_call', '/calls', `${n} SUT calls recorded for step ${step}`);
+  const reported = new Set<number>();
+  o.decisions.forEach((d, index) => {
+    const path = `/decisions/${index}`;
+    if (malformed.has(path) || d.step >= c.steps.length || control.has(d.step)) return;
+    reported.add(d.step);
+    const derivedDecision = decisionFromCall(c.steps[d.step], o.calls.find(call => call.step === d.step));
+    if (derivedDecision !== d.decision) { unsupported.add(path); return error('decision_without_evidence', path, `decision ${d.decision} at step ${d.step} is not the SUT answer recorded for that step (${derivedDecision ?? 'no call'})`); }
+    if (canonicalJson([...d.provenance].sort()) !== canonicalJson([...DECISION_PROVENANCE].sort())) error('provenance_mismatch', path, 'decisions carry sut_api provenance');
+  });
+  for (const call of o.calls) {
+    if (call.step < c.steps.length && !control.has(call.step) && !reported.has(call.step) && decisionFromCall(c.steps[call.step], call) !== undefined) error('decision_not_reported', '/decisions', `the SUT call of step ${call.step} is recorded, but its decision is not reported`);
+  }
+  const gaps = derived.inconsistent.map(x => ({ kind: x.kind, execution: x.execution, probe: x.probe }));
+  // A window ending at step `latest` closes at the last barrier-bound probe of a step <= latest: an effect first shown
+  // after it is drift or belongs to a later step (derive()). Without such a probe the window never closed.
+  const windowClose = (latest: number) => {
+    for (let k = o.probes.length - 1; k >= 0; k--) if (o.probes[k].step <= latest && !DRIFT_POINTS.includes(o.probes[k].point)) return k;
+    return Infinity;
+  };
+  return { seqTrusted: logIssues.length === 0 && derived.regressions.length === 0, gaps, windowClose };
 }
 
 function finish(e: Evidence): Evidence {

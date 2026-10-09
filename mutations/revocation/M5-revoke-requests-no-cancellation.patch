@@ -1,0 +1,13 @@
+diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
+index b936b4f..90e0d42 100644
+--- a/src/guarded-executor.ts
++++ b/src/guarded-executor.ts
+@@ -807,7 +807,7 @@ export class GuardedExecutor {
+     // re-entrant calls are contained per execution and cannot undo the revocation.
+     for (const execution of [...this.#executions.values()]) {
+       if (!execution.terminal && !execution.cancellationRequested && covered(execution.sessionId, execution.capabilityId)) {
+-        execution.requestCancellation(record.revocation_id);
++        void execution;
+       }
+     }
+     return receipt;

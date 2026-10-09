@@ -10,10 +10,11 @@ import { faultRuns } from './eval/revocation/self-test';
 import { buildReport, Report, reportJson, summary } from './report/revocation/report';
 import { validateReport } from './report/revocation/validate';
 import { VERSION } from './spec/revocation/model';
+import { runtimeCommand } from './eval/revocation/runtime-cli';
 
 function main(): number {
   const [command, ...args] = process.argv.slice(2);
-  if (!['self-test', 'evaluate'].includes(command)) throw new Error('Usage: ace:revocation self-test --out DIR | evaluate --observations FILE --out DIR');
+  if (!['self-test', 'evaluate'].includes(command)) throw new Error('Usage: ace:revocation self-test --out DIR | evaluate --observations FILE --out DIR | run-adapter --lock FILE --profile FILE --out DIR [--work DIR] [--sut-source PATH] [--verify-baseline] | mutants --lock FILE --profile FILE --out DIR [--work DIR] [--sut-source PATH] [--only IDS] | evaluate --observations FILE --lock FILE --profile FILE --out DIR');
   const options = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i], value = args[i + 1];
@@ -81,4 +82,10 @@ function main(): number {
   // Fail closed: 2 whenever the evaluation is technically invalid or incomplete, even with retained confirmed violations.
   return report.acceptance_passed ? 0 : report.technically_valid && report.counts.VIOLATION > 0 ? 1 : 2;
 }
-try { process.exitCode = main(); } catch (error) { console.error(String(error)); process.exitCode = 2; }
+const [command, ...rest] = process.argv.slice(2);
+if (command === 'run-adapter' || command === 'mutants' || (command === 'evaluate' && (rest.includes('--profile') || rest.includes('--lock')))) {
+  // Declared-profile mode against the pinned runtime (revocation-0.4.0).
+  runtimeCommand(command, rest).then(code => { process.exitCode = code; }, error => { console.error(String(error)); process.exitCode = 2; });
+} else {
+  try { process.exitCode = main(); } catch (error) { console.error(String(error)); process.exitCode = 2; }
+}

@@ -1,0 +1,13 @@
+diff --git a/src/managed-execution.ts b/src/managed-execution.ts
+index 188316b..63125c1 100644
+--- a/src/managed-execution.ts
++++ b/src/managed-execution.ts
+@@ -412,7 +412,7 @@ export class ManagedExecution {
+     const closedNow = this.#closedReason();
+     if (closedNow) this.#blocked(key, closedNow);
+     const revoked = this.deps.revoked();
+-    if (revoked) this.#blocked(key, revoked.reason, revoked.revocation_id);
++    if (revoked && revoked.revocation_id.length < 0) this.#blocked(key, revoked.reason, revoked.revocation_id);
+     const sequence = this.deps.write(key, json);
+ 
+     const commit_id = this.deps.nextCommitId();

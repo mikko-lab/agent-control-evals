@@ -6,7 +6,7 @@ Deterministic, reproducible evaluation harnesses for AI agent systems. The repos
 |---|---|---|---|
 | **[ACS runtime-control evaluation](#acs-runtime-control-evaluation)** (v0.1) | One pinned open-source SUT, its runtime and component control boundaries | Source-patch mutation of the pinned SUT | Declared statistical model with conditional confidence bounds |
 | **[Automotive Agent Assurance](#automotive-agent-assurance)** (auto-0.2.0) | Vendor-neutral automotive agent behaviour through an adapter protocol: structured observations first, deterministic oracle, no LLM judge, 4 executable domains, evidence bundle | Synthetic behaviour faults (`auto-faults-0.2.0`) | None: counts and designed coverage only |
-| **[Runtime Revocation & Containment Evaluation](#runtime-revocation--containment-evaluation)** (revocation-0.3.0) | Authority revocation at pending approval, issued permit, active session and in-flight execution; policy decisions separate from observed effects at their occurrence step | Fifteen synthetic behaviour faults with fixed decision/effect witnesses, plus evaluator regression mutants | None: counts and designed coverage only |
+| **[Runtime Revocation & Containment Evaluation](#runtime-revocation--containment-evaluation)** (revocation-0.4.0) | Authority revocation at pending approval, issued permit, active session and in-flight execution; policy decisions separate from observed effects at their occurrence step. Declared-profile evaluation of the pinned runtime `acs-guardrail-demo@a682e44` (14 of 27 cases in profile, plus 4 runtime-specific supplement cases) | Fifteen synthetic behaviour faults with fixed decision/effect witnesses, evaluator regression mutants, 11 runtime mutants and 10 adapter mutants | None: counts and designed coverage only |
 
 None of the tracks shows that any system is secure, safe, certified, compliant or production-ready.
 
@@ -269,7 +269,7 @@ The full list of limitations is emitted into every automotive report and fault r
 
 # Runtime Revocation & Containment Evaluation
 
-An independent evaluation contract for revocation and containment (revocation-0.3.0), with **27 designed cases**, **fifteen synthetic behaviour faults** and **four evaluator regression mutants**. The [specification](docs/revocation/evaluation-spec.md) defines the revoke step as the logical effective boundary, target-bound acknowledgements, monotonic authority revocation over tenant/session/descendant scopes, single-use permits, commit and delivery fencing, per-effect occurrence windows and closed observation barriers.
+An independent evaluation contract for revocation and containment (revocation-0.4.0; full-contract semantics unchanged from 0.3.0), with **27 designed cases**, **fifteen synthetic behaviour faults** and **four evaluator regression mutants**. The [specification](docs/revocation/evaluation-spec.md) defines the revoke step as the logical effective boundary, target-bound acknowledgements, monotonic authority revocation over tenant/session/descendant scopes, single-use permits, commit and delivery fencing, per-effect occurrence windows and closed observation barriers.
 
 Policy decisions and observed effects are evaluated separately and both are covered by the sensitivity gate. A correct DENY with a tool commit is an effect violation; an ALLOW record with a contained effect is a decision violation. Effects are compared at their occurrence step: a commit that moves across the cut is detected. A cancellation acknowledgement is not terminal evidence, and the seal never creates terminal evidence. A running execution may end at or after a revocation that covers it, before any finish request; finish is then an idempotent close, and a commit or delivery after the observed terminal is a violation. Earlier irreversible commits remain historical facts. Unknown authority, incomplete observations and missing terminal evidence never PASS. Causally impossible traces are HARNESS_ERRORs, and confirmed findings are kept beside such errors.
 
@@ -288,7 +288,22 @@ npm run ace:revocation -- evaluate --observations observations.json --out out/re
 
 The self-test writes SHA-bound baseline and fault bundles, separate decision/effect findings, verdicts, replayed state at each cut, limitations and a sensitivity gate (including which faults share witnesses). Reports are byte-deterministic. `self-test` exits 0 only when the baseline PASSes all cases and all declared faults are killed by valid fixed witnesses. `evaluate` exits 0 only for complete PASS, 1 for a technically valid evaluation with a violation, and 2 for invalid or incomplete evidence — **exit 2 does not mean no violation was found**: the report's `has_confirmed_violation` also counts findings retained in HARNESS_ERROR or incomplete cases.
 
-**This version evaluates a synthetic reference runtime and can compare imported observations. It does not integrate with ACS or a production runtime.** Imported observations are labelled `external_adapter_declared_unverified`: occurrence steps, terminal reports, actual barrier closure, hidden effects and adapter fidelity are not independently verified. The manifest binds compiled harness modules, compiled schemas and lockfile bytes; it does not verify installed dependencies, the Node.js runtime or an external SUT identity. No kill-switch UI or production revocation-latency claim is included. No results from this track are combined with ACS or automotive results.
+### Pinned runtime adapter (declared profile)
+
+revocation-0.4.0 adds an in-process adapter for one pinned runtime, `mikko-lab/acs-guardrail-demo` at `a682e4479dbccd1cd5f665f5d4879bd3dddb8b47`, locked by its own [`sut.revocation.lock.json`](sut.revocation.lock.json) (commit, tree, package-lock hash and SUT baseline; `sut.lock.json` and the ACS v0.1 baseline are unchanged). The [compatibility specification](docs/revocation/runtime-adapter-compatibility.md) defines the identity mapping, the declared capability profile ([`profiles/revocation/`](profiles/revocation/), golden-checked against a classifier that reads only the corpus and oracle), probe-bound effect ordering (`seq`), explicit barriers and the runtime-specific supplement.
+
+```sh
+# Exit 3 = declared profile accepted; never a contract pass. Exit 0 is reserved for full-contract acceptance.
+npm run ace:revocation -- run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-runtime --verify-baseline
+# Re-evaluate the recorded observations of a run without starting the SUT (same validations and exit rules)
+npm run ace:revocation -- evaluate --observations out/revocation-runtime/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-recorded
+# SUT mutants M1-M11 (typechecked patches under mutations/revocation/) and adapter mutants AM1-AM10, with fixed witnesses
+npm run ace:revocation -- mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-mutants
+```
+
+At the pin: 14 of 27 corpus cases are IN_PROFILE and PASS; 13 are OUT_OF_SCOPE (no verdict); 34 finish/seal decisions are not assessed; the supplement matches its declarations (S1-S3 PASS, S4 exactly UNASSESSABLE with missing terminal evidence); `contract_acceptance_passed: false`; exit 3. The report lists all 27 cases and keeps corpus coverage, the profile pass rate and the supplement apart.
+
+**The synthetic self-test evaluates a synthetic reference runtime; the declared-profile run evaluates one pinned runtime commit in process and is never a contract pass.** Imported observations are labelled `external_adapter_declared_unverified`: occurrence steps, terminal reports, actual barrier closure, hidden effects and adapter fidelity are not independently verified. The manifest binds compiled harness modules, compiled schemas and lockfile bytes; it does not verify installed dependencies, the Node.js runtime or an external SUT identity. No kill-switch UI or production revocation-latency claim is included. No results from this track are combined with ACS or automotive results.
 
 # Repository layout
 

@@ -159,3 +159,66 @@ jobs:
             out/revocation-a/**
             out/revocation-a-regressions.json
           if-no-files-found: warn
+
+  revocation-runtime:
+    name: revocation runtime adapter (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: 1. declared-profile run against the pinned runtime (lock verified fail closed, SUT baseline reproduced); exit 3 = profile accepted, not a contract pass
+        run: |
+          set +e
+          node dist/src/revocation-cli.js run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-runtime-a --verify-baseline
+          code=$?
+          set -e
+          test "$code" -eq 3
+      - name: 2. independent rerun, complete bundle byte comparison, committed fixture comparison
+        run: |
+          set +e
+          node dist/src/revocation-cli.js run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-runtime-b --verify-baseline
+          code=$?
+          set -e
+          test "$code" -eq 3
+          diff -r out/revocation-runtime-a out/revocation-runtime-b
+          cmp out/revocation-runtime-a/observations.json test/fixtures/revocation-runtime/a682e44-baseline-observations.json
+      - name: 2b. recorded observations re-evaluated without the SUT give the same evidence, acceptance fields and exit 3
+        run: |
+          set +e
+          node dist/src/revocation-cli.js evaluate --observations out/revocation-runtime-a/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-recorded
+          code=$?
+          set -e
+          test "$code" -eq 3
+          cmp out/revocation-runtime-a/evidence.jsonl out/revocation-recorded/evidence.jsonl
+          cmp out/revocation-runtime-a/supplement-evidence.jsonl out/revocation-recorded/supplement-evidence.jsonl
+          cmp out/revocation-runtime-a/observations.json out/revocation-recorded/observations.json
+          node -e "const a=require('./out/revocation-runtime-a/report.json'),b=require('./out/revocation-recorded/report.json');for(const k of ['counts','technically_valid','has_confirmed_violation','contract_acceptance_passed','profile_acceptance_passed','supplement_acceptance_passed'])if(JSON.stringify(a[k])!==JSON.stringify(b[k])){console.error('differs: '+k);process.exit(1)}"
+      - name: 3. tests against the pinned runtime
+        run: node --test --test-concurrency=1 dist/test/revocation/runtime-sut.test.js
+        env:
+          ACE_REVOCATION_WORK: ${{ github.workspace }}/.work/revocation
+      - name: 4. SUT mutants M1-M11 (typechecked patches, fixed witnesses) and adapter mutants AM1-AM10
+        run: node dist/src/revocation-cli.js mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a682e44.profile.json --out out/revocation-mutants
+      - name: 5. evaluator regression gate (0.3.0 step path unchanged)
+        run: node dist/scripts/revocation-regressions.js --out out/revocation-regressions.json
+      - name: upload revocation runtime artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: revocation-runtime-node${{ matrix.node }}
+          path: |
+            out/revocation-runtime-a/**
+            out/revocation-mutants/mutants.json
+            out/revocation-mutants/manifest.json
+            out/revocation-regressions.json
+          if-no-files-found: warn
