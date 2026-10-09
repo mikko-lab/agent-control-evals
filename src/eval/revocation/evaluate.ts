@@ -1,5 +1,5 @@
 import { canonicalJson } from '../../util/canonical-json';
-import { Case, Decision, Effect, Evidence, Expected, ExpectedEffect, RuntimeObservation } from '../../spec/revocation/model';
+import { Case, Decision, Effect, EffectKind, Evidence, Expected, ExpectedEffect, RuntimeObservation } from '../../spec/revocation/model';
 import { observationIssues, runtimeObservationIssues } from '../../report/revocation/validate';
 import { decisionFromCall, derive, effectSlot, probeLogIssues, DECISION_PROVENANCE, EFFECT_PROVENANCE } from '../../spec/revocation/runtime-observation';
 
@@ -18,6 +18,16 @@ export function withinWindow(step: number, expected: ExpectedEffect): boolean {
  * records, and the decisions of `controlSteps` (finish, seal) are harness control: not assessed and never reported.
  */
 export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps?: readonly number[] }
+
+/**
+ * Contradictory state evidence of one fact (probe_seq mode): the effect kind and execution it concerns (null when the
+ * fact names no observed execution) and the steps between which it can have occurred (from the probe before its first
+ * contradictory probe to that probe). It leaves unconfirmed only expected effects of that kind and execution whose
+ * window meets those steps; it is never evidence about any other effect.
+ */
+export interface EvidenceGap { kind: EffectKind; execution: string | null; from: number; to: number }
+const gapCovers = (g: EvidenceGap, kind: EffectKind, execution: string | null, earliest: number, latest: number) =>
+  g.kind === kind && (g.execution === null || g.execution === execution) && g.from <= latest && g.to >= earliest;
 
 const sameIdentity = (f: Effect, x: ExpectedEffect) => f.kind === x.kind && f.authority === x.authority && f.execution === x.execution && canonicalJson(f.target) === canonicalJson(x.target);
 const executionKey = (f: Effect) => `${f.authority}/${f.execution}`;
@@ -43,9 +53,8 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
   // Pinned runtime adapter: the reported items must be exactly what the probe log and the call records show.
   const unsupported = new Set<string>();
   let seqTrusted = true;
-  let evidenceGaps = false;
-  let contradictoryCommits = new Set<string>();
-  if (probeMode) ({ seqTrusted, evidenceGaps, contradictoryCommits } = checkRuntimeReport(c, o as unknown as RuntimeObservation, malformed, unsupported, control, e, error));
+  let gaps: EvidenceGap[] = [];
+  if (probeMode) ({ seqTrusted, gaps } = checkRuntimeReport(c, o as unknown as RuntimeObservation, malformed, unsupported, control, e, error));
 
   // Decisions: one per step; duplicates and out-of-range steps are not guessed between.
   const decisions = new Map<number, Decision[]>();
@@ -103,16 +112,16 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
     const commits = byStep.filter(y => y.f.kind === 'tool_commit' && !rejected.has(y.path) && executionKey(y.f) === executionKey(x.f)).map(y => y.f);
     if (commits.some(y => before(y, x.f))) continue;
     if (commits.some(y => unordered(y, x.f))) { orderUnknown(x.f, 'its commit'); continue; }
-    // A commit whose state evidence is contradictory is unconfirmed, not absent: the delivery is not impossible.
-    if (x.f.execution !== null && contradictoryCommits.has(x.f.execution)) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
+    // A commit of this execution whose state evidence is contradictory up to the delivery is unconfirmed, not absent:
+    // the delivery is not impossible.
+    if (gaps.some(g => gapCovers(g, 'tool_commit', x.f.execution, 0, x.f.step))) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
     rejected.add(x.path); error('causally_impossible', x.path, `output_delivery at step ${x.f.step} precedes every observed commit of ${x.f.execution}`);
   }
   const terminals = new Map<string, string[]>();
   for (const x of byStep) if (x.f.kind === 'execution_terminal' && !rejected.has(x.path)) terminals.set(executionKey(x.f), [...(terminals.get(executionKey(x.f)) ?? []), x.path]);
   for (const [key, paths] of terminals) if (paths.length > 1) for (const path of paths) { rejected.add(path); error('causally_impossible', path, `execution ${key} reported terminal ${paths.length} times`); }
   const accepted = byStep.filter(x => !rejected.has(x.path)).map(x => x.f);
-  // Contradictory state evidence (probe_seq mode) leaves expected effects unconfirmed, never missing.
-  const effectsExcluded = attributable.length !== o.effects.length || rejected.size > 0 || evidenceGaps;
+  const effectsExcluded = attributable.length !== o.effects.length || rejected.size > 0;
 
   // Policy decisions, compared separately from effects.
   if (!o.complete) e.incomplete.push('observation window not sealed');
@@ -141,7 +150,10 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
   }
   for (const { x } of open.filter(m => !m.used)) {
     const at = x.kind === 'execution_terminal' ? `${x.execution} in window ${x.earliest}..${x.latest}` : `${x.kind} at step ${x.earliest}`;
-    if (!o.complete || effectsExcluded) e.incomplete.push(`expected effect not confirmed: ${at}`);
+    // Contradictory state evidence (probe_seq mode) leaves the expected effect it concerns unconfirmed, never missing;
+    // it does not touch the expected effects of other kinds, executions or windows.
+    const gap = gaps.some(g => gapCovers(g, x.kind, x.execution, x.earliest, x.latest));
+    if (!o.complete || effectsExcluded || gap) e.incomplete.push(`expected effect not confirmed: ${at}`);
     else if (x.kind === 'execution_terminal') e.incomplete.push(`terminal evidence missing for ${at}`);
     else e.effect_findings.push({ step: x.earliest, reason: `missing_${x.kind}` });
   }
@@ -167,9 +179,9 @@ type ErrorSink = (code: string, path: string, message: string) => void;
  * Reported items without that evidence are excluded and reported as errors; evidence the report omits is an error.
  *  - every fact whose state evidence is contradictory (a terminal without its record and terminal-log entry, a commit
  *    key without its written value or version growth) is incomplete evidence, never an effect.
- * Returns whether seq can be trusted for ordering within a step, and whether the state evidence has gaps.
+ * Returns whether seq can be trusted for ordering within a step, and the scope of each contradictory fact.
  */
-function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): { seqTrusted: boolean; evidenceGaps: boolean; contradictoryCommits: Set<string> } {
+function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): { seqTrusted: boolean; gaps: EvidenceGap[] } {
   const logIssues = probeLogIssues(o.probes);
   for (const issue of logIssues) error('sequence_inconsistent', '/probes', issue);
   const derived = derive(o.probes, o.identity);
@@ -206,8 +218,9 @@ function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<strin
   for (const call of o.calls) {
     if (call.step < c.steps.length && !control.has(call.step) && !reported.has(call.step) && decisionFromCall(c.steps[call.step], call) !== undefined) error('decision_not_reported', '/decisions', `the SUT call of step ${call.step} is recorded, but its decision is not reported`);
   }
-  const contradictoryCommits = new Set(derived.inconsistent.filter(x => x.key.startsWith('commit:')).map(x => /^commit:ace:(.+)#\d+$/.exec(x.key)?.[1] ?? ''));
-  return { seqTrusted: logIssues.length === 0 && derived.regressions.length === 0, evidenceGaps: derived.inconsistent.length > 0, contradictoryCommits };
+  // A contradictory fact can have occurred between the probe before its first contradictory probe and that probe.
+  const gaps = derived.inconsistent.map(x => ({ kind: x.kind, execution: x.execution, from: o.probes[x.probe - 1]?.step ?? o.probes[x.probe].step, to: o.probes[x.probe].step }));
+  return { seqTrusted: logIssues.length === 0 && derived.regressions.length === 0, gaps };
 }
 
 function finish(e: Evidence): Evidence {

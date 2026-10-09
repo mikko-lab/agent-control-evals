@@ -49,28 +49,32 @@ export const commitValueJson = (label: string, n: number) => canonicalJson({ lab
  *    probes is in derive()); a key without that value is contradictory.
  * A contradictory fact is not an effect: it is incomplete evidence, whatever the SUT's API answered.
  */
-export function facts(state: ProbeState, identity: IdentityMapping): { present: Map<string, Omit<Effect, 'step'>>; inconsistent: Map<string, string> } {
+/** A fact whose evidence is contradictory: why, and the effect kind and execution label it concerns (null if none). */
+export interface Contradiction { reason: string; kind: EffectKind; execution: string | null }
+
+export function facts(state: ProbeState, identity: IdentityMapping): { present: Map<string, Omit<Effect, 'step'>>; inconsistent: Map<string, Contradiction> } {
   const out = new Map<string, Omit<Effect, 'step'>>();
-  const inconsistent = new Map<string, string>();
+  const inconsistent = new Map<string, Contradiction>();
+  const known = new Set(state.executions.map(x => x.execution_id));
+  const labelled = new Set([...state.executions.map(x => x.label), ...state.entries.map(x => x.label)]);
   const ex = (kind: EffectKind, label: string) => ({ kind, authority: authorityOf(state, label, identity), execution: label, target: null });
   for (const r of state.receipts) out.set(`ack@${r.step}`, { kind: 'revocation_ack', authority: null, execution: null, target: contractTarget(r.target, identity) });
   for (const x of state.entries) out.set(`start:${x.label}`, ex('execution_started', x.label));
   for (const m of state.managed) {
     if (m.value_json === commitValueJson(m.label, m.n)) out.set(`commit:${m.key}`, ex('tool_commit', m.label));
-    else inconsistent.set(`commit:${m.key}`, m.value_json === null ? 'key listed but get(key) returned undefined' : `get(key) returned ${m.value_json}, not the written value`);
+    else inconsistent.set(`commit:${m.key}`, { reason: m.value_json === null ? 'key listed but get(key) returned undefined' : `get(key) returned ${m.value_json}, not the written value`, kind: 'tool_commit', execution: labelled.has(m.label) ? m.label : null });
   }
   for (const d of state.deliveries) out.set(`deliver:${d.label}`, ex('output_delivery', d.label));
-  const known = new Set(state.executions.map(x => x.execution_id));
   for (const x of state.executions) {
     if (x.cancellation_acknowledged) out.set(`cack:${x.label}`, ex('cancellation_ack', x.label));
     const logged = state.terminals.filter(t => t.execution_id === x.execution_id).length;
     const record = x.terminal;
     if (x.state === 'terminal') {
       if (record && record.execution_id === x.execution_id && logged === 1) out.set(`term:${x.label}`, ex('execution_terminal', x.label));
-      else inconsistent.set(`term:${x.label}`, `state terminal, but ${!record ? 'no terminal record in the snapshot' : record.execution_id !== x.execution_id ? `the snapshot's terminal record names ${record.execution_id}` : `${logged} entries in terminals()`}`);
-    } else if (record || logged > 0) inconsistent.set(`term:${x.label}`, `state ${x.state}, but ${record ? 'a terminal record' : `${logged} terminals() entries`} present`);
+      else inconsistent.set(`term:${x.label}`, { reason: `state terminal, but ${!record ? 'no terminal record in the snapshot' : record.execution_id !== x.execution_id ? `the snapshot's terminal record names ${record.execution_id}` : `${logged} entries in terminals()`}`, kind: 'execution_terminal', execution: x.label });
+    } else if (record || logged > 0) inconsistent.set(`term:${x.label}`, { reason: `state ${x.state}, but ${record ? 'a terminal record' : `${logged} terminals() entries`} present`, kind: 'execution_terminal', execution: x.label });
   }
-  for (const t of state.terminals) if (!known.has(t.execution_id)) inconsistent.set(`term:?${t.execution_id}`, `terminals() lists ${t.execution_id}, which no observed execution has`);
+  for (const t of state.terminals) if (!known.has(t.execution_id)) inconsistent.set(`term:?${t.execution_id}`, { reason: `terminals() lists ${t.execution_id}, which no observed execution has`, kind: 'execution_terminal', execution: null });
   return { present: out, inconsistent };
 }
 
@@ -80,7 +84,7 @@ export interface Derivation {
   drift: { key: string; probe: number; point: ProbePoint }[];
   regressions: string[];
   /** Facts whose evidence is contradictory (first probe at which each was seen so). Never effects; incomplete evidence. */
-  inconsistent: { key: string; probe: number; reason: string }[];
+  inconsistent: ({ key: string; probe: number } & Contradiction)[];
 }
 
 /**
@@ -92,17 +96,17 @@ export function derive(probes: Probe[], identity: IdentityMapping): Derivation {
   const seen = new Set<string>();
   const flagged = new Set<string>();
   const result: Derivation = { effects: [], drift: [], regressions: [], inconsistent: [] };
-  const flag = (key: string, probe: number, reason: string) => { if (!flagged.has(key)) { flagged.add(key); result.inconsistent.push({ key, probe, reason }); } };
+  const flag = (key: string, probe: number, x: Contradiction) => { if (!flagged.has(key)) { flagged.add(key); result.inconsistent.push({ key, probe, ...x }); } };
   let previous = new Set<string>();
   let previousVersion = 0;
   probes.forEach((p, k) => {
     const { present, inconsistent } = facts(p.state, identity);
-    for (const [key, reason] of inconsistent) flag(key, k, reason);
+    for (const [key, x] of inconsistent) flag(key, k, x);
     // A commit first present at this probe needs the managed-state version to have grown by at least one per new commit.
     const version = p.state.managed_version;
     if (version < previousVersion) result.regressions.push(`managed_version decreases at probe ${k}`);
     const newCommits = [...present.keys()].filter(key => key.startsWith('commit:') && !seen.has(key) && !flagged.has(key));
-    if (newCommits.length > version - previousVersion) for (const key of newCommits) { flag(key, k, `managed_version ${previousVersion} -> ${version} does not account for ${newCommits.length} new commit(s)`); present.delete(key); }
+    if (newCommits.length > version - previousVersion) for (const key of newCommits) { flag(key, k, { reason: `managed_version ${previousVersion} -> ${version} does not account for ${newCommits.length} new commit(s)`, kind: 'tool_commit', execution: present.get(key)!.execution }); present.delete(key); }
     previousVersion = version;
     for (const key of previous) if (!present.has(key) && !flagged.has(key)) result.regressions.push(`${key} disappears at probe ${k}`);
     for (const [key, f] of present) {

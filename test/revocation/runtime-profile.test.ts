@@ -309,6 +309,63 @@ test('commit evidence: an API receipt or exception neither replaces nor removes 
   assert.deepEqual([r.verdict, findings(r)], ['VIOLATION', ['missing_tool_commit@1']]);
 });
 
+type State = RuntimeObservation['probes'][number]['state'];
+const noTerminalRecord = (label: string) => (s: State) => { for (const x of s.executions) if (x.label === label) x.terminal = null; };
+const keyWithoutValue = (label: string) => (s: State) => { for (const m of s.managed) if (m.label === label) m.value_json = null; };
+
+test('scoped evidence gaps: a missing commit stays a confirmed finding beside an unrelated terminal contradiction (exit 2)', () => {
+  const id = 'commit-shift-across-cut';
+  const noCommit = editProbes(obsOf(id), 0, s => { s.managed = []; s.managed_version = 0; });
+  // 1. The missing commit alone.
+  const alone = ev(id, rereport(caseOf(id), noCommit));
+  assert.deepEqual([alone.verdict, findings(alone), alone.errors], ['VIOLATION', ['missing_tool_commit@1'], []]);
+  // 2. The same missing commit with contradictory terminal evidence of the execution: same finding, plus incomplete.
+  const both = ev(id, rereport(caseOf(id), editProbes(noCommit, firstTerminalProbe(noCommit, 'e1'), noTerminalRecord('e1'))));
+  assert.deepEqual([both.verdict, findings(both), both.errors, both.confirmed_violation], ['VIOLATION', ['missing_tool_commit@1'], [], true]);
+  assert.ok(inconsistent(both, 'term:e1: state terminal, but no terminal record'), JSON.stringify(both.incomplete));
+  assert.ok(both.incomplete.includes('expected effect not confirmed: e1 in window 2..5'), JSON.stringify(both.incomplete));
+  const r = reportWith(new Map([[id, both]]));
+  assert.deepEqual([r.technically_valid, r.has_confirmed_violation, profileExitCode(r)], [false, true, 2]);
+});
+
+test('scoped evidence gaps: one execution\'s contradictory evidence never removes another execution\'s confirmed findings', () => {
+  const id = 'session-in-flight-commit-fence';
+  // e2 (session s2, not revoked) neither commits nor delivers in the state: two confirmed missing effects.
+  const e2Missing = editProbes(obsOf(id), 0, s => { s.managed = s.managed.filter(m => m.label !== 'e2'); s.deliveries = s.deliveries.filter(d => d.label !== 'e2'); });
+  const plain = ev(id, rereport(caseOf(id), e2Missing));
+  assert.deepEqual([plain.verdict, findings(plain)], ['VIOLATION', ['missing_output_delivery@5', 'missing_tool_commit@4']]);
+  // e1 (revoked session) with contradictory terminal evidence, or with a denied commit whose state is contradictory.
+  const e1Commit = editProbes(e2Missing, probeIndex(e2Missing, 3, 'barrier_complete'), s => writeCommit(s, 'e1', 1));
+  for (const [name, o, text] of [
+    ['e1 terminal record missing', editProbes(e2Missing, firstTerminalProbe(e2Missing, 'e1'), noTerminalRecord('e1')), 'term:e1'],
+    ['e1 commit key without value', editProbes(e1Commit, probeIndex(e1Commit, 3, 'barrier_complete'), keyWithoutValue('e1')), 'commit:ace:e1#1'],
+  ] as const) {
+    const e = ev(id, rereport(caseOf(id), o));
+    assert.deepEqual([e.verdict, findings(e), e.errors, e.confirmed_violation], ['VIOLATION', ['missing_output_delivery@5', 'missing_tool_commit@4'], [], true], name);
+    assert.ok(inconsistent(e, text), `${name}: ${JSON.stringify(e.incomplete)}`);
+  }
+});
+
+test('scoped evidence gaps: contradictory commit evidence still leaves that commit unconfirmed and blocks PASS', () => {
+  // The expected commit of commit-shift-across-cut (step 1) listed without its written value: neither PASS nor missing.
+  const id = 'commit-shift-across-cut';
+  const base = obsOf(id);
+  const e = ev(id, rereport(caseOf(id), editProbes(base, firstCommitProbe(base, 'ace:e1#1'), keyWithoutValue('e1'))));
+  assert.deepEqual([e.verdict, findings(e), e.errors, e.confirmed_violation], ['UNASSESSABLE', [], [], false]);
+  assert.ok(inconsistent(e, 'commit:ace:e1#1: key listed but get(key) returned undefined'), JSON.stringify(e.incomplete));
+  assert.ok(e.incomplete.includes('expected effect not confirmed: tool_commit at step 1'), JSON.stringify(e.incomplete));
+  // Without version growth, likewise.
+  const v = ev(id, rereport(caseOf(id), editProbes(base, 0, s => { s.managed_version = 0; })));
+  assert.deepEqual([v.verdict, findings(v)], ['UNASSESSABLE', []]);
+  assert.ok(v.incomplete.includes('expected effect not confirmed: tool_commit at step 1'), JSON.stringify(v.incomplete));
+  // A contradiction is bounded by its window: a contradictory write-behind commit after the cut does not confirm the
+  // commit expected at step 1, which stays missing; the late write itself stays unconfirmed (incomplete).
+  const late = editProbes(editProbes(base, 0, s => { s.managed = []; s.managed_version = 0; }), probeIndex(base, 3, 'barrier_complete'), s => s.managed.push({ key: 'ace:e1#1', label: 'e1', n: 1, value_json: null }));
+  const l = ev(id, rereport(caseOf(id), late));
+  assert.deepEqual([l.verdict, findings(l), l.confirmed_violation], ['VIOLATION', ['missing_tool_commit@1'], true]);
+  assert.ok(inconsistent(l, 'commit:ace:e1#1'), JSON.stringify(l.incomplete));
+});
+
 const cliRun = (...args: string[]) => spawnSync(process.execPath, [join(root, 'dist/src/revocation-cli.js'), ...args], { cwd: root, encoding: 'utf8' });
 const FIXTURE = join(root, 'test/fixtures/revocation-runtime/a682e44-baseline-observations.json');
 const evaluateRecorded = (input: string, out: string) => cliRun('evaluate', '--observations', input, '--lock', LOCK, '--profile', lock.profile, '--out', out);
@@ -370,5 +427,29 @@ test('evaluate --observations --profile --lock: invalid recorded input fails clo
     assert.equal(r.status, 2);
     const report = JSON.parse(readFileSync(join(dir, 'broken-out/report.json'), 'utf8'));
     assert.equal(report.evidence.find((e: { case_id: string }) => e.case_id === broken.corpus[0].case_id).verdict, 'HARNESS_ERROR');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('evaluate --observations: a scoped evidence gap keeps the recorded finding (exit 2, has_confirmed_violation) on the CLI path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rev-recorded-gap-'));
+  try {
+    const id = 'commit-shift-across-cut';
+    const noCommit = editProbes(obsOf(id), 0, s => { s.managed = []; s.managed_version = 0; });
+    const scenarios = [
+      ['missing commit + terminal contradiction', rereport(caseOf(id), editProbes(noCommit, firstTerminalProbe(noCommit, 'e1'), noTerminalRecord('e1'))), 'VIOLATION', ['missing_tool_commit@1'], true],
+      ['contradictory expected commit', rereport(caseOf(id), editProbes(obsOf(id), firstCommitProbe(obsOf(id), 'ace:e1#1'), keyWithoutValue('e1'))), 'UNASSESSABLE', [], false],
+    ] as const;
+    scenarios.forEach(([name, o, verdict, expectedFindings, confirmed], i) => {
+      const recorded = JSON.parse(readFileSync(FIXTURE, 'utf8')) as { corpus: RuntimeObservation[] };
+      recorded.corpus = recorded.corpus.map(x => (x.case_id === id ? o : x));
+      writeFileSync(join(dir, `in-${i}.json`), JSON.stringify(recorded));
+      const r = evaluateRecorded(join(dir, `in-${i}.json`), join(dir, `out-${i}`));
+      assert.equal(r.status, 2, `${name}: ${r.stderr}`);
+      const report = JSON.parse(readFileSync(join(dir, `out-${i}/report.json`), 'utf8'));
+      assert.deepEqual(validateProfileReport(report), [], name);
+      const e = report.evidence.find((x: Evidence) => x.case_id === id) as Evidence;
+      assert.deepEqual([e.verdict, findings(e), e.confirmed_violation, report.has_confirmed_violation, report.technically_valid], [verdict, expectedFindings, confirmed, confirmed, false], name);
+      assert.equal(canonicalJsonLines(report.evidence), canonicalJsonLines(reportWith(new Map([[id, ev(id, o)]])).evidence), `${name}: the CLI evidence equals the in-process evaluation`);
+    });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
