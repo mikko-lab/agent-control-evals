@@ -1,0 +1,522 @@
+{
+  "profile": "acs-guardrail-demo-a682e44/revocation-0.4.0/2",
+  "contract": "revocation-0.4.0",
+  "corpus_sha256": "16692ac9c055a504b01700e66b8a441781eb9dc7d6787dc214db0a5a5fba0708",
+  "sut_lock": {
+    "file": "sut.revocation.lock.json",
+    "sut_commit": "a682e4479dbccd1cd5f665f5d4879bd3dddb8b47"
+  },
+  "control_ops": [
+    "finish",
+    "seal"
+  ],
+  "identity": {
+    "runtime_session": "one per (tenant, session) pair",
+    "capability": "one per authority",
+    "request": "fresh per start attempt",
+    "clear_session": "never"
+  },
+  "supported": {
+    "revoke": {
+      "scopes": [
+        "authority_without_descendants",
+        "session"
+      ]
+    },
+    "start": {
+      "each_attempt": "fresh signed request under the authority's original capability"
+    },
+    "commit": {
+      "on": "execution started by the runtime",
+      "after_terminal": "retained context"
+    },
+    "deliver": {
+      "before_finish": true
+    },
+    "cancel_ack": {
+      "after_covering_revocation_before_finish": true
+    }
+  },
+  "unsupported_classes": [
+    "initial_pending_authority",
+    "approve",
+    "issue",
+    "single_use_permit",
+    "tenant_scope_revocation",
+    "descendant_coverage",
+    "client_chosen_execution_id",
+    "operation_on_execution_unknown_to_runtime",
+    "deliver_after_finish",
+    "cancel_ack_after_runtime_terminal",
+    "cancel_ack_without_cancellation_request",
+    "commit_once_only_sole_denial",
+    "deliver_requires_commit_sole_denial"
+  ],
+  "uncovered_design_fences": [
+    "approve (authority, descendant)",
+    "issue (authority)",
+    "start (descendant, tenant)",
+    "commit (descendant, tenant)",
+    "single use",
+    "execution identity (execution_id_in_use, unbound_execution)"
+  ],
+  "barrier_watchdog_ms": 2000,
+  "cases": [
+    {
+      "id": "pending-approval",
+      "family": "pending_approval",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "out_of_scope": [
+        {
+          "step": 1,
+          "requirement": "authority",
+          "capability_class": "initial_pending_authority",
+          "reason": "authority a starts pending; the runtime has no pending grant before a request, and approval and start are one runtime operation"
+        },
+        {
+          "step": 1,
+          "requirement": "decision",
+          "capability_class": "approve",
+          "reason": "approval is not a separate runtime operation (resolveApproval also starts the execution)"
+        },
+        {
+          "step": 2,
+          "requirement": "decision",
+          "capability_class": "issue",
+          "reason": "permits are minted inside the runtime start path and are neither invocable nor observable"
+        }
+      ]
+    },
+    {
+      "id": "issue-after-cut",
+      "family": "pending_approval",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "out_of_scope": [
+        {
+          "step": 0,
+          "requirement": "authority",
+          "capability_class": "initial_pending_authority",
+          "reason": "authority a starts pending; the runtime has no pending grant before a request, and approval and start are one runtime operation"
+        },
+        {
+          "step": 0,
+          "requirement": "decision",
+          "capability_class": "approve",
+          "reason": "approval is not a separate runtime operation (resolveApproval also starts the execution)"
+        },
+        {
+          "step": 2,
+          "requirement": "decision",
+          "capability_class": "issue",
+          "reason": "permits are minted inside the runtime start path and are neither invocable nor observable"
+        }
+      ]
+    },
+    {
+      "id": "issued-permit",
+      "family": "issued_permit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4,
+        5
+      ],
+      "tested_property": "A revoked capability denies two fresh requests under it before any execution.",
+      "family_caveat": "The runtime has no permit object; neither unused-permit nor fresh-ID-retry semantics are tested. The denials are explained by revocation of the capability."
+    },
+    {
+      "id": "fresh-id-retry-unused-permit",
+      "family": "issued_permit",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        7
+      ],
+      "out_of_scope": [
+        {
+          "step": 0,
+          "requirement": "authority",
+          "capability_class": "initial_pending_authority",
+          "reason": "authority a starts pending; the runtime has no pending grant before a request, and approval and start are one runtime operation"
+        },
+        {
+          "step": 0,
+          "requirement": "decision",
+          "capability_class": "issue",
+          "reason": "the denial rests on permit_not_issued alone, which the runtime does not enforce"
+        },
+        {
+          "step": 1,
+          "requirement": "decision",
+          "capability_class": "approve",
+          "reason": "approval is not a separate runtime operation (resolveApproval also starts the execution)"
+        },
+        {
+          "step": 2,
+          "requirement": "decision",
+          "capability_class": "issue",
+          "reason": "permits are minted inside the runtime start path and are neither invocable nor observable"
+        }
+      ]
+    },
+    {
+      "id": "cut-before-start",
+      "family": "issued_permit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        2,
+        3
+      ],
+      "tested_property": "A capability revoked before its first request is denied at the start.",
+      "family_caveat": "The runtime has no permit object; neither unused-permit nor fresh-ID-retry semantics are tested. The denials are explained by revocation of the capability."
+    },
+    {
+      "id": "duplicate-revocation",
+      "family": "issued_permit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4
+      ],
+      "tested_property": "A repeated capability revocation is acknowledged (already_revoked) and still denies a request.",
+      "family_caveat": "The runtime has no permit object; neither unused-permit nor fresh-ID-retry semantics are tested. The denials are explained by revocation of the capability."
+    },
+    {
+      "id": "active-session",
+      "family": "active_session",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4,
+        5
+      ],
+      "tested_property": "A session revocation denies the starts of two capabilities that share the revoked runtime session."
+    },
+    {
+      "id": "session-in-flight-commit-fence",
+      "family": "active_session",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        6,
+        7,
+        8
+      ],
+      "tested_property": "A session revocation fences the commit of a running execution; a running execution in another session of the same tenant still commits and delivers."
+    },
+    {
+      "id": "session-delivery-fence-after-commit",
+      "family": "active_session",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "A commit before a session revocation stays; the delivery after it is withheld."
+    },
+    {
+      "id": "tenant-multi-session-in-flight",
+      "family": "active_session",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "out_of_scope": [
+        {
+          "step": 3,
+          "requirement": "decision",
+          "capability_class": "tenant_scope_revocation",
+          "reason": "the runtime has no tenant scope"
+        }
+      ]
+    },
+    {
+      "id": "start-before-cut",
+      "family": "in_flight_before_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4
+      ],
+      "tested_property": "A capability revocation fences the commit of an execution that started before it."
+    },
+    {
+      "id": "in-flight-before-commit",
+      "family": "in_flight_before_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6
+      ],
+      "tested_property": "A capability revocation of a running execution: the cancellation is acknowledged, the commit is fenced and the delivery is withheld; the acknowledgement is not a terminal."
+    },
+    {
+      "id": "late-commit-after-terminal",
+      "family": "in_flight_before_commit",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        2,
+        5
+      ],
+      "out_of_scope": [
+        {
+          "step": 4,
+          "requirement": "decision",
+          "capability_class": "deliver_after_finish",
+          "reason": "the tool function has already settled at finish; the runtime has no later delivery operation"
+        }
+      ]
+    },
+    {
+      "id": "retry-after-revocation",
+      "family": "in_flight_before_commit",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        2,
+        5,
+        6
+      ],
+      "out_of_scope": [
+        {
+          "step": 4,
+          "requirement": "decision",
+          "capability_class": "operation_on_execution_unknown_to_runtime",
+          "reason": "commit of a/retry, an execution the runtime never started; there is no execution context to call"
+        }
+      ]
+    },
+    {
+      "id": "in-flight-after-commit",
+      "family": "in_flight_after_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        6,
+        7
+      ],
+      "tested_property": "A commit before a capability revocation stays; the later delivery is withheld and a second commit is fenced."
+    },
+    {
+      "id": "commit-before-cut",
+      "family": "in_flight_after_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "A commit and a delivery before a capability revocation stay; the terminal follows at finish."
+    },
+    {
+      "id": "commit-shift-across-cut",
+      "family": "in_flight_after_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "A commit observed at its own step before a capability revocation; cancellation acknowledged after the revocation."
+    },
+    {
+      "id": "cancel-is-not-rollback",
+      "family": "in_flight_after_commit",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        4,
+        6
+      ],
+      "out_of_scope": [
+        {
+          "step": 5,
+          "requirement": "decision",
+          "capability_class": "deliver_after_finish",
+          "reason": "the tool function has already settled at finish; the runtime has no later delivery operation"
+        }
+      ]
+    },
+    {
+      "id": "derived-authority",
+      "family": "descendant_scope",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "out_of_scope": [
+        {
+          "step": 2,
+          "requirement": "authority",
+          "capability_class": "initial_pending_authority",
+          "reason": "authority pending-child starts pending; the runtime has no pending grant before a request, and approval and start are one runtime operation"
+        },
+        {
+          "step": 0,
+          "requirement": "effect",
+          "capability_class": "descendant_coverage",
+          "reason": "revocation of a must also cover child, pending-child; a runtime capability revocation covers one capability"
+        },
+        {
+          "step": 2,
+          "requirement": "decision",
+          "capability_class": "approve",
+          "reason": "approval is not a separate runtime operation (resolveApproval also starts the execution)"
+        },
+        {
+          "step": 3,
+          "requirement": "decision",
+          "capability_class": "issue",
+          "reason": "permits are minted inside the runtime start path and are neither invocable nor observable"
+        }
+      ]
+    },
+    {
+      "id": "derived-in-flight-ancestor-revoked",
+      "family": "descendant_scope",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        3,
+        4
+      ],
+      "out_of_scope": [
+        {
+          "step": 1,
+          "requirement": "effect",
+          "capability_class": "descendant_coverage",
+          "reason": "revocation of a must also cover child; a runtime capability revocation covers one capability"
+        }
+      ]
+    },
+    {
+      "id": "sibling-isolation",
+      "family": "scope_isolation",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        8,
+        9
+      ],
+      "tested_property": "A capability revocation leaves two other capabilities in the same runtime session usable.",
+      "family_caveat": "Parent/child links are not modelled; no tree semantics are tested."
+    },
+    {
+      "id": "session-isolation",
+      "family": "scope_isolation",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        7
+      ],
+      "tested_property": "A session revocation leaves another session of the same tenant usable."
+    },
+    {
+      "id": "tenant-isolation",
+      "family": "scope_isolation",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        7
+      ],
+      "out_of_scope": [
+        {
+          "step": 0,
+          "requirement": "decision",
+          "capability_class": "tenant_scope_revocation",
+          "reason": "the runtime has no tenant scope"
+        }
+      ]
+    },
+    {
+      "id": "execution-id-reuse",
+      "family": "identity",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        3,
+        5,
+        6
+      ],
+      "out_of_scope": [
+        {
+          "step": 1,
+          "requirement": "decision",
+          "capability_class": "client_chosen_execution_id",
+          "reason": "the denial rests on execution_id_in_use alone, which the runtime does not enforce"
+        },
+        {
+          "step": 2,
+          "requirement": "decision",
+          "capability_class": "operation_on_execution_unknown_to_runtime",
+          "reason": "commit of b/e1, an execution the runtime never started; there is no execution context to call"
+        }
+      ]
+    },
+    {
+      "id": "permit-single-use",
+      "family": "control",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        4,
+        5,
+        6
+      ],
+      "out_of_scope": [
+        {
+          "step": 1,
+          "requirement": "decision",
+          "capability_class": "single_use_permit",
+          "reason": "the denial rests on permit_consumed alone, which the runtime does not enforce"
+        }
+      ]
+    },
+    {
+      "id": "approval-before-cut",
+      "family": "control",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        5,
+        7
+      ],
+      "out_of_scope": [
+        {
+          "step": 0,
+          "requirement": "authority",
+          "capability_class": "initial_pending_authority",
+          "reason": "authority a starts pending; the runtime has no pending grant before a request, and approval and start are one runtime operation"
+        },
+        {
+          "step": 0,
+          "requirement": "decision",
+          "capability_class": "approve",
+          "reason": "approval is not a separate runtime operation (resolveApproval also starts the execution)"
+        },
+        {
+          "step": 1,
+          "requirement": "decision",
+          "capability_class": "issue",
+          "reason": "permits are minted inside the runtime start path and are neither invocable nor observable"
+        }
+      ]
+    },
+    {
+      "id": "deferred-terminal-before-seal",
+      "family": "observation_timing",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        5
+      ],
+      "tested_property": "After a capability revocation and an acknowledged cancellation, the terminal follows at finish and a later commit through the retained context is fenced."
+    }
+  ]
+}

@@ -23,7 +23,7 @@ test('CLI self-test: two independent runs are byte-identical and every SHA bindi
   assert.deepEqual(a, files(join(dir, 'b')).map(f => relative(join(dir, 'b'), f)).sort());
   for (const f of a) assert.deepEqual(readFileSync(join(dir, 'a', f)), readFileSync(join(dir, 'b', f)), f);
   const m = JSON.parse(readFileSync(join(dir, 'a/manifest.json'), 'utf8'));
-  assert.equal(m.version, 'revocation-0.3.0'); assert.equal(m.input_observations_sha256, null);
+  assert.equal(m.version, 'revocation-0.4.0'); assert.equal(m.input_observations_sha256, null);
   assert.equal(sha256Hex(canonicalJson(m.implementation)), m.implementation_sha256);
   for (const f of m.implementation) assert.equal(sha256Hex(readFileSync(join(root, f.path))), f.sha256, f.path);
   assert.deepEqual(m.files.map((f: { path: string }) => f.path).sort(), a.filter(f => f !== 'manifest.json'));

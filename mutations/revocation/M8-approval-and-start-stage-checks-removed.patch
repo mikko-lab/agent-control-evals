@@ -1,0 +1,13 @@
+diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
+index b936b4f..baedd04 100644
+--- a/src/guarded-executor.ts
++++ b/src/guarded-executor.ts
+@@ -873,7 +873,7 @@ export class GuardedExecutor {
+ 
+   #denyIfRevoked(stage: Exclude<RevocationStage, "delivery">, requestId: string, authority: { session_id: string; capability_id?: string; tool: string }): void {
+     const match = this.#revocationAt(stage, requestId, authority);
+-    if (match) throw new AuthorityRevokedError(stage, match);
++    if (match && stage === "request") throw new AuthorityRevokedError(stage, match);
+   }
+ 
+   /**

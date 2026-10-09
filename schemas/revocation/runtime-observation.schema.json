@@ -1,0 +1,537 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "revocation-0.4.0 pinned-runtime-adapter observation (docs/revocation/runtime-adapter-compatibility.md). Extends the 0.3.0 observation with provenance, a probe-bound sequence index per effect, the probe log, the identity mapping, the SUT call records and diagnostics. Decisions of harness control steps (finish, seal) are absent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "complete",
+    "decisions",
+    "effects",
+    "identity",
+    "probes",
+    "calls",
+    "diagnostics"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/decision"
+      }
+    },
+    "effects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/effect"
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities",
+        "sessions"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sessions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tenant",
+              "session"
+            ],
+            "properties": {
+              "tenant": {
+                "type": "string",
+                "minLength": 1
+              },
+              "session": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "step",
+          "point",
+          "state"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "step": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "point": {
+            "enum": [
+              "pre_action",
+              "tool_entry",
+              "event",
+              "barrier_complete",
+              "seal_settle"
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/state"
+          }
+        }
+      }
+    },
+    "calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "api",
+          "outcome"
+        ],
+        "properties": {
+          "step": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "api": {
+            "enum": [
+              "revoke",
+              "process",
+              "resolveApproval",
+              "commit",
+              "deliver",
+              "acknowledgeCancellation"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "returned",
+              "threw",
+              "tool_invoked",
+              "fulfilled",
+              "rejected",
+              "timeout"
+            ]
+          },
+          "class": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "minLength": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "code",
+          "detail"
+        ],
+        "properties": {
+          "step": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "id"
+          ],
+          "properties": {
+            "scope": {
+              "const": "authority"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "tenant",
+            "session"
+          ],
+          "properties": {
+            "scope": {
+              "const": "session"
+            },
+            "tenant": {
+              "type": "string",
+              "minLength": 1
+            },
+            "session": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "tenant"
+          ],
+          "properties": {
+            "scope": {
+              "const": "tenant"
+            },
+            "tenant": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "decision",
+        "provenance"
+      ],
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decision": {
+          "enum": [
+            "ALLOW",
+            "DENY",
+            "UNKNOWN"
+          ]
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "sut_api",
+              "sut_state",
+              "harness_observation"
+            ]
+          }
+        }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "kind",
+        "authority",
+        "execution",
+        "target",
+        "seq",
+        "provenance"
+      ],
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "enum": [
+            "approval_granted",
+            "permit_issued",
+            "execution_started",
+            "tool_commit",
+            "output_delivery",
+            "revocation_ack",
+            "cancellation_ack",
+            "execution_terminal"
+          ]
+        },
+        "authority": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "execution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "target": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/target"
+            }
+          ]
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "sut_api",
+              "sut_state",
+              "harness_observation"
+            ]
+          }
+        }
+      }
+    },
+    "runtime_target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "capability_id"
+          ],
+          "properties": {
+            "scope": {
+              "const": "capability"
+            },
+            "capability_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope",
+            "session_id"
+          ],
+          "properties": {
+            "scope": {
+              "const": "session"
+            },
+            "session_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipts",
+        "entries",
+        "executions",
+        "managed",
+        "deliveries"
+      ],
+      "properties": {
+        "receipts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "step",
+              "target"
+            ],
+            "properties": {
+              "step": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "target": {
+                "$ref": "#/$defs/runtime_target"
+              }
+            }
+          }
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "execution_id",
+              "request_authority"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "execution_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "request_authority": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "executions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "execution_id",
+              "capability_id",
+              "session_id",
+              "state",
+              "cancellation_acknowledged"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "execution_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "capability_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "session_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "state": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cancellation_acknowledged": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "managed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "label",
+              "n"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "n": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "deliveries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

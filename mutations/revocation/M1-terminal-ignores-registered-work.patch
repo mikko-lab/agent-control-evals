@@ -1,0 +1,13 @@
+diff --git a/src/managed-execution.ts b/src/managed-execution.ts
+index 188316b..33988ad 100644
+--- a/src/managed-execution.ts
++++ b/src/managed-execution.ts
+@@ -462,7 +462,7 @@ export class ManagedExecution {
+   }
+ 
+   #maybeTerminal(): void {
+-    if (this.#state === "terminal" || !this.#mainSettled || this.#tracked.pending > 0) return;
++    if (this.#state === "terminal" || !this.#mainSettled) return;
+     this.#state = "terminal";
+     const terminal: ExecutionTerminal = {
+       execution_id: this.id,

@@ -1,0 +1,13 @@
+diff --git a/src/managed-execution.ts b/src/managed-execution.ts
+index 188316b..0ecc838 100644
+--- a/src/managed-execution.ts
++++ b/src/managed-execution.ts
+@@ -306,7 +306,7 @@ export class ManagedExecution {
+     } catch (e) {
+       // The Promise cannot be observed without running its code: the call fails, but the work behind it may still be
+       // pending, so this is not evidence that the execution ended. No terminal; the execution stays cancellable.
+-      this.#markUnobservable();
++      this.#settleMain("failed");
+       throw new TypeError("Tool returned a native Promise whose settlement cannot be observed", { cause: e });
+     }
+     if (settlement.ok) {

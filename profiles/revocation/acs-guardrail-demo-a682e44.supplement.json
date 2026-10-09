@@ -1,0 +1,397 @@
+{
+  "supplement": "acs-guardrail-demo-a682e44/revocation-0.4.0/supplement/1",
+  "contract": "revocation-0.4.0",
+  "sut_lock": {
+    "file": "sut.revocation.lock.json",
+    "sut_commit": "a682e4479dbccd1cd5f665f5d4879bd3dddb8b47"
+  },
+  "cases": [
+    {
+      "id": "sup-pending-approval-revoked",
+      "family": "pending_approval",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "authority",
+            "id": "a"
+          }
+        },
+        {
+          "op": "approve",
+          "authority": "a"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "setup": {
+        "kind": "pending_request",
+        "authority": "a",
+        "tool": "update_record"
+      },
+      "approve_starts": {
+        "a": "e1"
+      },
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "purpose": "A pending runtime approval whose capability is revoked before the approval attempt: the approval is denied and the tool is never invoked.",
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      },
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "DENY"
+          },
+          {
+            "step": 2,
+            "decision": "DENY"
+          },
+          {
+            "step": 3,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "earliest": 0,
+            "latest": 0
+          }
+        ],
+        "rationale": [
+          {
+            "step": 1,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 2,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 0,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "pending",
+                "revoked": "by_cut",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "sup-pending-approval-control",
+      "family": "control",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "approve",
+          "authority": "a"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "setup": {
+        "kind": "pending_request",
+        "authority": "a",
+        "tool": "update_record"
+      },
+      "approve_starts": {
+        "a": "e1"
+      },
+      "double": "default",
+      "expectation_source": "runtime_specific",
+      "runtime_specific_reason": "Approval and start are one runtime operation: an allowed approval starts the execution at the approve step. The contract would expect approval_granted instead of execution_started.",
+      "purpose": "Non-vacuity control for sup-pending-approval-revoked: with the same setup, an approval without revocation starts the tool.",
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      },
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 1,
+            "latest": 2
+          }
+        ],
+        "rationale": [],
+        "cuts": []
+      }
+    },
+    {
+      "id": "sup-commit-after-terminal-no-revocation",
+      "family": "observation_timing",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "commit",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "commit",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "purpose": "The terminal commit fence on its own: a commit through the retained context after the terminal is denied, without any revocation that could mask it. The first commit shows commits work (non-vacuity).",
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      },
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 3,
+            "decision": "DENY"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "tool_commit",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 1,
+            "latest": 1
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 2,
+            "latest": 4
+          }
+        ],
+        "rationale": [
+          {
+            "step": 3,
+            "reasons": [
+              "finish_requested",
+              "already_committed"
+            ]
+          }
+        ],
+        "cuts": []
+      }
+    },
+    {
+      "id": "sup-unobservable-pending-settlement",
+      "family": "observation_timing",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "double": "returns_unobservable_pending_promise",
+      "expectation_source": "contract_oracle",
+      "purpose": "Control run: the tool returns a pending native Promise whose settlement the runtime cannot observe. The correct outcome is missing terminal evidence; a reported terminal (for example premature) is a failure.",
+      "expected_result": {
+        "verdict": "UNASSESSABLE",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [
+          "terminal evidence missing for e1 in window 1..2",
+          "execution not observed terminal: e1"
+        ],
+        "errors": []
+      },
+      "declared_incomplete": [
+        "terminal evidence missing for e1 in window 1..2",
+        "execution not observed terminal: e1"
+      ],
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 1,
+            "latest": 2
+          }
+        ],
+        "rationale": [],
+        "cuts": []
+      }
+    }
+  ]
+}

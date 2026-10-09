@@ -1,0 +1,12 @@
+diff --git a/src/managed-execution.ts b/src/managed-execution.ts
+index 188316b..74ff1b6 100644
+--- a/src/managed-execution.ts
++++ b/src/managed-execution.ts
+@@ -387,7 +387,6 @@ export class ManagedExecution {
+ 
+   /** The fence reason for an execution that may no longer commit, apart from revocation. */
+   #closedReason(): CommitBlockReason | undefined {
+-    if (this.#state === "terminal") return "execution_terminal";
+     if (this.#state === "unobservable") return "settlement_unobservable";
+     return undefined;
+   }
