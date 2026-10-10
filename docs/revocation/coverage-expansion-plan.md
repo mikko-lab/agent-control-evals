@@ -360,9 +360,9 @@ and a mutant that removes only one of these check points is masked by the others
 
 | Fence | Tenant revocation (G1) | Ancestor revocation (G2) |
 |---|---|---|
-| **Request** (`process()`; stage `request`) | **Corpus** `tenant-isolation` step 1: start DENY, no `execution_started`. Mutant **M22** "tenant not checked at request and start" → `false_allow@1`, `unexpected_execution_started@1`. Runtime test for each of the two request check points: **M27a**. | **Supplement S5** `sup-ancestor-revoked-child-start` step 1: start DENY. Mutant **M20** "ancestry not walked at request and start" → `false_allow@1`, `unexpected_execution_started@1`. Runtime test per check point: **M27b**. |
+| **Request** (`process()`; stage `request`) | **Corpus** `tenant-isolation` step 1: start DENY, no `execution_started`. Mutant **M22** "tenant not checked at request and start" → `false_allow@1`, `unexpected_execution_started@1`. Runtime tests per request check point: **M27a** (early check) and **M27e** (after verification). | **Supplement S5** `sup-ancestor-revoked-child-start` step 1: start DENY. Mutant **M20** "ancestry not walked at request and start" → `false_allow@1`, `unexpected_execution_started@1`. Runtime test for the request check after verification: **M27b**. Ancestry can only be checked once the chain is verified, so there is no early check. |
 | **Approval** (`resolveApproval()` re-verification; stage `approval`) | **Supplement S7** `sup-tenant-pending-approval-revoked`: approve DENY, tool never invoked. Mutant **M26** "tenant not checked at approval re-verification and start guard" → `false_allow@1`, `unexpected_execution_started@1`. The approval path also passes the start guard, so the approval check alone is masked; runtime test for it: **M26a**. | **Supplement S8** `sup-ancestor-pending-approval-revoked`: approve DENY. Mutant **M34** "ancestry not checked at approval re-verification and start guard" → `false_allow@1`, `unexpected_execution_started@1`. Runtime test for the approval check alone: **M34a**. |
-| **Start guard** (`beforeInvoke`; stage `start`) | **Runtime-own test only** (revocation from an injected hook between the request checks and the invocation). Runtime-test mutant **M27c**. | **Runtime-own test only.** Runtime-test mutant **M27d**. |
+| **Start guard** (`beforeInvoke`; stage `start`) | **Runtime-own test only**: a revocation from an injected hook (the `tool_execution_started` audit record) after the request checks and before the invocation. Runtime-test mutant **M27c**. | **Runtime-own test only**, built the same way. Runtime-test mutant **M27d**. |
 | **Commit** (`ctx.commit()`) | **Corpus** `tenant-multi-session-in-flight` steps 4 and 5: DENY, no `tool_commit`. Mutant **M15** → `false_allow@4`, `false_allow@5`, `unexpected_tool_commit@4`, `unexpected_tool_commit@5`. **Supplement S9** step 2 is the non-vacuity commit before the cut. | **Corpus** `derived-in-flight-ancestor-revoked` step 2. Mutant **M21** → `false_allow@2`, `unexpected_tool_commit@2`. **Supplement S10** step 2 is the non-vacuity commit before the cut. |
 | **Delivery** (early check and hand-over) | **Supplement S9** `sup-tenant-fences-in-flight` step 6: deliver DENY (withheld, `tenant_revoked`), no `output_delivery`. Mutant **M28** "tenant not checked at delivery" → `false_allow@6`, `unexpected_output_delivery@6`. Runtime test per check point: **M28a/M28b**. | **Supplement S10** `sup-ancestor-fences-in-flight` step 6: deliver DENY. Mutant **M35** → `false_allow@6`, `unexpected_output_delivery@6`. Runtime test per check point: **M35a/M35b**. |
 | **Cancellation signal** (fan-out in `revoke()`) | **Supplement S9** step 5: `cancel_ack` ALLOW with `cancellation_ack@5`. The runtime returns `true` only when a cancellation was requested, so this observes the signal through the contract. Mutant **M29** "tenant revoke sends no cancellation" → `false_deny@5`, `missing_cancellation_ack@5`. Non-coverage of other tenants (no signal) is a runtime-own test, because the contract expects ALLOW for `cancel_ack` without a cancellation request, and this runtime's `false` is a declared unsupported class (§8). | **Supplement S10** step 5. Mutant **M36** "ancestor revoke sends no cancellation to descendants" → `false_deny@5`, `missing_cancellation_ack@5`. Non-coverage: runtime-own test. |
@@ -417,6 +417,7 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
   | Mutant | Removed or broken safeguard |
   |---|---|
   | M30 | tenant taken from request metadata instead of the signed grant |
+  | M30b | request/grant tenant mismatch not rejected |
   | M31 | tenantless grant accepted with tenancy enabled |
   | M32 | session not bound to one tenant (a second tenant can claim the same session) |
   | M33 | fingerprint excludes `tenant_id` (same id re-bound to another tenant) |
@@ -430,7 +431,7 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
   - In package 1 the parent link is **issuer-attested derivation**. The trusted issuer signs a child grant that names its parent.
   - The runtime enforces both:
     - **revocation dependency**: the child can be used only while no capability in its chain is revoked;
-    - **attenuation**: the child's `allowed_tools` are a subset of the parent's, its validity window lies within the parent's, and its tenant equals the parent's. Without attenuation, "descendant" would be a label rather than derived authority.
+    - **attenuation**: the child's `allowed_tools` are a subset of the parent's, and its validity window lies within the parent's. Without attenuation, "descendant" would be a label rather than derived authority. Tenant equality is checked once, by the tenant-conflict check below, not by attenuation, so the two checks do not mask each other.
   - Holder-to-holder delegation, where a child is signed by the parent holder's key, is out of scope. It needs holder keys and a separate design and review.
 - **Source of the verified chain.**
   - The child grant carries a signed reference `parent: { capability_id, fingerprint }`, where the fingerprint is that of the parent grant's body.
@@ -468,7 +469,8 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
   | M39 | depth not limited |
   | M40 | repeated id accepted |
   | M41 | tenant mismatch in the chain accepted |
-  | M42 | chain re-resolved at a later fence instead of using the start-time binding, or an already bound ancestor id re-bound to new content |
+  | M42a | chain re-resolved at a later fence instead of using the start-time binding |
+  | M42b | an already bound ancestor id re-bound to new content |
   | M43 | attenuation not enforced (child tool outside the parent's `allowed_tools`, or child validity beyond the parent's) |
   | M44 | root signature not verified |
   | M45 | intermediate member's signature not verified |
@@ -482,7 +484,7 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
 |---|---|---|
 | Corpus witness | M15, M16, M21, M22, M37 | The eval repo's mutation gate (typechecked patches, fixed witness, findings, exit) |
 | Supplement witness | M20 (S5), M26 (S7), M34 (S8), M28 and M29 (S9), M35 and M36 (S10) | The same gate. The findings appear in the supplement section. |
-| Runtime-own tests | M26a, M27a–d, M28a/b, M34a, M35a/b, M30–M33b, M38–M48 | The runtime-test mutant gate (§7.8). It is reported separately from the contract mutants and never counted as corpus or supplement evidence. |
+| Runtime-own tests | M26a, M27a–e, M28a/b, M34a, M35a/b, M30, M30b, M31–M33b, M38–M41, M42a/b, M43–M48; evidence kind per mutant in §7.8 | The runtime-test mutant gate (§7.8). It is reported separately from the contract mutants and never counted as corpus or supplement evidence. |
 | Adapter | AM11 (tenant revoke expanded to session revokes), AM12, AM13 | The adapter-mutant checks, as for AM1–AM10 |
 
 ### 7.8 Runtime-test mutant gate
@@ -493,7 +495,8 @@ A failing runtime test suite is not enough to count a runtime-test mutant as det
 - `id` and patch file;
 - the pre-named **witness tests** (file and test name);
 - the **expected assertion** in each witness: a fixed assertion label that the runtime test carries in its message, plus the expected-vs-actual shape;
-- the **evidence kind**, one of `check_point`, `containment_effect` or both (see below).
+- the **evidence kind**, one of `check_point`, `containment_effect` or `both`, under the rule below;
+- the **kept safeguards** that could also reject the witness input, and why the witness construction does not trigger them.
 
 **A mutant counts as detected only if all of the following hold:**
 
@@ -516,15 +519,54 @@ A failing runtime test suite is not enough to count a runtime-test mutant as det
 - a witness failure that is not the expected assertion;
 - a failing control.
 
-**Check point versus containment effect.** The gate report keeps these apart, per mutant and in the totals.
-- **`check_point`.** The witness proves that a specific runtime check point is exercised and enforced: the stage or code of the rejection. This is the only possible evidence when other check points would still contain the effect, as for:
-  - the two request checks;
-  - the approval check versus the start guard;
-  - the two delivery checks.
+**Evidence kind: general rule.** The gate report keeps check-point and containment evidence apart, per mutant and in the totals.
 
-  These mutants (M26a, M27a–d, M28a/b, M34a, M35a/b), and M47 and M48 (chain authentication, below), are reported as check-point evidence only, never as containment.
-- **`containment_effect`.** The witness proves that the effect is prevented in the runtime's own state: the tool not called, no execution created, no commit, output withheld or cancellation requested. Grant and chain validation mutants (M30–M33b, M38–M46) carry both kinds. Their witnesses assert both the rejection code (check point) and that no tool call, managed execution, permit or binding happened (containment).
+- **`check_point`.** The named stage or code assertion of the witness fails. The rejection does not happen at the named check point, or not with the named stage or code.
+- **`containment_effect`.** The named effect assertion of the witness fails, **and** a behaviour change is observed under the mutant in the runtime's own state. Examples: the tool function is called, a managed execution or permit is created, a commit is written, output is handed over, a binding is recorded, or no cancellation is requested.
+- **`both`.** Both of the above hold in the same witness run.
+- **A changed rejection code alone is never containment.** If the input is still rejected under the mutant, only by another check or with another code, the mutant is `check_point` at most.
+- **Masking safeguards are kept.** No safeguard is removed or weakened to give another check a containment witness.
+  - A witness may avoid a kept safeguard only through a realistic input that does not trigger it, for example a first use with nothing bound yet, or a fresh session. The manifest names that safeguard and the reason.
+  - Where no realistic input avoids every kept safeguard, the mutant is `check_point`.
 - **Contract mutants.** Corpus and supplement mutants are containment evidence through the contract's decisions and effects. They are reported in the existing mutation report, not in this gate.
+
+**Per-mutant evidence kind (package 1).** "Kept safeguards" are the other checks that would still reject the witness input, if any.
+
+| Mutant | Safeguard removed | Witness test | Check-point assertion | Effect assertion; behaviour change under the mutant | Kept safeguards that still contain the effect | Kind |
+|---|---|---|---|---|---|---|
+| M26a | tenant check at approval re-verification | T-fence-tenant-approval | denial at stage `approval` | — | start guard (`resolveApproval()` runs the start path) | `check_point` |
+| M34a | ancestry check at approval re-verification | T-fence-ancestor-approval | denial at stage `approval` | — | start guard | `check_point` |
+| M27a | tenant check at the early request check (session binding) | T-fence-tenant-request-early (session already bound) | denial before capability resolution | — | request check after verification, start guard | `check_point` |
+| M27e | tenant check at the request check after verification | T-fence-tenant-request-verified | denial after `capability_verified` | — | start guard | `check_point` |
+| M27b | ancestry check at the request check after verification | T-fence-ancestor-request | denial after `capability_verified` | — | start guard | `check_point` |
+| M27c | tenant check at the start guard | T-fence-tenant-start-guard (revocation injected after the request checks) | denial at stage `start` | tool not called; **under the mutant the tool is called** | none (the revocation happens after every earlier check) | `both` |
+| M27d | ancestry check at the start guard | T-fence-ancestor-start-guard (same construction) | denial at stage `start` | tool not called; **tool called** | none | `both` |
+| M28a | tenant check at the early delivery check | T-fence-tenant-delivery-early | withheld at the early check | — | hand-over check | `check_point` |
+| M28b | tenant check at the hand-over | T-fence-tenant-handover (revocation injected from the `tool_result_delivered` audit record, after the early check) | withheld at hand-over, code `tenant_revoked` | output withheld; **output handed over** | none (the revocation happens after the early check) | `both` |
+| M35a | ancestry check at the early delivery check | T-fence-ancestor-delivery-early | withheld at the early check | — | hand-over check | `check_point` |
+| M35b | ancestry check at the hand-over | T-fence-ancestor-handover (same construction as M28b) | withheld at hand-over | output withheld; **output handed over** | none | `both` |
+| M30 | tenant from request metadata instead of the grant | T-tenant-from-grant: tenant `t1` revoked; request without `tenant_id` under a `t1` grant, in a session not yet bound | denial `tenant_revoked` | tool not called; **tool called** | none for this input (the early session check is not triggered on a first use of the session) | `both` |
+| M30b | request/grant tenant mismatch not rejected | T-tenant-mismatch: request claims `t2` under a `t1` grant, no revocation | rejection `tenant_mismatch` | tool not called; **tool called** | none | `both` |
+| M31 | tenantless grant accepted with tenancy enabled | T-tenant-legacy-grant: grant without `tenant_id`, no revocation | rejection `MISSING_TENANT` | tool not called; **tool called** | none | `both` |
+| M32 | session not bound to one tenant | T-tenant-session-conflict: grant `A` (`t1`, session `S`) used, then grant `B` (`t2`, session `S`), different capability ids, no revocation | rejection `session_tenant_conflict` | tool not called for `B`; **tool called** | none | `both` |
+| M33 | fingerprint excludes `tenant_id` | T-tenant-capability-switch: `X` bound under `t1`; tenant `t1` revoked; `X` presented under `t2` | rejection `capability_id_conflict` caused by the tenant field | — (still rejected) | the fingerprint's other fields: in a new session, `session_id` differs and still gives `capability_id_conflict`; in the same session, the session-tenant binding gives `session_tenant_conflict` | `check_point` |
+| M33b | tenant re-resolved at commit or delivery instead of the start-time binding | T-tenant-start-binding | the capability provider is not consulted after start | — (the bound grant cannot differ, so the outcome is unchanged) | capability binding | `check_point` |
+| M38 | missing parent accepted as a root | T-chain-missing-parent, no revocation | rejection `MALFORMED_CHAIN` | tool not called; **tool called** | none | `both` |
+| M39 | depth not limited | T-chain-too-deep: 9 valid grants, no revocation | rejection naming the depth limit | tool not called; **tool called** | none | `both` |
+| M40 | repeated id accepted | T-chain-repeated-id | rejection naming the repeated id | — (the chain is still rejected, only with another code) | capability binding (two contents for one id give `capability_id_conflict`); fingerprint linkage (same content cannot link to itself) | `check_point` |
+| M41 | tenant mismatch in the chain accepted | T-chain-tenant-mismatch: parent in `t2`, leaf in `t1`; signatures, links and attenuation valid; no revocation | rejection `tenant_chain_mismatch` | tool not called; **tool called** | none (tenant equality is not part of attenuation) | `both` |
+| M42a | chain re-resolved at a later fence | T-chain-start-binding | the capability provider is not consulted after start | — (bound content cannot differ) | capability binding | `check_point` |
+| M42b | bound ancestor id re-bound to new content | T-chain-rebind-ancestor: ancestor `P` bound through a used chain; a new leaf whose valid chain carries `P` with other content | rejection `capability_id_conflict` | tool not called; **tool called** | none (the new chain's own links are consistent) | `both` |
+| M43 | attenuation not enforced | T-chain-attenuation (tool outside the parent's `allowed_tools`; validity beyond the parent's), no revocation | rejection naming attenuation | tool not called; **tool called** | none (the leaf's own `allowed_tools` include the tool) | `both` |
+| M44 | root signature not verified | T-chain-bad-root-signature | `INVALID_SIGNATURE` at position 2 | tool not called; **tool called** | none (fresh executor, first use) | `both` |
+| M45 | intermediate signature not verified | T-chain-bad-intermediate-signature | `INVALID_SIGNATURE` at position 1 | tool not called; **tool called** | none (fresh executor, first use) | `both` |
+| M46 | parent fingerprint not compared | T-chain-replaced-parent | `CHAIN_LINK_MISMATCH` (fingerprint) | tool not called; **tool called** | none (fresh executor: the replaced id is not bound yet) | `both` |
+| M47 | parent `capability_id` not compared | T-chain-substituted-parent | `CHAIN_LINK_MISMATCH` naming the id | — (still rejected) | fingerprint comparison | `check_point` |
+| M48 | approval re-verification compares only the leaf | T-chain-changed-at-approval | rejection at approval naming the chain snapshot | — (still rejected) | signature, link and binding checks | `check_point` |
+
+Totals reported separately:
+- **`both`:** M27c, M27d, M28b, M35b, M30, M30b, M31, M32, M38, M39, M41, M42b, M43, M44, M45, M46.
+- **`check_point` only:** M26a, M34a, M27a, M27e, M27b, M28a, M35a, M33, M33b, M40, M42a, M47, M48.
 
 **Chain authentication witnesses (G2).** These are runtime-own tests, each with its paired control and mutant.
 
@@ -541,7 +583,7 @@ A missing verification therefore makes the tool call happen and the witness fail
 | T-chain-valid (control) | Leaf → intermediate → root, all signed by the trusted issuer, links correct | Accepted; tool called once; execution bound to the 3-id chain | (Control for every row below; must pass under every mutant in this table) | — |
 | T-chain-bad-root-signature | As the control; root signature invalid (altered signature, or signed by an untrusted key) | Rejected `INVALID_SIGNATURE` at chain position 2; tool not called; no execution, permit or binding | M44 | both |
 | T-chain-bad-intermediate-signature | As the control; intermediate signature invalid | Rejected `INVALID_SIGNATURE` at chain position 1; same containment assertions | M45 | both |
-| T-chain-replaced-parent | Intermediate replaced by a validly signed grant with the same `capability_id`, the same parent link to the root and different content that still passes attenuation and tenant checks (for example another `issued_at` inside the root's window); the leaf's `parent.fingerprint` is unchanged | Rejected `CHAIN_LINK_MISMATCH` (fingerprint); same containment assertions | M46 | both |
+| T-chain-replaced-parent | Intermediate replaced by a validly signed grant with the same `capability_id`, the same parent link to the root and different content that still passes attenuation and tenant checks (for example another `issued_at` inside the root's window); the leaf's `parent.fingerprint` is unchanged; fresh executor, so the replaced id is not bound yet | Rejected `CHAIN_LINK_MISMATCH` (fingerprint); same containment assertions | M46 | both |
 | T-chain-substituted-parent | Intermediate replaced by another validly signed grant with a different `capability_id`, linked correctly to the root and passing attenuation and tenant checks | Rejected `CHAIN_LINK_MISMATCH` naming the capability id; tool not called | M47 | `check_point` only: a different id always means a different body, so the fingerprint comparison (M46's check) still contains the effect |
 
 **At approval.** The approval re-verification re-resolves the chain and requires it to equal, member by member, the chain snapshot taken at the request. A re-resolved chain that differs from the snapshot would also be rejected by signature, link or binding checks, so the comparison itself cannot be isolated as a containment witness. Its runtime test T-chain-changed-at-approval and mutant M48 ("approval re-verification compares only the leaf") are check-point evidence only. Revocation coverage at approval is witnessed by S8 (M34) and M34a.
@@ -559,8 +601,9 @@ The contract-level S6 (`sup-ancestor-control`) shows separately that a valid cha
 - **Mutants:**
   - every corpus-witness and supplement-witness mutant in §7.7 is detected with its stated witness and findings;
   - every runtime-test mutant is detected under the rules of §7.8: the control passes, the mutant typechecks and loads every suite, and a pre-named witness fails at its expected assertion. Technical failures never count;
-  - the gate report lists check-point and containment-effect evidence separately; the check-point-only mutants of §7.8 are not counted as containment;
-  - the chain authentication witnesses of §7.8 pass on the unmodified runtime, and M44–M48 are each detected by their own witness, with T-chain-valid passing under every one of them. M44–M46 count as containment and check-point evidence; M47 and M48 count as check-point evidence only;
+  - each runtime-test mutant is detected with exactly its evidence kind from the §7.8 table: `check_point` needs the named stage or code assertion to fail; `containment_effect` needs the named effect assertion to fail together with the observed behaviour change; `both` needs both. A mutant whose run shows only a changed rejection code counts as `check_point` at most;
+  - the gate report lists check-point and containment-effect evidence separately; the `check_point`-only mutants of §7.8 are not counted as containment, and no masking safeguard is removed to obtain a containment witness;
+  - the chain authentication witnesses of §7.8 pass on the unmodified runtime, and M44–M48 are each detected by their own witness, with T-chain-valid passing under every one of them. M44–M46 are `both`; M47 and M48 are `check_point` only;
   - AM11–AM13 are detected;
   - M1–M11 and AM1–AM10 are still detected with their current witnesses.
 - **Fence matrix:** every cell of §7.3 has its stated evidence. No cell is claimed by a kind of evidence that cannot reach it; in particular, the start guard is claimed by runtime-own tests only.
