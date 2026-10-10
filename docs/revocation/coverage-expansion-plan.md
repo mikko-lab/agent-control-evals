@@ -495,7 +495,7 @@ A failing runtime test suite is not enough to count a runtime-test mutant as det
 - `id` and patch file;
 - the pre-named **witness tests** (file and test name);
 - the **expected assertion** in each witness: a fixed assertion label that the runtime test carries in its message, plus the expected-vs-actual shape;
-- the **evidence kind**, one of `check_point`, `containment_effect` or `both`, under the rule below;
+- the **evidence kind**, one of `check_point`, `containment_effect`, `both` or `component_check_point`, under the rule below;
 - the **kept safeguards** that could also reject the witness input, and why the witness construction does not trigger them.
 
 **A mutant counts as detected only if all of the following hold:**
@@ -524,6 +524,11 @@ A failing runtime test suite is not enough to count a runtime-test mutant as det
 - **`check_point`.** The named stage or code assertion of the witness fails. The rejection does not happen at the named check point, or not with the named stage or code.
 - **`containment_effect`.** The named effect assertion of the witness fails, **and** a behaviour change is observed under the mutant in the runtime's own state. Examples: the tool function is called, a managed execution or permit is created, a commit is written, output is handed over, a binding is recorded, or no cancellation is requested.
 - **`both`.** Both of the above hold in the same witness run.
+- **The named assertion must separate control from mutant.** The unmodified runtime and the mutant must yield different values for the assertion that fails: a different stage, code, return value or state. A witness under which both give the same result, for example the same `capability_id_conflict`, is no evidence. If no production-path witness separates them, then either:
+  - a separate test of the runtime component that holds the check serves as the witness, reported as **`component_check_point`** (a check point of that component, not of the production path); or
+  - the gap is recorded as a coverage gap.
+
+  The production path's other safeguards are kept in every case.
 - **A changed rejection code alone is never containment.** If the input is still rejected under the mutant, only by another check or with another code, the mutant is `check_point` at most.
 - **Masking safeguards are kept.** No safeguard is removed or weakened to give another check a containment witness.
   - A witness may avoid a kept safeguard only through a realistic input that does not trigger it, for example a first use with nothing bound yet, or a fresh session. The manifest names that safeguard and the reason.
@@ -549,7 +554,7 @@ A failing runtime test suite is not enough to count a runtime-test mutant as det
 | M30b | request/grant tenant mismatch not rejected | T-tenant-mismatch: request claims `t2` under a `t1` grant, no revocation | rejection `tenant_mismatch` | tool not called; **tool called** | none | `both` |
 | M31 | tenantless grant accepted with tenancy enabled | T-tenant-legacy-grant: grant without `tenant_id`, no revocation | rejection `MISSING_TENANT` | tool not called; **tool called** | none | `both` |
 | M32 | session not bound to one tenant | T-tenant-session-conflict: grant `A` (`t1`, session `S`) used, then grant `B` (`t2`, session `S`), different capability ids, no revocation | rejection `session_tenant_conflict` | tool not called for `B`; **tool called** | none | `both` |
-| M33 | fingerprint excludes `tenant_id` | T-tenant-capability-switch: `X` bound under `t1`; tenant `t1` revoked; `X` presented under `t2` | rejection `capability_id_conflict` caused by the tenant field | — (still rejected) | the fingerprint's other fields: in a new session, `session_id` differs and still gives `capability_id_conflict`; in the same session, the session-tenant binding gives `session_tenant_conflict` | `check_point` |
+| M33 | fingerprint excludes `tenant_id` | **T-binding-tenant-field**: a component test of the binding registry (`capabilityFingerprint`, `AuthorityRevocationRegistry.bindCapability`), called directly with two grants identical in every field (same `capability_id`, same `session_id`) except `tenant_id` | **A-M33**: `bindCapability(grant_t2) === false` after `bindCapability(grant_t1) === true`, and the two fingerprints differ. Control: fingerprints differ; the second bind returns `false`. Mutant: fingerprints are equal; the second bind returns `true`. | — (component test; no production effect) | production path unchanged: in a new session, `session_id` in the fingerprint still gives `capability_id_conflict`; in the same session, the session-tenant binding gives `session_tenant_conflict` | `component_check_point` |
 | M33b | tenant re-resolved at commit or delivery instead of the start-time binding | T-tenant-start-binding | the capability provider is not consulted after start | — (the bound grant cannot differ, so the outcome is unchanged) | capability binding | `check_point` |
 | M38 | missing parent accepted as a root | T-chain-missing-parent, no revocation | rejection `MALFORMED_CHAIN` | tool not called; **tool called** | none | `both` |
 | M39 | depth not limited | T-chain-too-deep: 9 valid grants, no revocation | rejection naming the depth limit | tool not called; **tool called** | none | `both` |
@@ -566,17 +571,30 @@ A failing runtime test suite is not enough to count a runtime-test mutant as det
 
 Totals reported separately:
 - **`both`:** M27c, M27d, M28b, M35b, M30, M30b, M31, M32, M38, M39, M41, M42b, M43, M44, M45, M46.
-- **`check_point` only:** M26a, M34a, M27a, M27e, M27b, M28a, M35a, M33, M33b, M40, M42a, M47, M48.
+- **`check_point` only (production path):** M26a, M34a, M27a, M27e, M27b, M28a, M35a, M33b, M40, M42a, M47, M48.
+- **`component_check_point`:** M33.
+
+**Recorded coverage gap (M33).** No production-path witness separates the control from M33.
+- The production test T-tenant-capability-switch (`X` bound under `t1`; tenant `t1` revoked; `X` presented under `t2`) stays as a regression test of the kept safeguards. It is **not** evidence for M33:
+  - in a new session, the control and the mutant both return `capability_id_conflict` (the `session_id` field);
+  - in the same session, both return `session_tenant_conflict`.
+- M33's only evidence is the component check point A-M33. The tenant field in the fingerprint is therefore not shown on the production path. On that path the revocation escape stays contained by the kept safeguards, the session field and the session-tenant binding. A runtime change that weakened both of them as well would not be caught by M33's witness.
 
 **Chain authentication witnesses (G2).** These are runtime-own tests, each with its paired control and mutant.
 
-Every negative test is built so that the verification under test is the only thing that can reject the chain:
+Every negative test is built with:
 - a fresh executor;
 - no revocation record of any kind;
 - chain members never seen before (no prior binding that could raise `capability_id_conflict`);
 - all grants valid in time, with tools allowed and the tenant consistent.
 
-A missing verification therefore makes the tool call happen and the witness fail. It is never masked by a later revocation fence or a binding conflict.
+**For M44, M45 and M46** (the bad-root-signature, bad-intermediate-signature and replaced-parent tests), this construction leaves the verification under test as the only check that can reject the chain. Removing it makes the tool call happen, so these witnesses are `both`, and no later revocation fence or binding conflict masks them.
+
+**This does not hold for M47 and M48.**
+- **M47:** under the mutant, the substituted parent is still rejected by the fingerprint comparison.
+- **M48:** under the mutant, a changed chain at approval is still rejected by the signature, link or binding checks.
+
+These kept checks still prevent the effect. M47 and M48 are `check_point` only. Their witnesses separate control from mutant only by the named rejection reason: the id link versus the fingerprint for M47, and the snapshot comparison versus another check for M48.
 
 | Test | Construction | Expected (unmodified runtime) | Mutant | Evidence kind |
 |---|---|---|---|---|
@@ -601,7 +619,8 @@ The contract-level S6 (`sup-ancestor-control`) shows separately that a valid cha
 - **Mutants:**
   - every corpus-witness and supplement-witness mutant in §7.7 is detected with its stated witness and findings;
   - every runtime-test mutant is detected under the rules of §7.8: the control passes, the mutant typechecks and loads every suite, and a pre-named witness fails at its expected assertion. Technical failures never count;
-  - each runtime-test mutant is detected with exactly its evidence kind from the §7.8 table: `check_point` needs the named stage or code assertion to fail; `containment_effect` needs the named effect assertion to fail together with the observed behaviour change; `both` needs both. A mutant whose run shows only a changed rejection code counts as `check_point` at most;
+  - each runtime-test mutant is detected with exactly its evidence kind from the §7.8 table: `check_point` needs the named stage or code assertion to fail; `containment_effect` needs the named effect assertion to fail together with the observed behaviour change; `both` needs both; `component_check_point` needs the named assertion of the component test to fail, and is reported apart from production-path evidence. In every kind, the failing assertion must separate control from mutant. A mutant whose run shows only a changed rejection code counts as `check_point` at most;
+  - the M33 coverage gap of §7.8 stays recorded until a production-path witness exists;
   - the gate report lists check-point and containment-effect evidence separately; the `check_point`-only mutants of §7.8 are not counted as containment, and no masking safeguard is removed to obtain a containment witness;
   - the chain authentication witnesses of §7.8 pass on the unmodified runtime, and M44–M48 are each detected by their own witness, with T-chain-valid passing under every one of them. M44–M46 are `both`; M47 and M48 are `check_point` only;
   - AM11–AM13 are detected;
