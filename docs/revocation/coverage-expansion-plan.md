@@ -436,7 +436,16 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
   - The child grant carries a signed reference `parent: { capability_id, fingerprint }`, where the fingerprint is that of the parent grant's body.
   - The capability provider returns the leaf grant together with its **complete ancestor chain** up to a root grant without a parent. Each grant in the chain is signed by the trusted issuer.
   - The runtime verifies every chain member: signature, structure, validity, fingerprint link to its child, attenuation and tenant. Only then does it accept the leaf.
+  - **Where a chain is rejected.** A chain that fails any check is rejected at capability verification in `process()`. At the approval re-verification, the re-resolved chain must equal the snapshot taken at the request. In both places the rejection comes:
+    - before the guardian decision and before a pending approval is created;
+    - before any capability binding (no member of a rejected chain is bound, so a forged chain cannot poison later bindings);
+    - before any permit is minted, any managed execution is created or the tool function is called.
   - The runtime never uses grants it has seen earlier as the source of a chain. It binds only grants seen in use, so the chain's availability cannot be assumed and must come with the request. Earlier bindings serve only as conflict checks.
+- **Chain authentication.** Each member's signature is verified with the trusted issuer key, and each link is checked in both directions:
+  - the child's `parent.capability_id` must equal the supplied parent's `capability_id`;
+  - the child's `parent.fingerprint` must equal the fingerprint of the supplied parent's body.
+
+  A parent that is validly signed but is not the one the child names is rejected (`CHAIN_LINK_MISMATCH`). This covers a different grant, and a re-issued grant with the same id but other content. Signature failures anywhere in the chain are rejected with `INVALID_SIGNATURE` naming the chain position. The witnesses are in §7.8.
 - **Missing parent.** A grant that names a parent which the supplied chain does not contain, or a chain that does not end in a root, is rejected (`MALFORMED_CHAIN`, fail closed). It is never treated as a root.
 - **Cycles.** A repeated `capability_id` anywhere in the chain is rejected. Fingerprint linkage makes a cycle infeasible as well, but the runtime does not rely on that.
 - **Depth.** The chain is limited to a fixed maximum, provisionally 8 grants including the leaf. The constant is part of the runtime release and recorded in the lock. A longer chain is rejected, not truncated.
@@ -461,6 +470,11 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
   | M41 | tenant mismatch in the chain accepted |
   | M42 | chain re-resolved at a later fence instead of using the start-time binding, or an already bound ancestor id re-bound to new content |
   | M43 | attenuation not enforced (child tool outside the parent's `allowed_tools`, or child validity beyond the parent's) |
+  | M44 | root signature not verified |
+  | M45 | intermediate member's signature not verified |
+  | M46 | parent fingerprint not compared (a replaced parent grant with the same `capability_id` accepted) |
+  | M47 | parent `capability_id` not compared (any validly signed grant accepted as the parent) |
+  | M48 | approval re-verification compares only the leaf, not the whole chain snapshot (check point only, §7.8) |
 
 ### 7.7 Mutants by evidence type
 
@@ -468,10 +482,73 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
 |---|---|---|
 | Corpus witness | M15, M16, M21, M22, M37 | The eval repo's mutation gate (typechecked patches, fixed witness, findings, exit) |
 | Supplement witness | M20 (S5), M26 (S7), M34 (S8), M28 and M29 (S9), M35 and M36 (S10) | The same gate. The findings appear in the supplement section. |
-| Runtime-own tests | M26a, M27a–d, M28a/b, M34a, M35a/b, M30–M33b, M38–M43 | A new gate step applies each patch to the pinned runtime and requires the runtime's own test suite to fail. It is reported separately from the contract mutants and never counted as corpus or supplement evidence. |
+| Runtime-own tests | M26a, M27a–d, M28a/b, M34a, M35a/b, M30–M33b, M38–M48 | The runtime-test mutant gate (§7.8). It is reported separately from the contract mutants and never counted as corpus or supplement evidence. |
 | Adapter | AM11 (tenant revoke expanded to session revokes), AM12, AM13 | The adapter-mutant checks, as for AM1–AM10 |
 
-### 7.8 Acceptance criteria for package 1
+### 7.8 Runtime-test mutant gate
+
+A failing runtime test suite is not enough to count a runtime-test mutant as detected. The gate runs in the eval repo against the pinned runtime checkout and build, and each mutant is listed in a committed, golden-hashed manifest before any run.
+
+**Manifest per mutant:**
+- `id` and patch file;
+- the pre-named **witness tests** (file and test name);
+- the **expected assertion** in each witness: a fixed assertion label that the runtime test carries in its message, plus the expected-vs-actual shape;
+- the **evidence kind**, one of `check_point`, `containment_effect` or both (see below).
+
+**A mutant counts as detected only if all of the following hold:**
+
+1. **Unmodified control passes.** In the same environment and run, the unpatched pinned runtime typechecks, builds and passes its whole suite. Suite and test counts must equal the lock's SUT baseline. The control also runs every witness test by name, and each must pass. If the control fails, the whole gate is a technical failure (exit 2), and no mutant is assessed.
+2. **The mutant is technically sound.**
+   - The patch applies cleanly, the patched runtime passes its own typecheck, and the build succeeds.
+   - The test runner starts normally and loads every suite: the suite count equals the control's, and there are no collection or module-load errors.
+3. **The named witness fails at the expected assertion.**
+   - At least one witness test fails with an assertion failure whose label and shape match the manifest.
+   - Behaviour assertions read the runtime's own state: for example "tool function not called", "no managed execution", "commit rejected with reason X", "output withheld with code X" or "cancellation requested".
+   - Check-point assertions read the rejection stage or code: for example `AuthorityRevokedError.stage === "approval"`, an `authority_revocation_enforced` audit record with that stage, or `INVALID_SIGNATURE` at chain position 2.
+4. **Nothing else explains the failure.** The witness must not fail only through a thrown non-assertion error, a timeout or an unhandled rejection. Failures of tests that are not named witnesses are recorded as diagnostics and never count.
+
+**Never a detection; these are technical failures (exit 2):**
+- a patch that does not apply;
+- a typecheck or build error;
+- a module-load or collection error;
+- a runner crash or timeout;
+- a changed suite count;
+- a witness failure that is not the expected assertion;
+- a failing control.
+
+**Check point versus containment effect.** The gate report keeps these apart, per mutant and in the totals.
+- **`check_point`.** The witness proves that a specific runtime check point is exercised and enforced: the stage or code of the rejection. This is the only possible evidence when other check points would still contain the effect, as for:
+  - the two request checks;
+  - the approval check versus the start guard;
+  - the two delivery checks.
+
+  These mutants (M26a, M27a–d, M28a/b, M34a, M35a/b), and M47 and M48 (chain authentication, below), are reported as check-point evidence only, never as containment.
+- **`containment_effect`.** The witness proves that the effect is prevented in the runtime's own state: the tool not called, no execution created, no commit, output withheld or cancellation requested. Grant and chain validation mutants (M30–M33b, M38–M46) carry both kinds. Their witnesses assert both the rejection code (check point) and that no tool call, managed execution, permit or binding happened (containment).
+- **Contract mutants.** Corpus and supplement mutants are containment evidence through the contract's decisions and effects. They are reported in the existing mutation report, not in this gate.
+
+**Chain authentication witnesses (G2).** These are runtime-own tests, each with its paired control and mutant.
+
+Every negative test is built so that the verification under test is the only thing that can reject the chain:
+- a fresh executor;
+- no revocation record of any kind;
+- chain members never seen before (no prior binding that could raise `capability_id_conflict`);
+- all grants valid in time, with tools allowed and the tenant consistent.
+
+A missing verification therefore makes the tool call happen and the witness fail. It is never masked by a later revocation fence or a binding conflict.
+
+| Test | Construction | Expected (unmodified runtime) | Mutant | Evidence kind |
+|---|---|---|---|---|
+| T-chain-valid (control) | Leaf → intermediate → root, all signed by the trusted issuer, links correct | Accepted; tool called once; execution bound to the 3-id chain | (Control for every row below; must pass under every mutant in this table) | — |
+| T-chain-bad-root-signature | As the control; root signature invalid (altered signature, or signed by an untrusted key) | Rejected `INVALID_SIGNATURE` at chain position 2; tool not called; no execution, permit or binding | M44 | both |
+| T-chain-bad-intermediate-signature | As the control; intermediate signature invalid | Rejected `INVALID_SIGNATURE` at chain position 1; same containment assertions | M45 | both |
+| T-chain-replaced-parent | Intermediate replaced by a validly signed grant with the same `capability_id`, the same parent link to the root and different content that still passes attenuation and tenant checks (for example another `issued_at` inside the root's window); the leaf's `parent.fingerprint` is unchanged | Rejected `CHAIN_LINK_MISMATCH` (fingerprint); same containment assertions | M46 | both |
+| T-chain-substituted-parent | Intermediate replaced by another validly signed grant with a different `capability_id`, linked correctly to the root and passing attenuation and tenant checks | Rejected `CHAIN_LINK_MISMATCH` naming the capability id; tool not called | M47 | `check_point` only: a different id always means a different body, so the fingerprint comparison (M46's check) still contains the effect |
+
+**At approval.** The approval re-verification re-resolves the chain and requires it to equal, member by member, the chain snapshot taken at the request. A re-resolved chain that differs from the snapshot would also be rejected by signature, link or binding checks, so the comparison itself cannot be isolated as a containment witness. Its runtime test T-chain-changed-at-approval and mutant M48 ("approval re-verification compares only the leaf") are check-point evidence only. Revocation coverage at approval is witnessed by S8 (M34) and M34a.
+
+The contract-level S6 (`sup-ancestor-control`) shows separately that a valid chain works through the adapter. No contract or supplement case claims chain authentication, because a chain rejection has no contract decision. The adapter's start mapping turns a non-revocation rejection into UNKNOWN, never DENY.
+
+### 7.9 Acceptance criteria for package 1
 
 - **Profile:** the classifier, from capability rules alone, yields 17 `IN_PROFILE` and 10 `OUT_OF_SCOPE` cases, golden-checked. `derived-authority` stays `OUT_OF_SCOPE` (needs G3).
 - **Baseline run:**
@@ -481,14 +558,16 @@ The supplement grows from 4 to 10 cases. All of them stay out of corpus coverage
 - **K count:** `not_assessed_requirements` rises from 34 to 43 (+4 `tenant-multi-session-in-flight`, +3 `tenant-isolation`, +2 `derived-in-flight-ancestor-revoked`).
 - **Mutants:**
   - every corpus-witness and supplement-witness mutant in §7.7 is detected with its stated witness and findings;
-  - every runtime-test mutant makes the pinned runtime's own suite fail;
+  - every runtime-test mutant is detected under the rules of §7.8: the control passes, the mutant typechecks and loads every suite, and a pre-named witness fails at its expected assertion. Technical failures never count;
+  - the gate report lists check-point and containment-effect evidence separately; the check-point-only mutants of §7.8 are not counted as containment;
+  - the chain authentication witnesses of §7.8 pass on the unmodified runtime, and M44–M48 are each detected by their own witness, with T-chain-valid passing under every one of them. M44–M46 count as containment and check-point evidence; M47 and M48 count as check-point evidence only;
   - AM11–AM13 are detected;
   - M1–M11 and AM1–AM10 are still detected with their current witnesses.
 - **Fence matrix:** every cell of §7.3 has its stated evidence. No cell is claimed by a kind of evidence that cannot reach it; in particular, the start guard is claimed by runtime-own tests only.
 - **No emulation:** no tenant or ancestor revoke is expressed by the adapter as several capability or session revokes. AM11 must be detected, for example by a probe-log check that the receipt target is the tenant. The adapter never infers coverage from the parent links it knows.
 - **Determinism:** two runs are byte-identical and equal to the new fixture, and the recorded `evaluate` re-evaluation is identical.
 
-### 7.9 Proposed sequence
+### 7.10 Proposed sequence
 
 Each step needs its own authorization.
 
@@ -500,10 +579,10 @@ Each step needs its own authorization.
    - classifier rules for tenant and descendant scope;
    - supplement S5–S10;
    - adapter mapping and the versioned runtime-observation schema revision (tenant target, identity tenants and parents);
-   - the mutants of §7.7 and the runtime-test mutant gate step;
+   - the mutants of §7.7, and the runtime-test mutant gate with its committed manifest (§7.8);
    - CI otherwise unchanged in shape.
 
-### 7.10 Deferred after package 1
+### 7.11 Deferred after package 1
 
 - **G3, then G4:** the largest remaining coverage gain (five cases, including `derived-authority`), but a lifecycle redesign that needs its own spec review.
 - **G5 and G6:** both require a decision by the runtime owner on the addressable operation surface and the delivery model.
