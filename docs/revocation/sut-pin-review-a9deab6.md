@@ -58,7 +58,24 @@ The eval mutant gate (`mutants.json`) reports each mutant's evidence kind from i
 
 ## 4a. Gate results
 
-**Eval mutant gate** (`mutants --lock --profile`, manifest `mutations/revocation/manifest.json`, SHA-256 `3e1f95e611978e6bb297c369c80855c718f5e12479e5629111b79f31cb338568`, committed in `0d3347e` before the final run): control exit 3; **23/23 SUT mutants detected** with exactly their manifest values, 0 survived, 0 technical failures; **AM1–AM13 13/13 detected**; gate exit 0.
+**Eval mutant gate** (`mutants --lock --profile` at `ef13244`, with the whole-run check of §5a; manifest `mutations/revocation/manifest.json`, SHA-256 `84ad1a6fb043ea6f2bc0096e45b5f20e02006f71f1489bf5957ccbbd165da478`, committed in `a55ef60` before the run):
+- the control showed exit 3 and no exception;
+- **23/23 SUT mutants detected** with exactly their manifest values and run exceptions (M4: 1 predeclared harness error; M10: 24 predeclared barrier timeouts; others: none), 0 survived, 0 technical failures;
+- **AM1–AM13 13/13 detected**;
+- gate exit 0.
+
+The earlier run at `0d3347e` (manifest `3e1f95e6…`) used the classification the review rejected (§5a).
+
+**Gate regressions G1–G5** (real pinned runtime):
+
+| Case | Required | At `46d0be9` (classification of `57edc4a`) | At `ef13244` |
+|---|---|---|---|
+| G1-m1-unchanged | detected, exit 0 | ok: detected, exit 0 | ok |
+| G2-m1-malformed-other-case | technical, exit 2 | **FAIL: detected, exit 0** | ok: `unexpected harness error issued-permit malformed_observation` |
+| G3-m10-extra-timeout | technical, exit 2 | **FAIL: detected, exit 0** | ok: `unexpected barrier timeout issued-permit@1` |
+| G4-m4-extra-error-other-case | technical, exit 2 | **FAIL: detected, exit 0** | ok: `unexpected harness error start-before-cut malformed_observation` |
+| G5-m10-unchanged | detected, exit 0 | ok: detected, exit 0 | ok |
+| Runner exit | 0 | 1 | 0 |
 
 | Mutant | Witness | Exit | Evidence kind |
 |---|---|---|---|
@@ -115,9 +132,7 @@ The eval mutant gate (`mutants.json`) reports each mutant's evidence kind from i
 - A predeclared exception allows nothing else, not even a second error of the same kind, and its absence means no detection. The control run must have no exception at all.
 - The values come from two independent runs, which agreed exactly.
 
-**Gate regressions G1–G5** (compatibility spec §13.6) run the real runtime:
-- at `46d0be9` (the classification of `57edc4a` plus only the regression seam): see §4a;
-- after the fix: see §4a.
+**Gate regressions G1–G5** (compatibility spec §13.6) run the real runtime. At `46d0be9`, which is the classification of `57edc4a` plus only the regression seam, G2–G4 fail: the gate reports detected with exit 0. After the fix all five pass (§4a).
 
 ## 6. Open risks and limits
 
