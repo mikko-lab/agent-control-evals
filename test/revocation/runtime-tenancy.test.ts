@@ -20,7 +20,7 @@ import { controlSteps, loadProfile, loadSupplement } from '../../src/profile/rev
 import { buildProfileReport, profileExitCode } from '../../src/report/revocation/profile-report';
 import { runtimeObservationIssues, validateProfileReport } from '../../src/report/revocation/validate';
 import { identityFor, sessionIdFor } from '../../src/adapter/revocation-runtime/runner';
-import { loadMutantManifest, MUTANT_MANIFEST, MutantManifestError, witnessFailures } from '../../src/mutation/revocation/mutants';
+import { classifyMutantRun, loadMutantManifest, MUTANT_MANIFEST, MutantManifestError, RevocationMutant, RunFacts, unexpectedTechnical, witnessFailures } from '../../src/mutation/revocation/mutants';
 import { loadRevocationLock, RevocationLockError } from '../../src/sut/revocation-lock';
 import { canonicalJsonLines } from '../../src/util/canonical-json';
 import { sha256Hex } from '../../src/util/hash';
@@ -265,6 +265,9 @@ test('mutant manifest: golden-hashed, bound to the pin, exact witnesses and evid
       ['duplicate id', m => { m.mutants.push(clone(m.mutants[0])); }, /duplicate mutant id/],
       ['no exit reason', m => { m.mutants[0].witness.exit_reason = ''; }, /exit_reason/],
       ['baseline exit', m => { m.baseline.exit = 0; }, /baseline exit/],
+      ['no run exceptions', m => { delete (m.mutants[0] as Partial<RevocationMutant>).run_exceptions; }, /run_exceptions/],
+      ['witness errors not predeclared', m => { m.mutants.find(x => x.id === 'M4')!.run_exceptions.harness_errors = []; m.mutants.find(x => x.id === 'M4')!.witness.errors = ['causally_impossible']; }, /witness errors differ/],
+      ['malformed timeout', m => { m.mutants.find(x => x.id === 'M10')!.run_exceptions.barrier_timeouts[0].detail = ''; }, /malformed predeclared barrier timeout/],
     ];
     for (const [name, edit, message] of tamper) {
       const m = clone(manifest); edit(m); write(m);
@@ -303,4 +306,59 @@ test('CLI: mutants and runtime-gates fail closed before any runtime on bad optio
     const legacy = cliRun('runtime-gates', '--lock', 'profiles/revocation/history/sut.revocation.a682e44.lock.json', '--out', join(dir, 'h'));
     assert.equal(legacy.status, 2); assert.match(legacy.stderr, /pins no runtime_test_gates/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('mutant gate classification: the whole run is checked first; harness errors and timeouts only as predeclared case by case', () => {
+  const { manifest } = loadMutantManifest(root, lock, VERSION);
+  const by = (id: string) => manifest.mutants.find(m => m.id === id)!;
+  const all = [...fixture.corpus, ...fixture.supplement];
+  const control: RunFacts = { cases: new Map(all.map(o => [o.case_id, ev(o.case_id, o)])), diagnostics: all.flatMap(o => o.diagnostics.map(d => ({ case_id: o.case_id, ...d }))), exit: 3, confirmed_violation: false };
+  assert.deepEqual(unexpectedTechnical(control, null), []);
+  const harness = (cases: Map<string, Evidence>, id: string, code: string) => { const e = cases.get(id)!; cases.set(id, { ...e, verdict: 'HARNESS_ERROR', errors: [...e.errors, { code, path: '/gate-regression', message: 'injected' }] }); };
+  // A run showing exactly the manifest entry's witness and run exceptions.
+  const runFor = (m: RevocationMutant): RunFacts => {
+    const cases = new Map(control.cases);
+    const errorsOf = (id: string) => m.run_exceptions.harness_errors.filter(h => h.case_id === id).map(h => ({ code: h.code, path: h.path, message: h.message }));
+    for (const h of m.run_exceptions.harness_errors) cases.set(h.case_id, { ...cases.get(h.case_id)!, verdict: 'HARNESS_ERROR', errors: errorsOf(h.case_id) });
+    const w = m.witness;
+    cases.set(w.case_id, { ...cases.get(w.case_id)!, verdict: w.verdict, confirmed_violation: w.verdict === 'VIOLATION', decision_findings: w.decision_findings, effect_findings: w.effect_findings, incomplete: w.incomplete, errors: errorsOf(w.case_id) });
+    const timeouts = m.run_exceptions.barrier_timeouts.map(t => ({ case_id: t.case_id, step: t.step, code: 'barrier_timeout', detail: t.detail }));
+    return { cases, diagnostics: [...control.diagnostics, ...timeouts], exit: w.exit, confirmed_violation: w.run_confirmed_violation };
+  };
+  const outcome = (m: RevocationMutant, r: RunFacts) => classifyMutantRun(m, r, control);
+  // M1: unchanged -> detected; a malformed observation in another case -> technical failure, the witness notwithstanding.
+  assert.equal(outcome(by('M1'), runFor(by('M1'))).outcome, 'detected');
+  const m1 = runFor(by('M1')); harness(m1.cases, 'issued-permit', 'malformed_observation');
+  const r1 = outcome(by('M1'), m1);
+  assert.equal(r1.outcome, 'technical_failure'); assert.ok(r1.technical.some(x => x.startsWith('unexpected harness error issued-permit malformed_observation')), JSON.stringify(r1.technical));
+  // M4: its one predeclared causally_impossible error allows no other error, and is required.
+  assert.deepEqual(by('M4').run_exceptions.harness_errors.map(h => [h.case_id, h.code]), [['in-flight-before-commit', 'causally_impossible']]);
+  assert.equal(outcome(by('M4'), runFor(by('M4'))).outcome, 'detected');
+  const m4 = runFor(by('M4')); harness(m4.cases, 'start-before-cut', 'malformed_observation');
+  assert.equal(outcome(by('M4'), m4).outcome, 'technical_failure');
+  const m4twice = runFor(by('M4')); harness(m4twice.cases, 'in-flight-before-commit', 'causally_impossible');
+  assert.equal(outcome(by('M4'), m4twice).outcome, 'technical_failure', 'a second error of the predeclared kind is not predeclared');
+  const m4none = runFor(by('M4')); m4none.cases.set('in-flight-before-commit', control.cases.get('in-flight-before-commit')!);
+  assert.notEqual(outcome(by('M4'), m4none).outcome, 'detected');
+  // M10: only its named barrier timeouts; one more anywhere is technical, one missing is no detection.
+  assert.equal(by('M10').run_exceptions.barrier_timeouts.length, 24);
+  assert.equal(outcome(by('M10'), runFor(by('M10'))).outcome, 'detected');
+  const m10 = runFor(by('M10')); m10.diagnostics.push({ case_id: 'issued-permit', step: 1, code: 'barrier_timeout', detail: 'injected' });
+  const r10 = outcome(by('M10'), m10);
+  assert.equal(r10.outcome, 'technical_failure'); assert.ok(r10.technical.some(x => x.startsWith('unexpected barrier timeout issued-permit@1')), JSON.stringify(r10.technical));
+  const m10missing = runFor(by('M10')); m10missing.diagnostics = m10missing.diagnostics.filter((d, i, xs) => i !== xs.findIndex(y => y.code === 'barrier_timeout'));
+  assert.notEqual(outcome(by('M10'), m10missing).outcome, 'detected');
+  // Other mutants predeclare no timeout at all, and a harness process error is never predeclarable.
+  const m2 = runFor(by('M2')); m2.diagnostics.push({ case_id: 'start-before-cut', step: 3, code: 'barrier_timeout', detail: 'injected' });
+  assert.equal(outcome(by('M2'), m2).outcome, 'technical_failure');
+  const m10abort = runFor(by('M10')); m10abort.diagnostics.push({ case_id: 'issued-permit', step: 0, code: 'adapter_abort', detail: 'injected' });
+  assert.equal(outcome(by('M10'), m10abort).outcome, 'technical_failure');
+  // A run equal to the control survives; the same run with a harness error anywhere is technical.
+  assert.equal(outcome(by('M1'), control).outcome, 'survived');
+  const broken: RunFacts = { ...control, cases: new Map(control.cases) }; harness(broken.cases, 'tenant-isolation', 'malformed_observation');
+  assert.equal(outcome(by('M1'), broken).outcome, 'technical_failure');
+  assert.ok(unexpectedTechnical(broken, null).length > 0, 'the control itself must be free of harness errors');
+  // A different case inventory is technical.
+  const fewer: RunFacts = { ...runFor(by('M1')) }; fewer.cases = new Map(fewer.cases); fewer.cases.delete('issued-permit');
+  assert.equal(outcome(by('M1'), fewer).outcome, 'technical_failure');
 });

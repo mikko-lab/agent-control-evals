@@ -2,12 +2,15 @@
  * SUT mutants of the revocation track's pinned runtime (docs/revocation/runtime-adapter-compatibility.md, section 10).
  * Each is one type-safe patch of one file of the pinned acs-guardrail-demo tree under mutations/revocation/, applied to
  * a fresh checkout. Patches, witnesses, exact expected values and evidence kinds are fixed in the committed, golden-
- * hashed manifest mutations/revocation/manifest.json before any mutant run. A mutant that does not apply, changes
- * another file or does not typecheck is a technical failure of the gate, never a kill.
+ * hashed manifest mutations/revocation/manifest.json before any mutant run, together with every harness error and
+ * barrier timeout the mutant run is predeclared to show, case by case. A mutant that does not apply, changes another
+ * file or does not typecheck, and a run with any technical error the manifest does not name, is a technical failure of
+ * the gate, never a kill.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Evidence, Finding } from '../../spec/revocation/model';
+import type { Diagnostic, Evidence, Finding } from '../../spec/revocation/model';
+import { canonicalJson } from '../../util/canonical-json';
 import { sha256Hex } from '../../util/hash';
 
 export const MUTANT_MANIFEST = 'mutations/revocation/manifest.json';
@@ -33,12 +36,23 @@ export interface Witness {
   exit_reason: string;
 }
 export interface MutantSource { repository: string; commit: string; path: string; sha256: string }
+/** An evaluator error of one case of the mutant run (its verdict is then HARNESS_ERROR). */
+export interface RunHarnessError { case_id: string; code: string; path: string; message: string }
+/** An adapter barrier timeout of one case of the mutant run. */
+export interface RunBarrierTimeout { case_id: string; step: number | null; detail: string }
+/**
+ * Every technical exception the whole mutant run is predeclared to show, case by case and exactly: any other harness
+ * error or barrier timeout anywhere in the run is a technical failure, and a predeclared one that does not occur is no
+ * detection.
+ */
+export interface RunExceptions { harness_errors: RunHarnessError[]; barrier_timeouts: RunBarrierTimeout[] }
 export interface RevocationMutant {
   id: string; patch: string; patch_sha256: string; target: string; description: string;
   /** Where a patch copied byte for byte from the pinned runtime's own mutant gate comes from; null for eval-side patches. */
   source: MutantSource | null;
   evidence_kind: MutantEvidenceKind;
   witness: Witness;
+  run_exceptions: RunExceptions;
 }
 export interface MutantManifest {
   manifest: string; version: string; sut_repository: string; sut_commit: string; profile: string; supplement: string;
@@ -98,6 +112,12 @@ export function loadMutantManifest(root: string, lock: { sut_repository: string;
     if (!w || !['corpus', 'supplement'].includes(w.set) || typeof w.case_id !== 'string') bad(`${x.id}: invalid witness`);
     if (!Array.isArray(w.incomplete) || !Array.isArray(w.errors) || !Number.isInteger(w.exit) || !w.exit_reason || typeof w.run_confirmed_violation !== 'boolean') bad(`${x.id}: witness needs exact incomplete, errors, exit, exit_reason and run_confirmed_violation`);
     if (witnessKind(w) !== x.evidence_kind) bad(`${x.id}: evidence kind ${x.evidence_kind} does not match its expected values (${witnessKind(w)})`);
+    const ex = x.run_exceptions;
+    if (!ex || !Array.isArray(ex.harness_errors) || !Array.isArray(ex.barrier_timeouts)) bad(`${x.id}: run_exceptions must list harness_errors and barrier_timeouts`);
+    for (const h of ex.harness_errors) if (!h || [h.case_id, h.code, h.path, h.message].some(v => typeof v !== 'string' || !v)) bad(`${x.id}: malformed predeclared harness error`);
+    for (const t of ex.barrier_timeouts) if (!t || typeof t.case_id !== 'string' || !(t.step === null || Number.isInteger(t.step)) || typeof t.detail !== 'string' || !t.detail) bad(`${x.id}: malformed predeclared barrier timeout`);
+    const witnessCodes = ex.harness_errors.filter(h => h.case_id === w.case_id).map(h => h.code).sort();
+    if (JSON.stringify(witnessCodes) !== JSON.stringify([...w.errors].sort())) bad(`${x.id}: the witness errors differ from the run exceptions predeclared for ${w.case_id}`);
   }
   return { manifest: m, sha256 };
 }
@@ -119,4 +139,59 @@ export function witnessFailures(w: Witness, e: Evidence | undefined, exit: numbe
   if (!sameSet(e.incomplete, w.incomplete)) out.push(`incomplete ${JSON.stringify(e.incomplete)} != ${JSON.stringify(w.incomplete)}`);
   if (exit !== undefined && exit !== w.exit) out.push(`exit ${exit} != ${w.exit}`);
   return out;
+}
+
+/** Adapter diagnostics that mean the harness process itself failed: never SUT behaviour, never predeclarable. */
+export const HARNESS_PROCESS_CODES: ReadonlySet<string> = new Set(['adapter_abort', 'setup_failed', 'constructor_getter_ran']);
+
+/** What the gate needs of one complete profile run: every evaluated case, every adapter diagnostic, exit and flag. */
+export interface RunFacts {
+  cases: Map<string, Evidence>;
+  diagnostics: (Diagnostic & { case_id: string })[];
+  exit: number;
+  confirmed_violation: boolean;
+}
+export type MutantOutcome = 'detected' | 'survived' | 'technical_failure';
+
+/** Items of `actual` not matched one for one by `expected` (multiset difference). */
+function unmatched<T>(actual: T[], expected: T[]): T[] {
+  const pool = expected.map(x => canonicalJson(x));
+  return actual.filter(x => { const i = pool.indexOf(canonicalJson(x)); if (i < 0) return true; pool.splice(i, 1); return false; });
+}
+export const runHarnessErrors = (r: RunFacts): RunHarnessError[] => [...r.cases].flatMap(([case_id, e]) => e.errors.map(x => ({ case_id, code: x.code, path: x.path, message: x.message })));
+export const runBarrierTimeouts = (r: RunFacts): RunBarrierTimeout[] => r.diagnostics.filter(d => d.code === 'barrier_timeout').map(d => ({ case_id: d.case_id, step: d.step, detail: d.detail }));
+
+/**
+ * The technical errors of a whole profile run that a manifest entry does not predeclare: a case inventory other than
+ * the control's, any harness process diagnostic, and every harness error or barrier timeout, in any case, beyond the
+ * entry's run_exceptions. Without an entry (the control) nothing is predeclared.
+ */
+export function unexpectedTechnical(run: RunFacts, control: RunFacts | null, ex: RunExceptions = { harness_errors: [], barrier_timeouts: [] }): string[] {
+  const out: string[] = [];
+  if (control && JSON.stringify([...run.cases.keys()].sort()) !== JSON.stringify([...control.cases.keys()].sort())) out.push('case inventory differs from the control');
+  for (const d of run.diagnostics) if (HARNESS_PROCESS_CODES.has(d.code)) out.push(`harness process error ${d.case_id}@${d.step}: ${d.code}: ${d.detail}`);
+  for (const h of unmatched(runHarnessErrors(run), ex.harness_errors)) out.push(`unexpected harness error ${h.case_id} ${h.code}: ${h.path} ${h.message}`);
+  for (const t of unmatched(runBarrierTimeouts(run), ex.barrier_timeouts)) out.push(`unexpected barrier timeout ${t.case_id}@${t.step}: ${t.detail}`);
+  return out;
+}
+
+const sameEvidence = (a: Evidence | undefined, b: Evidence | undefined) => !!a && !!b && canonicalJson({ ...a, case_id: '' }) === canonicalJson({ ...b, case_id: '' });
+
+/**
+ * Classifies one mutant run. The whole run is checked for technical errors first: any the manifest entry does not
+ * predeclare makes it a technical failure, whatever its witness shows. Only then is it detected (the witness, the
+ * run's exit and has_confirmed_violation exactly as fixed, and every predeclared exception present) or survived (the
+ * witness case and the exit exactly the control's). Anything else is a technical failure too: never a kill.
+ */
+export function classifyMutantRun(m: Pick<RevocationMutant, 'witness' | 'run_exceptions'>, run: RunFacts, control: RunFacts): { outcome: MutantOutcome; technical: string[]; failures: string[] } {
+  const technical = unexpectedTechnical(run, control, m.run_exceptions);
+  const e = run.cases.get(m.witness.case_id);
+  const failures = witnessFailures(m.witness, e, run.exit);
+  if (run.confirmed_violation !== m.witness.run_confirmed_violation) failures.push(`has_confirmed_violation ${run.confirmed_violation} != ${m.witness.run_confirmed_violation}`);
+  for (const h of unmatched(m.run_exceptions.harness_errors, runHarnessErrors(run))) failures.push(`predeclared harness error missing: ${h.case_id} ${h.code}`);
+  for (const t of unmatched(m.run_exceptions.barrier_timeouts, runBarrierTimeouts(run))) failures.push(`predeclared barrier timeout missing: ${t.case_id}@${t.step}`);
+  if (technical.length) return { outcome: 'technical_failure', technical, failures };
+  if (failures.length === 0) return { outcome: 'detected', technical, failures };
+  if (run.exit === control.exit && sameEvidence(e, control.cases.get(m.witness.case_id))) return { outcome: 'survived', technical, failures };
+  return { outcome: 'technical_failure', technical: ['witness values are neither the control\'s nor the manifest\'s'], failures };
 }
