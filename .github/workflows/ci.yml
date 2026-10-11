@@ -217,6 +217,8 @@ jobs:
           ACE_REVOCATION_WORK: ${{ github.workspace }}/.work/revocation
       - name: 4. SUT mutants M1-M11, M15-M37 (golden-hashed manifest, typechecked patches, exact witnesses) and adapter mutants AM1-AM13; exit 0 = every mutant detected
         run: node dist/src/revocation-cli.js mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-mutants
+      - name: 4b. mutant gate regressions G1-G5 (real pinned runtime; unchanged M1 and M10 detected, a malformed observation in another case or an extra M10 timeout or another error beside M4's predeclared one rejected as technical)
+        run: node dist/scripts/mutant-gate-regressions.js --out out/revocation-mutant-gate-regressions.json
       - name: 5. evaluator regression gate (0.3.0 step path unchanged)
         run: node dist/scripts/revocation-regressions.js --out out/revocation-regressions.json
       - name: upload revocation runtime artifacts
@@ -228,6 +230,7 @@ jobs:
             out/revocation-runtime-a/**
             out/revocation-mutants/mutants.json
             out/revocation-mutants/manifest.json
+            out/revocation-mutant-gate-regressions.json
             out/revocation-regressions.json
           if-no-files-found: warn
 

@@ -54,7 +54,7 @@ The three kinds of plan §7.2 stay apart in the reports:
 2. **Supplement** (`supplement-evidence.jsonl`, counts only toward `supplement_acceptance_passed`).
 3. **Runtime-own tests** (`runtime-gates.json`): the pinned runtime's own mutant gates and gate regressions, compared with the lock. Within them, `both` and `containment_effect` are containment evidence, `check_point` is check-point evidence only, `component_check_point` is never production-path evidence.
 
-The eval mutant gate (`mutants.json`) reports each mutant's evidence kind from its manifest: `decision_and_effect` (a decision finding and an effect finding), `effect` (effect findings only: M1, M11) and `missing_evidence` (M10: detected only through missing terminal evidence, never as a violation). Decisions and effects are observed separately; no audit event or API receipt stands in for state evidence.
+The eval mutant gate (`mutants.json`) reports each mutant's evidence kind from its manifest: `decision_and_effect` (a decision finding and an effect finding), `effect` (effect findings only: M1, M11) and `missing_evidence` (M10: detected only through missing terminal evidence, never as a violation; its barrier timeouts are predeclared one by one, not exempt as a class). Decisions and effects are observed separately; no audit event or API receipt stands in for state evidence.
 
 ## 4a. Gate results
 
@@ -92,9 +92,32 @@ The eval mutant gate (`mutants.json`) reports each mutant's evidence kind from i
 - **M37 is an eval-side patch.** The runtime gate's M37 propagates a revocation to parent and siblings when `revoke()` is called. In `sibling-isolation` the child is revoked before any capability is bound, so it would have nothing to propagate to. The eval's M37 walks the revoked capability's lineage at check time instead (same defect, reachable through the contract). All other package 1 patches (M15, M16, M20–M22, M26, M28, M29, M34–M36) are copied byte for byte from the runtime gate, with source path and hash in the manifest.
 - **Exact witnesses.** The plan names the findings each mutant must produce. The manifest pins the complete values, so a detection needs exactly them. Besides the plan's findings, a start that should have been denied also has an unexpected terminal (M6, M8, M9, M20, M22, M26, M34), and an over-reaching denial also leaves the denied execution's later commit and delivery missing (M7, M16, M37).
 - **Exits 2 for detected mutants.** M1, M4, M7, M10, M16 and M37 are detected with run exit 2. Each manifest entry gives the reason: incompleteness beside the confirmed findings (M1, M7, M16, M37), a causally impossible trace in another case (M4: delivery after a denied commit), or missing evidence only (M10). In every case but M10 the witness is a confirmed VIOLATION, and the manifest also pins `has_confirmed_violation`.
-- **Technical failures.** A patch that does not apply, changes another file than its target or does not typecheck aborts the gate (exit 2). Inside a run, a harness process diagnostic (`adapter_abort`, `setup_failed`, `constructor_getter_ran`), a barrier timeout (except for M10, declared as missing evidence) or any witness value that is neither the control's nor the manifest's is a technical failure. None of these is ever a kill. During the precheck the gate correctly aborted on a wrong target file for M15 and M21 (`managed-execution.ts` instead of `guarded-executor.ts`); the manifest generator now derives targets from the patches, and the manifest loader checks them before any build.
+- **Technical failures.** A patch that does not apply, changes another file than its target or does not typecheck aborts the gate (exit 2). Every whole mutant run is checked for technical errors before it is classified (§5a). Any of the following is a technical failure, and none of them is ever a kill:
+  - a harness process diagnostic (`adapter_abort`, `setup_failed`, `constructor_getter_ran`);
+  - any evaluator error or barrier timeout, in any case, that the mutant's `run_exceptions` do not predeclare;
+  - a different case inventory;
+  - a witness value that is neither the control's nor the manifest's.
+
+  During the precheck the gate correctly aborted on a wrong target file for M15 and M21 (`managed-execution.ts` instead of `guarded-executor.ts`). The manifest generator now derives targets from the patches, and the manifest loader checks them before any build.
 - **AM11–AM13 detection.** AM11 is caught by the new probe-log receipt check (`revocation_target_mismatch`: several session receipts for one tenant revocation). AM12 and AM13 are caught by the identity-mapping check (`identity_mapping_invalid`); AM13 additionally makes S5's start succeed (`false_allow@1`), so the missing parent link is visible in the effects too. AM8 is now also caught by the identity check.
 - **Runtime gates in CI** run as a matrix over Node 22/24 and the three gates (tenant, ancestor, regressions) for wall-clock reasons; `runtime-gates` without `--gates` runs all three.
+
+## 5a. Review finding at `57edc4a`: the mutant gate ignored technical errors outside the witness
+
+**Finding.** The review reproduced it with the real pinned runtime and the M1 patch. A schema-violating field added to the `issued-permit` observation made that case a HARNESS_ERROR (`malformed_observation`). The gate still reported M1 as detected with exit 0, because its classification looked only at the witness case and a short list of diagnostics; changes in other cases were diagnostics only. In the same way, every barrier timeout of a `missing_evidence` mutant (M10) was exempt as a class.
+
+**Fix.**
+- The gate checks the whole run before classifying (`classifyMutantRun`, `src/mutation/revocation/mutants.ts`).
+- The manifest predeclares `run_exceptions` per mutant, case by case and exactly:
+  - M4: one `causally_impossible` error in `in-flight-before-commit` (path and message pinned);
+  - M10: 24 finish-barrier timeouts (case, step and detail pinned);
+  - every other mutant: none.
+- A predeclared exception allows nothing else, not even a second error of the same kind, and its absence means no detection. The control run must have no exception at all.
+- The values come from two independent runs, which agreed exactly.
+
+**Gate regressions G1–G5** (compatibility spec §13.6) run the real runtime:
+- at `46d0be9` (the classification of `57edc4a` plus only the regression seam): see §4a;
+- after the fix: see §4a.
 
 ## 6. Open risks and limits
 

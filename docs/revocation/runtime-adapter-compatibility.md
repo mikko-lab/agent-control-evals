@@ -723,7 +723,19 @@ The profile `acs-guardrail-demo-a9deab6/revocation-0.4.0/3` declares the revoke 
 
 ### 13.6 Mutants
 
-The eval mutant gate reads `mutations/revocation/manifest.json` (golden SHA-256 in `manifest.sha256`), bound to the pinned SUT, profile and supplement. Per mutant it fixes the patch and its SHA-256, the single target file, the source of a patch copied byte for byte from the runtime's own gate, the evidence kind, the witness case and its exact verdict, decision findings, effect findings, incompleteness, evaluator errors and run exit with the reason for that exit. Matching is exact: a detection needs exactly these values and no harness error anywhere in the run; a witness case and exit equal to the control's is a survivor; anything else is a technical failure (exit 2), never a kill. A patch that does not apply, changes another file or does not typecheck aborts the gate as a technical failure.
+The eval mutant gate reads `mutations/revocation/manifest.json` (golden SHA-256 in `manifest.sha256`), bound to the pinned SUT, profile and supplement. Per mutant it fixes the patch and its SHA-256, the single target file, the source of a patch copied byte for byte from the runtime's own gate, the evidence kind, the witness case and its exact verdict, decision findings, effect findings, incompleteness, evaluator errors and run exit with the reason for that exit. It also predeclares, case by case and exactly, every technical exception the whole mutant run shows (`run_exceptions`): the evaluator errors (case, code, path, message) and the adapter barrier timeouts (case, step, detail). Only M4 (one `causally_impossible` in `in-flight-before-commit`) and M10 (its 24 finish-barrier timeouts) predeclare any.
+
+The gate checks every whole run for technical errors **before** it classifies the mutant. A case inventory other than the control's, a harness process diagnostic (`adapter_abort`, `setup_failed`, `constructor_getter_ran`), or any evaluator error or barrier timeout in any case beyond the predeclared ones is a technical failure (exit 2), whatever the witness shows. Only then is the mutant detected: exactly the witness values, exit and `has_confirmed_violation`, and every predeclared exception present. A witness case and exit equal to the control's is a survivor. Anything else is a technical failure, never a kill. The control run must show no evaluator error, barrier timeout or harness process error at all. A patch that does not apply, changes another file or does not typecheck aborts the gate as a technical failure.
+
+**Gate regressions** (`mutations/revocation/gate-regressions.json`, golden SHA-256; `node dist/scripts/mutant-gate-regressions.js`, in CI) run the real pinned runtime. They can edit one mutant run's observations before evaluation (`mutants --only <M> --inject FILE`). Such a run is labelled a regression input and is never evidence.
+
+| Case | Input | Required gate result |
+|---|---|---|
+| G1-m1-unchanged | M1 | detected, exit 0 |
+| G2-m1-malformed-other-case | M1, plus a field the schema forbids in `issued-permit` | technical failure, exit 2 (`unexpected harness error issued-permit malformed_observation`) |
+| G3-m10-extra-timeout | M10, plus one barrier timeout in `issued-permit` at step 1 | technical failure, exit 2 (`unexpected barrier timeout issued-permit@1`) |
+| G4-m4-extra-error-other-case | M4, plus a malformed observation in `start-before-cut` | technical failure, exit 2 |
+| G5-m10-unchanged | M10 | detected, exit 0 |
 
 | Evidence | Mutants |
 |---|---|
