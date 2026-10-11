@@ -3,6 +3,7 @@
  *
  *   run-adapter --lock FILE --profile FILE --out DIR [--work DIR] [--sut-source PATH] [--verify-baseline]
  *   mutants     --lock FILE --profile FILE --out DIR [--work DIR] [--sut-source PATH] [--only M1,M2,...]
+ *               [--inject FILE]  (gate regressions only: edits one mutant run's observations before evaluation)
  *   evaluate    --observations FILE --lock FILE --profile FILE --out DIR
  *     (recorded corpus and supplement observations of a run-adapter bundle; the SUT is not started)
  *
@@ -27,6 +28,7 @@ import { validateProfileReport } from '../../report/revocation/validate';
 import { observationsOf, runProfile } from './runtime-run';
 import { loadMutantManifest, MUTANT_MANIFEST, witnessFailures } from '../../mutation/revocation/mutants';
 import { adapterMutantChecks } from '../../mutation/revocation/adapter-mutants';
+import { applyInjections, InjectionInput } from '../../mutation/revocation/gate-injection';
 
 const IMPLEMENTATION = [
   'dist/src/revocation-cli.js', 'dist/src/eval/revocation/runtime-cli.js', 'dist/src/eval/revocation/runtime-run.js', 'dist/src/eval/revocation/evaluate.js',
@@ -67,7 +69,7 @@ function parse(args: string[], valued: string[], flags: string[]): { options: Ma
 }
 
 function setup(command: string, args: string[]): Setup {
-  const valued = command === 'evaluate' ? ['--out', '--lock', '--profile', '--observations'] : ['--out', '--lock', '--profile', '--work', '--sut-source', ...(command === 'mutants' ? ['--only'] : [])];
+  const valued = command === 'evaluate' ? ['--out', '--lock', '--profile', '--observations'] : ['--out', '--lock', '--profile', '--work', '--sut-source', ...(command === 'mutants' ? ['--only', '--inject'] : [])];
   const { options, flags } = parse(args, valued, command === 'run-adapter' ? ['--verify-baseline'] : []);
   if (command === 'evaluate' && !options.has('--observations')) throw new Error('Required option missing');
   const root = resolve(__dirname, '..', '..', '..', '..');
@@ -214,6 +216,11 @@ async function mutants(args: string[]): Promise<number> {
   const only = s.options.get('--only')?.split(',');
   const selected = mm.mutants.filter(m => !only || only.includes(m.id));
   if (only && selected.length !== only.length) throw new Error('--only names an unknown mutant');
+  // A gate regression input: edits applied to exactly one selected mutant's observations. Never evidence.
+  const injectPath = s.options.get('--inject');
+  const injectRaw = injectPath ? readFileSync(resolve(injectPath)) : null;
+  const injection = injectRaw ? JSON.parse(injectRaw.toString('utf8')) as InjectionInput : null;
+  if (injection && (selected.length !== 1 || injection.mutant !== selected[0].id || !Array.isArray(injection.injections))) throw new Error('--inject needs --only with exactly the one mutant the injection names');
   const { files, write } = writer(s.out);
   const baseline = prepareRevocationEnv(s.lock, 'baseline', { workDir: s.work, harnessRoot: s.root, sourceOverride: s.sourceOverride });
   const baseRun = await runProfile(baseline.build, s.cases, s.truths, s.profile, s.supplement);
@@ -233,7 +240,8 @@ async function mutants(args: string[]): Promise<number> {
     if (m.id === 'M10') builds.m10 = env.build;
     if (m.id === 'M11') builds.m11 = env.build;
     const run = await runProfile(env.build, s.cases, s.truths, s.profile, s.supplement);
-    const evaluated = evaluateRecorded(s, observationsOf(run));
+    const observed = injection ? applyInjections(observationsOf(run), injection.injections) : observationsOf(run);
+    const evaluated = evaluateRecorded(s, observed);
     const report = reportOf(s, env, evaluated, 'pinned_runtime_adapter');
     const exit = profileExitCode(report);
     bundle(write, `mutants/${m.id}/`, evaluated.observations, report);
@@ -242,7 +250,7 @@ async function mutants(args: string[]): Promise<number> {
     const failures = witnessFailures(m.witness, e, exit);
     // Harness process problems anywhere in the run, and barrier timeouts unless the mutant is declared to be detected
     // through missing evidence (M10), are technical failures: never a kill.
-    const diags = [...run.corpus.map(x => x.run.observation), ...run.supplement.map(x => x.run.observation)].flatMap(o => o.diagnostics.map(d => ({ case_id: o.case_id, ...d })));
+    const diags = [...observed.corpus, ...observed.supplement].flatMap(o => o.diagnostics.map(d => ({ case_id: o.case_id, ...d })));
     const technicalDiags = diags.filter(d => HARNESS_PROCESS_CODES.has(d.code) || (d.code === 'barrier_timeout' && m.evidence_kind !== 'missing_evidence')).map(d => `${d.case_id}@${d.step}: ${d.code}`);
     if (report.has_confirmed_violation !== m.witness.run_confirmed_violation) failures.push(`has_confirmed_violation ${report.has_confirmed_violation} != ${m.witness.run_confirmed_violation}`);
     // Detected: exactly the manifest values and no technical diagnostic. Survived: the witness case and the exit are
@@ -259,6 +267,7 @@ async function mutants(args: string[]): Promise<number> {
   const kinds = (k: string) => results.filter(r => r.detected && r.evidence_kind === k).map(r => r.id as string);
   write('mutants.json', canonicalJson({
     version: VERSION, mutant_manifest: { path: MUTANT_MANIFEST, sha256: manifestSha256 },
+    ...(injection ? { gate_regression_injection: { file: injectPath, sha256: sha256Hex(injectRaw!), injections: injection.injections, note: 'Gate regression input: the mutant run was edited before evaluation. Never evidence.' } } : {}),
     baseline: { exit: baseExit, counts: baseReport.counts, supplement_acceptance_passed: baseReport.supplement_acceptance_passed, control_failures: control },
     sut_mutants: results, adapter_mutants: adapter,
     summary: {

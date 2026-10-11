@@ -1,0 +1,55 @@
+{
+  "regressions": "revocation-mutant-gate-regressions/1",
+  "note": "Regressions of the eval mutant gate's own classification. Each case runs the real pinned runtime with one manifest mutant and optionally edits that mutant run's recorded observations before evaluation (mutants --only <mutant> --inject). The required gate exit and outcome are fixed here; an edited run is a regression input, never evidence.",
+  "cases": [
+    {
+      "id": "G1-m1-unchanged",
+      "mutant": "M1",
+      "injections": [],
+      "expected_exit": 0,
+      "expected_outcome": "detected",
+      "why": "The unchanged M1 run shows exactly its manifest witness and run exceptions: detected."
+    },
+    {
+      "id": "G2-m1-malformed-other-case",
+      "mutant": "M1",
+      "injections": [
+        { "case_id": "issued-permit", "op": "add_field", "field": "ace_gate_regression_unexpected_field", "value": true }
+      ],
+      "expected_exit": 2,
+      "expected_outcome": "technical_failure",
+      "expected_reason": "unexpected harness error issued-permit malformed_observation",
+      "why": "The M1 witness is unchanged, but another case's observation violates the schema (HARNESS_ERROR malformed_observation). A technical error anywhere in the run is never a kill: technical failure, exit 2."
+    },
+    {
+      "id": "G3-m10-extra-timeout",
+      "mutant": "M10",
+      "injections": [
+        { "case_id": "issued-permit", "op": "add_diagnostic", "diagnostic": { "step": 1, "code": "barrier_timeout", "detail": "gate regression: a barrier timeout M10's manifest does not name" } }
+      ],
+      "expected_exit": 2,
+      "expected_outcome": "technical_failure",
+      "expected_reason": "unexpected barrier timeout issued-permit@1",
+      "why": "M10 is detected through its named, predeclared barrier timeouts only. One more timeout in a case its manifest entry does not name is a technical failure, exit 2."
+    },
+    {
+      "id": "G4-m4-extra-error-other-case",
+      "mutant": "M4",
+      "injections": [
+        { "case_id": "start-before-cut", "op": "add_field", "field": "ace_gate_regression_unexpected_field", "value": true }
+      ],
+      "expected_exit": 2,
+      "expected_outcome": "technical_failure",
+      "expected_reason": "unexpected harness error start-before-cut malformed_observation",
+      "why": "M4's predeclared causally_impossible error in in-flight-before-commit allows no other error: a malformed observation in another case is a technical failure, exit 2."
+    },
+    {
+      "id": "G5-m10-unchanged",
+      "mutant": "M10",
+      "injections": [],
+      "expected_exit": 0,
+      "expected_outcome": "detected",
+      "why": "The unchanged M10 run shows exactly its named barrier timeouts and missing evidence: detected."
+    }
+  ]
+}
