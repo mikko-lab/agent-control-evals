@@ -27,7 +27,7 @@ test('pinned runtime: a fresh baseline run reproduces the committed fixture obse
   const { profile } = loadProfile(root, lock.profile, cases, corpusSha, VERSION, lock.sut_commit);
   const { supplement } = loadSupplement(root, lock.supplement, VERSION, lock.sut_commit);
   const run = await runProfile(env!.build, cases, cases.map(expected), profile, supplement);
-  const fixture = readFileSync(join(root, 'test/fixtures/revocation-runtime/a682e44-baseline-observations.json'), 'utf8');
+  const fixture = readFileSync(join(root, 'test/fixtures/revocation-runtime/a9deab6-baseline-observations.json'), 'utf8');
   assert.equal(canonicalJson(observationsOf(run)) + '\n', fixture);
   for (const r of [...run.corpus, ...run.supplement]) {
     assert.deepEqual(requestDisciplineIssues(r.run), [], r.c.id);

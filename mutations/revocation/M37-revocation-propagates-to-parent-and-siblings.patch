@@ -1,0 +1,30 @@
+diff --git a/src/authority-revocation.ts b/src/authority-revocation.ts
+index 607a36f..d3a7d2c 100644
+--- a/src/authority-revocation.ts
++++ b/src/authority-revocation.ts
+@@ -112,6 +112,7 @@ export class AuthorityRevocationRegistry {
+   private readonly tenants = new Map<string, RevocationRecord>();
+   private readonly capabilityBindings = new Map<string, string>();
+   private readonly sessionTenants = new Map<string, string>();
++  private readonly mutantParents = new Map<string, string>();
+   private sequence = 0;
+ 
+   /** Records the revocation if it is new; returns the original record and whether this call was a duplicate. */
+@@ -145,6 +146,9 @@ export class AuthorityRevocationRegistry {
+       const record = this.capabilities.get(ancestor);
+       if (record) return { reason: "ancestor_revoked", record };
+     }
++    const lineage = (id: string) => { const out: string[] = []; for (let p = this.mutantParents.get(id); p !== undefined && !out.includes(p); p = this.mutantParents.get(p)) out.push(p); return out; };
++    const own = [authority.capability_id ?? "", ...(authority.ancestor_capability_ids ?? [])];
++    for (const [revoked, record] of this.capabilities) if (lineage(revoked).some(x => own.includes(x))) return { reason: "ancestor_revoked", record };
+     if (authority.capability_id !== undefined) {
+       const capability = this.capabilities.get(authority.capability_id);
+       if (capability) return { reason: "capability_revoked", record: capability };
+@@ -163,6 +167,7 @@ export class AuthorityRevocationRegistry {
+    * Returns false if the id is already bound to different content.
+    */
+   bindCapability(grant: CapabilityGrant): boolean {
++    if (grant.version === 2 && grant.parent) this.mutantParents.set(grant.capability_id, grant.parent.capability_id);
+     const fingerprint = capabilityFingerprint(grant);
+     const bound = this.capabilityBindings.get(grant.capability_id);
+     if (bound === undefined) {

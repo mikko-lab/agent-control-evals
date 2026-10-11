@@ -8,8 +8,9 @@
  * seal). Every asynchronous barrier is an explicit event with a bounded watchdog; `whenTerminal()` is only a wake-up.
  */
 import { createHash, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
+import { RUNTIME_OBSERVATION_FORMAT_2 } from "../../spec/revocation/model";
 import type { Authority, CallRecord, Diagnostic, Effect, Expected, IdentityMapping, Probe, ProbePoint, ProbeState, RuntimeDecision, RuntimeEffect, RuntimeObservation, RuntimeTarget, Step } from "../../spec/revocation/model";
-import { decisionFromCall, derive, DECISION_PROVENANCE, EFFECT_PROVENANCE } from "../../spec/revocation/runtime-observation";
+import { contractAncestors, decisionFromCall, derive, DECISION_PROVENANCE, EFFECT_PROVENANCE } from "../../spec/revocation/runtime-observation";
 import { canonicalJson } from "../../util/canonical-json";
 import type { RevocationSut } from "./sut";
 
@@ -26,9 +27,11 @@ export interface AdapterCase {
 }
 
 /**
- * Deliberate adapter defects (section 10, AM1-AM10), used only by tests and the mutation gate to show that each is
- * detected. AM3 and AM6 corrupt the report as AM1/AM2/AM5/AM9 do; AM4, AM7, AM8 and AM10 change how the adapter
- * drives or probes the SUT.
+ * Deliberate adapter defects (section 10, AM1-AM10; plan section 7.7, AM11-AM13), used only by tests and the mutation
+ * gate to show that each is detected. AM3 and AM6 corrupt the report as AM1/AM2/AM5/AM9 do; AM4, AM7, AM8 and AM10
+ * change how the adapter drives or probes the SUT. AM11 emulates a tenant revocation by session revocations, AM12
+ * maps the pairs of one session name in two tenants onto one runtime session, and AM13 issues every authority an
+ * independent grant (no parent link, no chain).
  */
 export const ADAPTER_FAULTS = [
   "AM1_backfill_from_oracle",
@@ -41,6 +44,9 @@ export const ADAPTER_FAULTS = [
   "AM8_session_per_authority",
   "AM9_seq_by_array_order",
   "AM10_no_entry_probe",
+  "AM11_tenant_revoke_as_session_revokes",
+  "AM12_tenant_blind_session_mapping",
+  "AM13_drop_parent_links",
 ] as const;
 export type AdapterFault = (typeof ADAPTER_FAULTS)[number];
 
@@ -81,6 +87,29 @@ export function uuidFor(caseId: string, ns: string, label: string): string {
 /** Runtime session id of a contract (tenant, session) pair: exactly one per pair (section 3.1). */
 export const sessionIdFor = (caseId: string, tenant: string, session: string) => uuidFor(caseId, "session", `${tenant}/${session}`);
 export const capabilityIdFor = (caseId: string, authority: string) => uuidFor(caseId, "capability", authority);
+/** Runtime tenant of a contract tenant: one per tenant, carried only in the issuer-signed grants (plan section 7.5). */
+export const tenantIdFor = (caseId: string, tenant: string) => `ace-tenant-${uuidFor(caseId, "tenant", tenant)}`;
+
+/**
+ * The identity mapping the adapter uses for a case (section 3.1, plan sections 7.5-7.6), fixed before the run from
+ * the case alone: one capability per authority, one runtime session per (tenant, session) pair, one runtime tenant
+ * per tenant, and for every capability the chain of ancestor capabilities it is issued with (parent first).
+ */
+export function identityFor(c: Pick<AdapterCase, "id" | "authorities">, fault?: AdapterFault): IdentityMapping {
+  const identity: IdentityMapping = { capabilities: {}, sessions: {}, tenants: {}, chains: {} };
+  for (const a of c.authorities) {
+    identity.capabilities[capabilityIdFor(c.id, a.id)] = a.id;
+    identity.sessions[runtimeSessionFor(c.id, a, fault)] = { tenant: a.tenant, session: a.session };
+    identity.tenants![tenantIdFor(c.id, a.tenant)] = a.tenant;
+    identity.chains![capabilityIdFor(c.id, a.id)] = fault === "AM13_drop_parent_links" ? [] : contractAncestors(c.authorities, a.id).map((x) => capabilityIdFor(c.id, x));
+  }
+  return identity;
+}
+function runtimeSessionFor(caseId: string, a: Authority, fault?: AdapterFault): string {
+  if (fault === "AM8_session_per_authority") return uuidFor(caseId, "session-per-authority", a.id);
+  if (fault === "AM12_tenant_blind_session_mapping") return uuidFor(caseId, "session", `*/${a.session}`);
+  return sessionIdFor(caseId, a.tenant, a.session);
+}
 export const outputNonce = (label: string) => `ace-out:${label}`;
 
 export class HarnessFinish extends Error {
@@ -100,6 +129,8 @@ function deferred<T>(): Deferred<T> {
   return d;
 }
 const settle = () => new Promise<void>((r) => setImmediate(r));
+/** Withheld-output codes of the pinned runtime that name a revocation (any scope); anything else is UNKNOWN. */
+const REVOCATION_CODES = new Set(["capability_revoked", "session_revoked", "tenant_revoked", "ancestor_revoked"]);
 
 interface PublicCall { state: "pending" | "fulfilled" | "rejected"; value?: unknown; error?: unknown }
 
@@ -107,12 +138,8 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
   const variant: DoubleVariant = c.double ?? "default";
   const control = new Set(o.controlSteps);
   const authorityById = new Map(c.authorities.map((a) => [a.id, a]));
-  const pairSession = (a: Authority) => (o.fault === "AM8_session_per_authority" ? uuidFor(c.id, "session-per-authority", a.id) : sessionIdFor(c.id, a.tenant, a.session));
-  const identity: IdentityMapping = { capabilities: {}, sessions: {} };
-  for (const a of c.authorities) {
-    identity.capabilities[capabilityIdFor(c.id, a.id)] = a.id;
-    identity.sessions[pairSession(a)] = { tenant: a.tenant, session: a.session };
-  }
+  const pairSession = (a: Authority) => runtimeSessionFor(c.id, a, o.fault);
+  const identity = identityFor(c, o.fault);
 
   // ---- SUT instance, fresh per case -------------------------------------------------------------------------------
   const keys = { approver: generateKeyPairSync("ed25519"), capability: generateKeyPairSync("ed25519") };
@@ -125,20 +152,48 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
   const audit = new sut.AuditCollector();
   const signer = new sut.SignatureService(REQUEST_ROOT_SECRET, REQUEST_KEY_ID);
   const grantByRequest = new Map<string, unknown>();
-  const grants = new Map<string, unknown>();
-  for (const a of c.authorities) {
-    const tool = c.setup?.authority === a.id ? c.setup.tool : "read_record";
+  // The harness is the trusted issuer (plan section 7.6): every authority gets one issuer-signed tenant-bound grant
+  // (tenancy mode). A derived authority's grant names its parent by capability_id and by the content fingerprint of
+  // the parent's body, so parents are issued first. Attenuation holds by construction: a parent allows every tool of
+  // its descendants, and a deeper grant's validity window lies inside its parent's. The provider answers a request of
+  // an authority with a parent with the complete chain, leaf first, then ancestors from the parent up to the root.
+  const grants = new Map<string, Record<string, unknown>>();
+  const parentOf = (a: Authority) => (o.fault === "AM13_drop_parent_links" ? null : a.parent);
+  const ownTool = (a: Authority) => (c.setup?.authority === a.id ? c.setup.tool : "read_record");
+  const toolsOf = (a: Authority) => [...new Set([ownTool(a), ...c.authorities.filter((x) => contractAncestors(c.authorities, x.id).includes(a.id)).map(ownTool)])].sort();
+  const depthOf = (a: Authority) => contractAncestors(c.authorities, a.id).length;
+  const issue = (a: Authority): Record<string, unknown> => {
+    const have = grants.get(a.id);
+    if (have) return have;
+    const parentId = parentOf(a);
+    const parent = parentId === null ? undefined : issue(authorityById.get(parentId)!);
+    const depth = o.fault === "AM13_drop_parent_links" ? 0 : depthOf(a);
     const body: Record<string, unknown> = {
-      version: 1,
+      version: 2,
       capability_id: capabilityIdFor(c.id, a.id),
       agent_id: AGENT,
       session_id: pairSession(a),
-      allowed_tools: [tool],
-      issued_at: iso(BASE_MS - 60_000),
-      expires_at: iso(BASE_MS + 3_600_000),
+      tenant_id: tenantIdFor(c.id, a.tenant),
+      ...(parent ? { parent: { capability_id: parent.capability_id, fingerprint: fingerprintOf(parent) } } : {}),
+      allowed_tools: toolsOf(a),
+      issued_at: iso(BASE_MS - 60_000 + 1_000 * depth),
+      expires_at: iso(BASE_MS + 3_600_000 - 1_000 * depth),
     };
-    grants.set(a.id, { ...body, signature: { algorithm: "Ed25519", key_id: CAPABILITY_KEY_ID, value: signEd25519(keys.capability.privateKey, body) } });
-  }
+    const grant = { ...body, signature: { algorithm: "Ed25519", key_id: CAPABILITY_KEY_ID, value: signEd25519(keys.capability.privateKey, body) } };
+    grants.set(a.id, grant);
+    return grant;
+  };
+  /** SHA-256 of the canonical JSON of a grant's body (every field except the signature): the parent link's fingerprint. */
+  const fingerprintOf = (grant: Record<string, unknown>) => {
+    const { signature: _signature, ...body } = grant;
+    return createHash("sha256").update(sut.canonicalize(body)).digest("hex");
+  };
+  for (const a of c.authorities) issue(a);
+  const answerFor = (a: Authority): unknown => {
+    const chain: unknown[] = [];
+    for (let p = parentOf(a); p !== null; p = parentOf(authorityById.get(p)!)) chain.push(grants.get(p));
+    return chain.length ? { kind: "capability_chain", leaf: grants.get(a.id), ancestors: chain } : grants.get(a.id);
+  };
   const provider = {
     resolve(lc: { request_id: string }) {
       const g = grantByRequest.get(lc.request_id);
@@ -157,7 +212,7 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
     clock,
     APPROVAL_FUTURE_SKEW_MS,
     provider,
-    new sut.CapabilityGrantVerifier(keys.capability.publicKey, CAPABILITY_KEY_ID, clock),
+    new sut.CapabilityGrantVerifier(keys.capability.publicKey, CAPABILITY_KEY_ID, clock, { tenancy: true }),
   );
   let clearSessionCalls = 0;
   const clearSession = executor.clearSession.bind(executor);
@@ -188,7 +243,7 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
     const executions: ProbeState["executions"] = [];
     for (const e of entries) {
       const s = executor.getExecution(e.execution_id);
-      if (s) executions.push({ label: e.label, execution_id: e.execution_id, capability_id: s.capability_id, session_id: s.session_id, state: s.state, cancellation_acknowledged: s.cancellation_acknowledged, terminal: s.terminal ? { execution_id: String(s.terminal.execution_id), outcome: String(s.terminal.outcome) } : null });
+      if (s) executions.push({ label: e.label, execution_id: e.execution_id, capability_id: s.capability_id, session_id: s.session_id, state: s.state, cancellation_acknowledged: s.cancellation_acknowledged, terminal: s.terminal ? { execution_id: String(s.terminal.execution_id), outcome: String(s.terminal.outcome) } : null, tenant_id: typeof s.tenant_id === "string" ? s.tenant_id : null, ancestor_capability_ids: Array.isArray(s.ancestor_capability_ids) ? s.ancestor_capability_ids.map(String) : [] });
     }
     const terminals = (executor.terminals() as { execution_id: unknown; outcome: unknown }[]).map((t) => ({ execution_id: String(t.execution_id), outcome: String(t.outcome) }));
     const view = executor.managedState;
@@ -289,7 +344,7 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
     const requestId = uuidFor(c.id, "request", `${authority}/${step}`);
     const trace = `${authority}/${label}/${step}`;
     traces.set(trace, { authority, label });
-    grantByRequest.set(requestId, grants.get(authority));
+    grantByRequest.set(requestId, answerFor(a));
     const envelope = {
       jsonrpc: "2.0",
       method: "steps/toolCallRequest",
@@ -307,13 +362,18 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
     requests.push({ step: step === "setup" ? -1 : step, authority, request_id: requestId });
     return signed;
   };
-  const runtimeTarget = (t: Extract<Step, { op: "revoke" }>["target"]): RuntimeTarget | null => {
-    if (t.scope === "authority") return { scope: "capability", capability_id: capabilityIdFor(c.id, t.id) };
+  /**
+   * Runtime targets of a contract revocation: one target, mapped, never enumerated. Only the AM11 defect expands a
+   * tenant revocation into one session revocation per known session of the tenant.
+   */
+  const runtimeTargets = (t: Extract<Step, { op: "revoke" }>["target"]): RuntimeTarget[] => {
+    if (t.scope === "authority") return [{ scope: "capability", capability_id: capabilityIdFor(c.id, t.id) }];
     if (t.scope === "session") {
       const a = c.authorities.find((x) => x.tenant === t.tenant && x.session === t.session);
-      return { scope: "session", session_id: a ? pairSession(a) : sessionIdFor(c.id, t.tenant, t.session) };
+      return [{ scope: "session", session_id: a ? pairSession(a) : sessionIdFor(c.id, t.tenant, t.session) }];
     }
-    return null;
+    if (o.fault === "AM11_tenant_revoke_as_session_revokes") return [...new Set(c.authorities.filter((x) => x.tenant === t.tenant).map(pairSession))].map((session_id) => ({ scope: "session", session_id }));
+    return [{ scope: "tenant", tenant_id: tenantIdFor(c.id, t.tenant) }];
   };
   const executionState = (label: string) => {
     const e = entries.find((x) => x.label === label);
@@ -353,14 +413,14 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
       probe("pre_action");
       switch (s.op) {
         case "revoke": {
-          const rt = runtimeTarget(s.target);
-          if (!rt) { diag(i, "unsupported_target", `revocation target ${JSON.stringify(s.target)} has no runtime counterpart`); break; }
-          try {
-            const receipt = executor.revoke(rt);
-            receipts.push({ step: i, target: { ...receipt.target } });
-            calls.push({ step: i, api: "revoke", outcome: "returned" });
-          } catch (e) {
-            calls.push({ step: i, api: "revoke", outcome: "threw", class: errorClass(e) });
+          for (const rt of runtimeTargets(s.target)) {
+            try {
+              const receipt = executor.revoke(rt);
+              receipts.push({ step: i, target: { ...receipt.target } });
+              calls.push({ step: i, api: "revoke", outcome: "returned" });
+            } catch (e) {
+              calls.push({ step: i, api: "revoke", outcome: "threw", class: errorClass(e) });
+            }
           }
           break;
         }
@@ -413,7 +473,7 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
           else {
             const v = pub.value as { result?: { exit_status?: unknown; outputs?: { value?: { code?: unknown } }[] } };
             const code = v?.result?.outputs?.[0]?.value?.code;
-            const value = delivered(s.execution, pub) ? "delivered" : v?.result?.exit_status === "blocked" && (code === "session_revoked" || code === "capability_revoked") ? "withheld_revoked" : `other:${String(v?.result?.exit_status)}`;
+            const value = delivered(s.execution, pub) ? "delivered" : v?.result?.exit_status === "blocked" && typeof code === "string" && REVOCATION_CODES.has(code) ? "withheld_revoked" : `other:${String(v?.result?.exit_status)}`;
             calls.push({ step: i, api: "deliver", outcome: "fulfilled", value });
           }
           break;
@@ -476,7 +536,7 @@ export async function runCase(c: AdapterCase, sut: RevocationSut, o: RunOptions)
   for (const d of derived.drift) diag(probes[d.probe].step, "drift", `${d.key} first observed at probe ${d.probe} (${d.point}), outside every step barrier`);
   const { decisions, effects } = report(c, probes, calls, identity, control, o, entries, traces);
   return {
-    observation: { case_id: c.id, complete, decisions, effects, identity, probes, calls, diagnostics },
+    observation: { format: RUNTIME_OBSERVATION_FORMAT_2, case_id: c.id, complete, decisions, effects, identity, probes, calls, diagnostics },
     requests,
     clearSessionCalls,
     constructorGetterCalls: getterCalls,

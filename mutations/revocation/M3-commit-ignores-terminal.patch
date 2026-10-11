@@ -1,8 +1,8 @@
 diff --git a/src/managed-execution.ts b/src/managed-execution.ts
-index 188316b..74ff1b6 100644
+index 04f44b4..8cf6528 100644
 --- a/src/managed-execution.ts
 +++ b/src/managed-execution.ts
-@@ -387,7 +387,6 @@ export class ManagedExecution {
+@@ -412,7 +412,6 @@ export class ManagedExecution {
  
    /** The fence reason for an execution that may no longer commit, apart from revocation. */
    #closedReason(): CommitBlockReason | undefined {

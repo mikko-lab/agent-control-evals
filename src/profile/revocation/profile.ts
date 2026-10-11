@@ -10,7 +10,7 @@ import { canonicalJson } from "../../util/canonical-json";
 import { expected } from "../../oracle/revocation/expected";
 import type { Authority, Case, Expected, Family, Step } from "../../spec/revocation/model";
 import type { AdapterCase, DoubleVariant } from "../../adapter/revocation-runtime/runner";
-import { Applicability, classify, OutOfScopeRequirement } from "./classifier";
+import { Applicability, classify, OutOfScopeRequirement, rulesOf } from "./classifier";
 
 export interface ProfileCase {
   id: string;
@@ -27,6 +27,9 @@ export interface Profile {
   corpus_sha256: string;
   sut_lock: { file: string; sut_commit: string };
   control_ops: string[];
+  supported: { revoke: { scopes: string[] } } & Record<string, unknown>;
+  /** Runtime observation format the profile accepts (absent: format 1). */
+  observation_format?: 1 | 2;
   uncovered_design_fences: string[];
   barrier_watchdog_ms: number;
   cases: ProfileCase[];
@@ -71,9 +74,12 @@ export function loadProfile(root: string, path: string, corpus: Case[], corpusSh
   if (canonicalJson(p.control_ops) !== canonicalJson(["finish", "seal"])) fail("control_ops must be finish and seal");
   if (!Number.isSafeInteger(p.barrier_watchdog_ms) || p.barrier_watchdog_ms <= 0) fail("barrier_watchdog_ms must be a positive integer");
   if (p.cases.length !== corpus.length || p.cases.some((x, i) => x.id !== corpus[i].id)) fail("cases must list every corpus case in corpus order");
-  // Applicability is the classifier's, computed from the corpus and the oracle only.
+  if (p.observation_format !== undefined && p.observation_format !== 1 && p.observation_format !== 2) fail("observation_format must be 1 or 2");
+  let rules;
+  try { rules = rulesOf(p.supported?.revoke?.scopes ?? []); } catch (e) { return fail(String((e as Error).message)); }
+  // Applicability is the classifier's, computed from the corpus, the oracle and the profile's capability rules only.
   corpus.forEach((c, i) => {
-    const want = classify(c, expected(c));
+    const want = classify(c, expected(c), rules);
     const have = p.cases[i];
     const got = { id: have.id, applicability: have.applicability, out_of_scope: have.out_of_scope ?? [], not_assessed_requirements: have.not_assessed_requirements };
     if (canonicalJson(got) !== canonicalJson(want)) fail(`case ${c.id}: committed applicability differs from the classifier`);

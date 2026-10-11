@@ -1,0 +1,21 @@
+{
+  "track": "revocation",
+  "contract": "revocation-0.4.0",
+  "sut": "acs-guardrail-demo",
+  "sut_repository": "https://github.com/mikko-lab/acs-guardrail-demo",
+  "sut_commit": "a682e4479dbccd1cd5f665f5d4879bd3dddb8b47",
+  "sut_tree": "1346e92e64aff16183df84ea126271644498190a",
+  "sut_version": "0.4.0",
+  "sut_package_lock_sha256": "acef66c720934d35add73e53269d0bf8618cc84646dbbb2d92cefe1f1ff91829",
+  "approved_via": "mikko-lab/acs-guardrail-demo#10 merge commit; technical approval of head e3e2746009db823867a1fbe7058e3d9c1c8b9073",
+  "baseline_at_pin": {
+    "test_suites": 28,
+    "tests": 553,
+    "ci_node_versions": [22, 24],
+    "verify_command": "npm run verify"
+  },
+  "profile": "profiles/revocation/acs-guardrail-demo-a682e44.profile.json",
+  "supplement": "profiles/revocation/acs-guardrail-demo-a682e44.supplement.json",
+  "follow_upstream": false,
+  "note": "Pinned SUT of the revocation track only. The ACS v0.1 track keeps sut.lock.json (403d315). A different commit is a different SUT and requires a new review."
+}
