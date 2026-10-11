@@ -1,7 +1,7 @@
 import { canonicalJson } from '../../util/canonical-json';
 import { Case, Decision, DRIFT_POINTS, Effect, EffectKind, Evidence, Expected, ExpectedEffect, RuntimeObservation } from '../../spec/revocation/model';
 import { observationIssues, runtimeObservationIssues } from '../../report/revocation/validate';
-import { decisionFromCall, derive, effectSlot, probeLogIssues, DECISION_PROVENANCE, EFFECT_PROVENANCE } from '../../spec/revocation/runtime-observation';
+import { bindingIssues, decisionFromCall, derive, effectSlot, identityIssues, probeLogIssues, receiptIssues, DECISION_PROVENANCE, EFFECT_PROVENANCE } from '../../spec/revocation/runtime-observation';
 
 const EXECUTION_KINDS = new Set(['execution_started', 'tool_commit', 'output_delivery', 'cancellation_ack', 'execution_terminal']);
 const NEEDS_START = new Set(['tool_commit', 'output_delivery', 'cancellation_ack', 'execution_terminal']);
@@ -17,7 +17,7 @@ export function withinWindow(step: number, expected: ExpectedEffect): boolean {
  * adapter observation: effects are ordered by (step, seq), the report is checked against the probe log and call
  * records, and the decisions of `controlSteps` (finish, seal) are harness control: not assessed and never reported.
  */
-export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps?: readonly number[] }
+export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps?: readonly number[]; observationFormat?: 1 | 2 }
 
 /**
  * Contradictory state evidence of one fact (probe_seq mode): the effect kind and execution it concerns (null when the
@@ -47,6 +47,9 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
   if (fatal.length) { for (const i of fatal) error('malformed_observation', i.path || '/', i.message); return finish(e); }
   const o = input as { case_id: string; complete: boolean; decisions: unknown[]; effects: unknown[] };
   if (o.case_id !== c.id) { error('case_identity_mismatch', '/case_id', `observation for ${JSON.stringify(o.case_id)} supplied for case ${JSON.stringify(c.id)}`); return finish(e); }
+  // A profile that binds an observation format accepts no other revision.
+  const format = (o as { format?: string }).format === undefined ? 1 : 2;
+  if (probeMode && options.observationFormat !== undefined && format !== options.observationFormat) { error('observation_format_mismatch', '/format', `observation format ${format}, the profile requires format ${options.observationFormat}`); return finish(e); }
   const malformed = new Set<string>();
   for (const i of issues) { const [, list, index] = ITEM.exec(i.path)!; const path = `/${list}/${index}`; if (!malformed.has(path)) { malformed.add(path); error('malformed_item', path, i.message); } }
 
@@ -186,6 +189,15 @@ type ErrorSink = (code: string, path: string, message: string) => void;
  * at which an expected window closes.
  */
 function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<string>, unsupported: Set<string>, control: Set<number>, e: Evidence, error: ErrorSink): { seqTrusted: boolean; gaps: EvidenceGap[]; windowClose: (latest: number) => number } {
+  // Format 2: the declared identity mapping must be the case's (one capability per authority, one runtime session per
+  // pair, one runtime tenant per tenant, the supplied chain equal to the contract ancestry), every execution the
+  // runtime ran must be bound to exactly that tenant and chain, and every contract revocation must be exactly one
+  // runtime revocation of its mapped target. Effects are still evaluated beside these errors.
+  if (o.format !== undefined) {
+    for (const issue of identityIssues(c.authorities, o.identity)) error('identity_mapping_invalid', '/identity', issue);
+    for (const issue of bindingIssues(c.authorities, o.probes, o.identity)) error('runtime_binding_mismatch', '/probes', issue);
+    for (const issue of receiptIssues(c.steps, o.probes, o.identity)) error('revocation_target_mismatch', '/probes', issue);
+  }
   const logIssues = probeLogIssues(o.probes);
   for (const issue of logIssues) error('sequence_inconsistent', '/probes', issue);
   const derived = derive(o.probes, o.identity);

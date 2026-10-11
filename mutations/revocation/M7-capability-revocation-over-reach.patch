@@ -1,10 +1,10 @@
 diff --git a/src/authority-revocation.ts b/src/authority-revocation.ts
-index 5002fab..6efe57b 100644
+index 607a36f..9e8b746 100644
 --- a/src/authority-revocation.ts
 +++ b/src/authority-revocation.ts
-@@ -114,7 +114,7 @@ export class AuthorityRevocationRegistry {
-     const session = this.sessions.get(authority.session_id);
-     if (session) return { reason: "session_revoked", record: session };
+@@ -146,7 +146,7 @@ export class AuthorityRevocationRegistry {
+       if (record) return { reason: "ancestor_revoked", record };
+     }
      if (authority.capability_id !== undefined) {
 -      const capability = this.capabilities.get(authority.capability_id);
 +      const capability = this.capabilities.get(authority.capability_id) ?? [...this.capabilities.values()][0];

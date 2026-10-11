@@ -1,5 +1,5 @@
 import { canonicalJson } from '../../util/canonical-json';
-import { CallRecord, DecisionValue, DRIFT_POINTS, Effect, EffectKind, IdentityMapping, Probe, ProbePoint, ProbeState, Provenance, RuntimeTarget, Step, Target } from './model';
+import { Authority, CallRecord, DecisionValue, DRIFT_POINTS, Effect, EffectKind, IdentityMapping, Probe, ProbePoint, ProbeState, Provenance, RuntimeTarget, Step, Target } from './model';
 
 /**
  * Observation semantics of a pinned runtime adapter (revocation-0.4.0). Effects and decisions are derived from the raw
@@ -23,6 +23,7 @@ export const DECISION_PROVENANCE: Provenance[] = ['sut_api'];
 /** Contract target of a runtime revocation target, through the declared identity mapping (never guessed). */
 export function contractTarget(t: RuntimeTarget, identity: IdentityMapping): Target {
   if (t.scope === 'capability') return { scope: 'authority', id: identity.capabilities[t.capability_id] ?? `unmapped:${t.capability_id}` };
+  if (t.scope === 'tenant') return { scope: 'tenant', tenant: identity.tenants?.[t.tenant_id] ?? `unmapped:${t.tenant_id}` };
   const pair = identity.sessions[t.session_id];
   return pair ? { scope: 'session', tenant: pair.tenant, session: pair.session } : { scope: 'session', tenant: 'unmapped', session: t.session_id };
 }
@@ -150,3 +151,92 @@ export function decisionFromCall(step: Step, call: CallRecord | undefined): Deci
 
 /** Canonical identity of a reported or derived runtime effect, including its step and sequence index. */
 export const effectSlot = (f: Effect & { seq: number }) => canonicalJson({ step: f.step, seq: f.seq, kind: f.kind, authority: f.authority, execution: f.execution, target: f.target });
+
+/** The contract ancestors of an authority, parent first, from the case's own parent links (cycle-safe). */
+export function contractAncestors(authorities: Authority[], id: string): string[] {
+  const byId = new Map(authorities.map(a => [a.id, a]));
+  const out: string[] = [];
+  for (let p = byId.get(id)?.parent ?? null; p !== null && !out.includes(p); p = byId.get(p)?.parent ?? null) out.push(p);
+  return out;
+}
+
+/**
+ * Format 2 identity mapping against the case, before any runtime evidence is read (plan sections 7.5, 7.6):
+ *  - one distinct runtime capability per authority, and nothing else;
+ *  - exactly one runtime session per contract (tenant, session) pair, and no runtime session for two pairs;
+ *  - exactly one runtime tenant per contract tenant, and no runtime tenant for two contract tenants;
+ *  - for every authority, the chain the adapter supplied is exactly its contract ancestry, parent first.
+ */
+export function identityIssues(authorities: Authority[], identity: IdentityMapping): string[] {
+  const issues: string[] = [];
+  const capOf = new Map<string, string>();
+  for (const [cap, a] of Object.entries(identity.capabilities)) {
+    if (!authorities.some(x => x.id === a)) issues.push(`runtime capability ${cap} maps to unknown authority ${a}`);
+    else if (capOf.has(a)) issues.push(`authority ${a} has more than one runtime capability`);
+    else capOf.set(a, cap);
+  }
+  for (const a of authorities) if (!capOf.has(a.id)) issues.push(`authority ${a.id} has no runtime capability`);
+  const pairs = new Map<string, string[]>();
+  for (const [sid, pair] of Object.entries(identity.sessions)) pairs.set(`${pair.tenant}/${pair.session}`, [...(pairs.get(`${pair.tenant}/${pair.session}`) ?? []), sid]);
+  for (const a of authorities) {
+    const sids = pairs.get(`${a.tenant}/${a.session}`) ?? [];
+    if (sids.length !== 1) issues.push(`pair ${a.tenant}/${a.session} of authority ${a.id} maps to ${sids.length} runtime sessions`);
+  }
+  for (const key of pairs.keys()) if (!authorities.some(a => `${a.tenant}/${a.session}` === key)) issues.push(`runtime session mapped to pair ${key}, which no authority has`);
+  const tenants = identity.tenants ?? {};
+  const runtimeTenantsOf = new Map<string, string[]>();
+  for (const [rt, t] of Object.entries(tenants)) runtimeTenantsOf.set(t, [...(runtimeTenantsOf.get(t) ?? []), rt]);
+  for (const t of new Set(authorities.map(a => a.tenant))) if ((runtimeTenantsOf.get(t) ?? []).length !== 1) issues.push(`contract tenant ${t} maps to ${(runtimeTenantsOf.get(t) ?? []).length} runtime tenants`);
+  for (const t of runtimeTenantsOf.keys()) if (!authorities.some(a => a.tenant === t)) issues.push(`runtime tenant mapped to contract tenant ${t}, which no authority has`);
+  const chains = identity.chains ?? {};
+  for (const a of authorities) {
+    const cap = capOf.get(a.id);
+    if (!cap) continue;
+    const want = contractAncestors(authorities, a.id).map(x => capOf.get(x) ?? `unmapped:${x}`);
+    const got = chains[cap];
+    if (!Array.isArray(got) || canonicalJson(got) !== canonicalJson(want)) issues.push(`authority ${a.id}: supplied chain ${JSON.stringify(got ?? null)} is not its contract ancestry ${JSON.stringify(want)}`);
+  }
+  for (const cap of Object.keys(chains)) if (!(cap in identity.capabilities)) issues.push(`chain declared for unknown runtime capability ${cap}`);
+  return [...new Set(issues)];
+}
+
+/**
+ * Format 2: a contract revocation is exactly one runtime revocation of the mapped target. Every receipt in the probe
+ * log must belong to a revoke step, at most one per step, and acknowledge exactly that step's target. A tenant or an
+ * ancestor revocation expressed as several session or capability revocations fails here.
+ */
+export function receiptIssues(steps: Step[], probes: Probe[], identity: IdentityMapping): string[] {
+  const issues: string[] = [];
+  const last = probes[probes.length - 1];
+  if (!last) return issues;
+  const byStep = new Map<number, RuntimeTarget[]>();
+  for (const r of last.state.receipts) byStep.set(r.step, [...(byStep.get(r.step) ?? []), r.target]);
+  for (const [step, targets] of byStep) {
+    const s = steps[step];
+    if (!s || s.op !== 'revoke') { issues.push(`runtime revocation receipt at step ${step}, which is not a revoke step`); continue; }
+    if (targets.length !== 1) issues.push(`step ${step}: ${targets.length} runtime revocations for one contract revocation ${canonicalJson(s.target)}`);
+    for (const t of targets) {
+      const got = contractTarget(t, identity);
+      if (canonicalJson(got) !== canonicalJson(s.target)) issues.push(`step ${step}: runtime revocation of ${canonicalJson(got)} acknowledges a contract revocation of ${canonicalJson(s.target)}`);
+    }
+  }
+  return issues;
+}
+
+/**
+ * Format 2: the runtime's own start-time binding of every observed execution must be the declared mapping of the
+ * capability it runs under: the tenant of that authority and the chain supplied for that capability. A disagreement
+ * means the identity mapping does not describe what the runtime enforced.
+ */
+export function bindingIssues(authorities: Authority[], probes: Probe[], identity: IdentityMapping): string[] {
+  const issues = new Set<string>();
+  for (const p of probes) for (const x of p.state.executions) {
+    const a = authorities.find(y => y.id === identity.capabilities[x.capability_id]);
+    if (!a) continue;
+    const tenant = x.tenant_id == null ? null : identity.tenants?.[x.tenant_id] ?? `unmapped:${x.tenant_id}`;
+    if (tenant !== a.tenant) issues.add(`execution ${x.label} is bound to tenant ${JSON.stringify(tenant)}, its authority ${a.id} to ${a.tenant}`);
+    const want = identity.chains?.[x.capability_id] ?? [];
+    if (canonicalJson(x.ancestor_capability_ids ?? []) !== canonicalJson(want)) issues.add(`execution ${x.label} is bound to the chain ${JSON.stringify(x.ancestor_capability_ids ?? [])}, the supplied chain is ${JSON.stringify(want)}`);
+  }
+  return [...issues];
+}

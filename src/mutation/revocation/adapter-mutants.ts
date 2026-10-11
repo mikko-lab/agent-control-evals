@@ -1,5 +1,6 @@
 /**
- * Adapter mutants AM1-AM10 (docs/revocation/runtime-adapter-compatibility.md, section 10). Each check runs the
+ * Adapter mutants AM1-AM13 (docs/revocation/runtime-adapter-compatibility.md, section 10; AM11-AM13: coverage
+ * expansion plan, section 7.7). Each check runs the
  * adapter with one deliberate defect against a real pinned runtime build (or applies the defect to a real observation
  * where the defect needs SUT behaviour the baseline runtime does not show) and states how the defect is detected.
  */
@@ -8,7 +9,7 @@ import { evaluate } from '../../eval/revocation/evaluate';
 import { runProfile } from '../../eval/revocation/runtime-run';
 import { AdapterCase, AdapterFault, capabilityIdFor, report, requestDisciplineIssues, sessionDisciplineIssues } from '../../adapter/revocation-runtime/runner';
 import { controlSteps, Profile, Supplement } from '../../profile/revocation/profile';
-import { MUTANTS, witnessFailures } from './mutants';
+import { MutantManifest, witnessFailures } from './mutants';
 import { commitValueJson } from '../../spec/revocation/runtime-observation';
 
 export interface AdapterMutantResult { id: AdapterFault; detected: boolean; how: string }
@@ -45,7 +46,7 @@ export const probeIndex = (o: RuntimeObservation, step: number, point: string) =
 const ev = (c: Case, truth: Expected, o: RuntimeObservation) => evaluate(c, truth, o, { ordering: 'probe_seq', controlSteps: controlSteps(c) });
 const codes = (e: Evidence) => e.errors.map(x => x.code);
 
-export async function adapterMutantChecks(builds: { baseline: string; m10?: string; m11?: string }, cases: Case[], truths: Expected[], profile: Profile, supplement: Supplement): Promise<AdapterMutantResult[]> {
+export async function adapterMutantChecks(builds: { baseline: string; m10?: string; m11?: string }, cases: Case[], truths: Expected[], profile: Profile, supplement: Supplement, mutants: MutantManifest): Promise<AdapterMutantResult[]> {
   const caseOf = (id: string) => { const i = cases.findIndex(c => c.id === id); return { c: cases[i], truth: truths[i] }; };
   const one = (id: string) => (x: string) => x === id;
   const out: AdapterMutantResult[] = [];
@@ -124,10 +125,33 @@ export async function adapterMutantChecks(builds: { baseline: string; m10?: stri
     else {
       const r = await runProfile(builds.m11, cases, truths, profile, supplement, { only: one('sup-unobservable-pending-settlement'), fault: 'AM10_no_entry_probe' });
       const e = r.supplement[0].evidence;
-      const m11 = MUTANTS.find(m => m.id === 'M11')!;
-      const failures = witnessFailures({ ...m11.witness, exit: undefined }, e, 0);
+      const m11 = mutants.mutants.find(m => m.id === 'M11')!;
+      const failures = witnessFailures(m11.witness, e, undefined);
       add('AM10_no_entry_probe', failures.length > 0 && e.incomplete.some(x => x.startsWith('effect order not established')), `M11 S4 under AM10: ${e.verdict}; witness fails: ${failures.join('; ')}`);
     }
+  }
+  // AM11: a tenant revocation emulated by session revocations of the tenant's sessions. The probe log's receipts show
+  // several runtime revocations (or one of another scope) for one contract revocation: revocation_target_mismatch.
+  {
+    const r = await runProfile(builds.baseline, cases, truths, profile, supplement, { only: x => x === 'tenant-multi-session-in-flight' || x === 'sup-tenant-fences-in-flight', fault: 'AM11_tenant_revoke_as_session_revokes' });
+    const all = [...r.corpus.map(x => x.evidence), ...r.supplement.map(x => x.evidence)];
+    add('AM11_tenant_revoke_as_session_revokes', all.length === 2 && all.every(e => e.verdict === 'HARNESS_ERROR' && codes(e).includes('revocation_target_mismatch')), all.map(e => `${e.case_id}: ${e.verdict} [${[...new Set(codes(e))].join(',')}]`).join('; '));
+  }
+  // AM12: the pairs of one session name in two tenants mapped onto one runtime session. The declared mapping no longer
+  // gives each pair its own runtime session (identity_mapping_invalid), and the runtime itself refuses the second
+  // tenant's grant in that session, so the other tenant's start is denied.
+  {
+    const e = (await runProfile(builds.baseline, cases, truths, profile, supplement, { only: one('tenant-isolation'), fault: 'AM12_tenant_blind_session_mapping' })).corpus[0].evidence;
+    add('AM12_tenant_blind_session_mapping', e.verdict === 'HARNESS_ERROR' && codes(e).includes('identity_mapping_invalid'), `tenant-isolation: ${e.verdict} [${[...new Set(codes(e))].join(',')}]; decision findings ${JSON.stringify(e.decision_findings)}`);
+  }
+  // AM13: every authority issued without its parent link. The supplied chains are not the contract ancestry
+  // (identity_mapping_invalid), and without the link the ancestor revocation does not reach the child: S5's start is
+  // allowed (false_allow@1, unexpected_execution_started@1).
+  {
+    const r = await runProfile(builds.baseline, cases, truths, profile, supplement, { only: x => x === 'derived-in-flight-ancestor-revoked' || x === 'sup-ancestor-revoked-child-start', fault: 'AM13_drop_parent_links' });
+    const corpus = r.corpus[0].evidence, s5 = r.supplement[0].evidence;
+    const allowed = s5.decision_findings.some(f => f.reason === 'false_allow' && f.step === 1) && s5.effect_findings.some(f => f.reason === 'unexpected_execution_started' && f.step === 1);
+    add('AM13_drop_parent_links', [corpus, s5].every(e => e.verdict === 'HARNESS_ERROR' && codes(e).includes('identity_mapping_invalid')) && allowed, `${corpus.case_id}: ${corpus.verdict} [${[...new Set(codes(corpus))].join(',')}]; S5: ${s5.verdict} [${[...new Set(codes(s5))].join(',')}] ${JSON.stringify(s5.decision_findings)} ${JSON.stringify(s5.effect_findings)}`);
   }
   return out;
 }

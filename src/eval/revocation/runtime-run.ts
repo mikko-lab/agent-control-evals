@@ -22,14 +22,14 @@ export async function runProfile(build: string, cases: Case[], truths: Expected[
     if (p.applicability !== 'IN_PROFILE' || (o.only && !o.only(p.id))) continue;
     const c = cases[i];
     const run = await runCase({ id: c.id, authorities: c.authorities, steps: c.steps }, sut, { watchdogMs: o.watchdogMs ?? profile.barrier_watchdog_ms, controlSteps: p.not_assessed_requirements, fault: o.fault, oracle: o.fault === 'AM1_backfill_from_oracle' ? truths[i] : undefined });
-    out.corpus.push({ c, truth: truths[i], run, evidence: evaluate(c, truths[i], run.observation, { ordering: 'probe_seq', controlSteps: p.not_assessed_requirements }) });
+    out.corpus.push({ c, truth: truths[i], run, evidence: evaluate(c, truths[i], run.observation, { ordering: 'probe_seq', controlSteps: p.not_assessed_requirements, observationFormat: profile.observation_format ?? 1 }) });
   }
   for (const s of supplement.cases) {
     if (o.only && !o.only(s.id)) continue;
     const control = controlSteps(s);
     const run = await runCase({ id: s.id, authorities: s.authorities, steps: s.steps, setup: s.setup, approve_starts: s.approve_starts, double: s.double }, sut, { watchdogMs: o.watchdogMs ?? profile.barrier_watchdog_ms, controlSteps: control, fault: o.fault, oracle: o.fault === 'AM1_backfill_from_oracle' ? s.expected : undefined });
     const c: Case = { id: s.id, family: s.family, authorities: s.authorities, steps: s.steps };
-    out.supplement.push({ c: s, run, evidence: evaluate(c, s.expected, run.observation, { ordering: 'probe_seq', controlSteps: control }) });
+    out.supplement.push({ c: s, run, evidence: evaluate(c, s.expected, run.observation, { ordering: 'probe_seq', controlSteps: control, observationFormat: profile.observation_format ?? 1 }) });
   }
   return out;
 }

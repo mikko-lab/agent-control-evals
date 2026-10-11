@@ -6,7 +6,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { buildSut, ensureMirror, freshCheckout, npmCi, runSutVerify, SutCheckoutError } from "./checkout";
-import { buildHashes, RevocationLock, verifyRevocationCheckout } from "./revocation-lock";
+import { buildHashes, RevocationLock, verifyRevocationCheckout, verifyRevocationTag } from "./revocation-lock";
 
 export interface RevocationEnv {
   label: string;
@@ -34,6 +34,7 @@ export class MutantTypecheckError extends Error {}
 export function prepareRevocationEnv(lock: RevocationLock, label: string, o: RevocationEnvOptions): RevocationEnv {
   const work = resolve(o.workDir);
   const mirror = ensureMirror(lock, work, o.sourceOverride);
+  verifyRevocationTag(lock, mirror);
   const dir = join(work, "envs", label);
   const info = freshCheckout(lock, mirror, join(dir, "checkout"));
   verifyRevocationCheckout(lock, info.dir);
@@ -64,6 +65,12 @@ export function prepareRevocationEnv(lock: RevocationLock, label: string, o: Rev
     if (!baseline_verified) throw new SutCheckoutError(`SUT baseline does not reproduce the lock (${lock.baseline_at_pin.test_suites} suites / ${lock.baseline_at_pin.tests} tests):\n${v.summary}`);
   }
   const build = buildSut(info.dir, join(dir, "build"), o.harnessRoot);
+  // The pinned chain length is a runtime constant: the built runtime must export exactly the locked value.
+  if ((lock.sut_runtime_mode ?? "legacy") === "tenancy") {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const got = (require(join(build, "src", "capability-grant")) as { MAX_CHAIN_LENGTH?: unknown }).MAX_CHAIN_LENGTH;
+    if (got !== lock.max_chain_length) throw new SutCheckoutError(`SUT MAX_CHAIN_LENGTH ${String(got)} != pinned ${String(lock.max_chain_length)}`);
+  }
   const hashes = buildHashes(build);
   return { label, checkout: info.dir, build, patched: !!o.patch, modules: hashes.modules, build_sha256: hashes.build_sha256, baseline_verified, baseline_summary };
 }

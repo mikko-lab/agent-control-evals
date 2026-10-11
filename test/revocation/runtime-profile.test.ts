@@ -1,7 +1,9 @@
 /**
- * revocation-0.4.0 declared-profile tests that need no SUT: they evaluate the committed observations of the pinned
- * runtime's baseline run (test/fixtures/revocation-runtime, refreshed and byte-compared against a fresh run in
- * runtime-sut.test.ts) and controlled edits of them that simulate SUT behaviour the baseline does not show.
+ * revocation-0.4.0 declared-profile tests that need no SUT, on the earlier pin (acs-guardrail-demo@a682e44, legacy
+ * mode, runtime observation format 1): they evaluate the committed observations of that runtime's baseline run
+ * (test/fixtures/revocation-runtime/a682e44-baseline-observations.json) under its historical lock, profile and
+ * supplement, and controlled edits of them that simulate SUT behaviour the baseline does not show. They keep the
+ * format 1 evaluation path and its regressions unchanged; the current pin is covered by runtime-tenancy.test.ts.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +25,7 @@ import { loadRevocationLock, RevocationLockError } from '../../src/sut/revocatio
 import { canonicalJsonLines } from '../../src/util/canonical-json';
 import { sha256Hex } from '../../src/util/hash';
 
-const LOCK = 'sut.revocation.lock.json';
+const LOCK = 'profiles/revocation/history/sut.revocation.a682e44.lock.json';
 const { lock, sha256: lockSha256 } = loadRevocationLock(join(root, LOCK), VERSION);
 const corpusSha = sha256Hex(canonicalJsonLines(cases));
 const { profile, sha256: profileSha } = loadProfile(root, lock.profile, cases, corpusSha, VERSION, lock.sut_commit);
@@ -61,7 +63,7 @@ test('profile and supplement fail closed: golden bytes, classifier agreement and
   const dir = mkdtempSync(join(tmpdir(), 'rev-profile-'));
   try {
     mkdirSync(join(dir, 'profiles/revocation'), { recursive: true });
-    for (const f of readdirSync(join(root, 'profiles/revocation'))) copyFileSync(join(root, 'profiles/revocation', f), join(dir, 'profiles/revocation', f));
+    for (const f of readdirSync(join(root, 'profiles/revocation')).filter(f => statSync(join(root, 'profiles/revocation', f)).isFile())) copyFileSync(join(root, 'profiles/revocation', f), join(dir, 'profiles/revocation', f));
     const p = join(dir, lock.profile);
     const original = readFileSync(p, 'utf8');
     writeFileSync(p, original.replace('"IN_PROFILE"', '"OUT_OF_SCOPE"'));
@@ -241,6 +243,10 @@ test('CLI run-adapter fails closed before any runtime: wrong profile binding, mi
     assert.equal(wrong.status, 2); assert.match(wrong.stderr, /not the profile bound by the lock/);
     assert.equal(run('run-adapter', '--lock', LOCK, '--out', join(dir, 'y')).status, 2);
     assert.equal(run('mutants', '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'z'), '--only', 'M99').status, 2);
+    // The adapter drives the runtime in tenancy mode only: the legacy pin can be re-evaluated, never run.
+    const legacy = run('run-adapter', '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'w'));
+    assert.equal(legacy.status, 2); assert.match(legacy.stderr, /tenancy-mode lock and a format 2 profile/);
+    assert.throws(() => statSync(join(dir, 'w')));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

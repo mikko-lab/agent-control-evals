@@ -1,8 +1,8 @@
 diff --git a/src/managed-execution.ts b/src/managed-execution.ts
-index 188316b..63125c1 100644
+index 04f44b4..d83aaa7 100644
 --- a/src/managed-execution.ts
 +++ b/src/managed-execution.ts
-@@ -412,7 +412,7 @@ export class ManagedExecution {
+@@ -437,7 +437,7 @@ export class ManagedExecution {
      const closedNow = this.#closedReason();
      if (closedNow) this.#blocked(key, closedNow);
      const revoked = this.deps.revoked();

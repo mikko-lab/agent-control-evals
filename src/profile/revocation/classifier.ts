@@ -13,6 +13,20 @@ export type Applicability = 'IN_PROFILE' | 'OUT_OF_SCOPE';
 export interface OutOfScopeRequirement { step: number; requirement: 'decision' | 'effect' | 'authority'; capability_class: string; reason: string }
 export interface Classification { id: string; applicability: Applicability; out_of_scope: OutOfScopeRequirement[]; not_assessed_requirements: number[] }
 
+/**
+ * The profile's capability rules that the classifier depends on, read from the committed profile only
+ * (`supported.revoke.scopes`): whether the runtime revokes by tenant, and whether an authority-scope revocation
+ * covers the target's descendants (issuer-attested ancestor chains).
+ */
+export interface CapabilityRules { tenant_scope: boolean; descendant_coverage: boolean }
+/** The a682e44 profile's rules: capability (without descendants) and session scope only. */
+export const LEGACY_RULES: CapabilityRules = { tenant_scope: false, descendant_coverage: false };
+export function rulesOf(revokeScopes: readonly string[]): CapabilityRules {
+  const known = new Set(['authority_without_descendants', 'authority_with_descendants', 'session', 'tenant']);
+  for (const x of revokeScopes) if (!known.has(x)) throw new Error(`unknown revoke scope rule ${x}`);
+  return { tenant_scope: revokeScopes.includes('tenant'), descendant_coverage: revokeScopes.includes('authority_with_descendants') };
+}
+
 /** Sole denial reasons the runtime cannot express, with their capability class. */
 const SOLE_REASON_CLASS: Record<string, string> = {
   permit_consumed: 'single_use_permit',
@@ -22,7 +36,7 @@ const SOLE_REASON_CLASS: Record<string, string> = {
   not_committed: 'deliver_requires_commit_sole_denial',
 };
 
-export function classify(c: Case, truth: Expected): Classification {
+export function classify(c: Case, truth: Expected, rules: CapabilityRules = LEGACY_RULES): Classification {
   const out: OutOfScopeRequirement[] = [];
   const o = (step: number, requirement: OutOfScopeRequirement['requirement'], capability_class: string, reason: string) => out.push({ step, requirement, capability_class, reason });
   const decision = (step: number) => truth.decisions.find(d => d.step === step)!.decision;
@@ -42,8 +56,8 @@ export function classify(c: Case, truth: Expected): Classification {
         : o(step, 'decision', 'issue', 'permits are minted inside the runtime start path and are neither invocable nor observable');
     }
     if (s.op === 'revoke') {
-      if (s.target.scope === 'tenant') return o(step, 'decision', 'tenant_scope_revocation', 'the runtime has no tenant scope');
-      if (s.target.scope === 'authority') {
+      if (s.target.scope === 'tenant') return rules.tenant_scope ? undefined : o(step, 'decision', 'tenant_scope_revocation', 'the runtime has no tenant scope');
+      if (s.target.scope === 'authority' && !rules.descendant_coverage) {
         const id = s.target.id;
         const descendants = c.authorities.filter(x => x.id !== id && covers(c.authorities, x.id, { scope: 'authority', id }));
         if (descendants.length) return o(step, 'effect', 'descendant_coverage', `revocation of ${id} must also cover ${descendants.map(x => x.id).join(', ')}; a runtime capability revocation covers one capability`);

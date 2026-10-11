@@ -56,12 +56,23 @@ export type ProbePoint = typeof PROBE_POINTS[number];
 /** Probe points at which a first-observed effect lies outside every step barrier (drift). */
 export const DRIFT_POINTS: readonly ProbePoint[] = ['pre_action', 'seal_settle'];
 /** Runtime identities, mapped back to contract identities by the declared identity mapping. */
-export type RuntimeTarget = { scope: 'capability'; capability_id: string } | { scope: 'session'; session_id: string };
+export type RuntimeTarget = { scope: 'capability'; capability_id: string } | { scope: 'session'; session_id: string } | { scope: 'tenant'; tenant_id: string };
+/**
+ * Runtime observation format revision 2 (pinned runtime in tenancy mode, plan section 7.10): the identity mapping
+ * declares the runtime tenants and the issuer-signed ancestor chain the adapter supplied for every capability, and
+ * every execution record carries the runtime's own start-time tenant and chain binding. Revision 1 (no `format`
+ * field) is the a682e44 shape and is evaluated unchanged.
+ */
+export const RUNTIME_OBSERVATION_FORMAT_2 = 'revocation-runtime-observation/2';
 export interface IdentityMapping {
   /** runtime capability_id -> contract authority */
   capabilities: Record<string, string>;
   /** runtime session_id -> contract (tenant, session) pair */
   sessions: Record<string, { tenant: string; session: string }>;
+  /** Format 2: runtime tenant_id -> contract tenant. */
+  tenants?: Record<string, string>;
+  /** Format 2: runtime capability_id -> ancestor capability_ids of the chain the adapter supplied (parent first). */
+  chains?: Record<string, string[]>;
 }
 /** Raw observable state at one probe. Effects are derived from it by src/spec/revocation/runtime-observation.ts. */
 export interface ProbeState {
@@ -72,7 +83,13 @@ export interface ProbeState {
    * Runtime execution records (getExecution) of every invocation seen so far, with the snapshot's own terminal record
    * (null when the snapshot has none).
    */
-  executions: { label: string; execution_id: string; capability_id: string; session_id: string; state: string; cancellation_acknowledged: boolean; terminal: { execution_id: string; outcome: string } | null }[];
+  executions: {
+    label: string; execution_id: string; capability_id: string; session_id: string; state: string; cancellation_acknowledged: boolean; terminal: { execution_id: string; outcome: string } | null;
+    /** Format 2: the runtime's start-time tenant binding (null when the snapshot has none). */
+    tenant_id?: string | null;
+    /** Format 2: the runtime's start-time ancestor chain binding (empty when the snapshot has none). */
+    ancestor_capability_ids?: string[];
+  }[];
   /** The executor's terminal log (terminals()), in its own order. */
   terminals: { execution_id: string; outcome: string }[];
   /**
@@ -103,6 +120,8 @@ export interface Diagnostic { step: number | null; code: string; detail: string 
 export interface RuntimeDecision extends Decision { provenance: Provenance[] }
 export interface RuntimeEffect extends Effect { seq: number; provenance: Provenance[] }
 export interface RuntimeObservation {
+  /** Absent: format 1 (a682e44). RUNTIME_OBSERVATION_FORMAT_2: tenancy-mode runtime with tenants and chains. */
+  format?: typeof RUNTIME_OBSERVATION_FORMAT_2;
   case_id: string;
   complete: boolean;
   decisions: RuntimeDecision[];
