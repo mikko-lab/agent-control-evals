@@ -63,7 +63,7 @@ test('profile and supplement fail closed: golden bytes, classifier agreement and
   const dir = mkdtempSync(join(tmpdir(), 'rev-profile-'));
   try {
     mkdirSync(join(dir, 'profiles/revocation'), { recursive: true });
-    for (const f of readdirSync(join(root, 'profiles/revocation'))) copyFileSync(join(root, 'profiles/revocation', f), join(dir, 'profiles/revocation', f));
+    for (const f of readdirSync(join(root, 'profiles/revocation')).filter(f => statSync(join(root, 'profiles/revocation', f)).isFile())) copyFileSync(join(root, 'profiles/revocation', f), join(dir, 'profiles/revocation', f));
     const p = join(dir, lock.profile);
     const original = readFileSync(p, 'utf8');
     writeFileSync(p, original.replace('"IN_PROFILE"', '"OUT_OF_SCOPE"'));

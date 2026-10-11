@@ -200,7 +200,7 @@ test('runtime binding: an execution bound to another tenant or chain than its ca
   const e1 = ev(d.case_id, d);
   assert.equal(e1.verdict, 'HARNESS_ERROR'); assert.ok(codes(e1).includes('runtime_binding_mismatch'));
   const t = obsOf('tenant-isolation');
-  const [other] = Object.keys(t.identity.tenants!).filter(rt => t.identity.tenants![rt] === 't2');
+  const [other] = Object.keys(t.identity.tenants!).filter(rt => t.identity.tenants![rt] === 't1');
   for (const p of t.probes) for (const x of p.state.executions) x.tenant_id = other;
   const e2 = ev(t.case_id, t);
   assert.equal(e2.verdict, 'HARNESS_ERROR'); assert.ok(codes(e2).includes('runtime_binding_mismatch'));
@@ -210,8 +210,12 @@ test('runtime binding: an execution bound to another tenant or chain than its ca
 
 test('observation formats: a profile binds its format; the format 2 schema requires tenants, chains and execution bindings', () => {
   const o = obsOf('start-before-cut');
+  // A genuine format 1 observation (earlier pin) is refused by a format 2 profile; a format 2 observation stripped of
+  // its format field no longer validates as format 1.
+  const old = (JSON.parse(readFileSync(join(root, 'test/fixtures/revocation-runtime/a682e44-baseline-observations.json'), 'utf8')) as { corpus: RuntimeObservation[] }).corpus.find(x => x.case_id === 'start-before-cut')!;
+  assert.deepEqual(codes(ev('start-before-cut', old)), ['observation_format_mismatch']);
   const v1 = clone(o) as unknown as Record<string, unknown>; delete v1.format;
-  assert.deepEqual(codes(ev('start-before-cut', v1)), ['observation_format_mismatch']);
+  assert.equal(ev('start-before-cut', v1).verdict, 'HARNESS_ERROR');
   assert.deepEqual(codes(ev('start-before-cut', o, 1)), ['observation_format_mismatch']);
   const noTenants = clone(o); delete noTenants.identity.tenants;
   assert.ok(runtimeObservationIssues(noTenants).length > 0);

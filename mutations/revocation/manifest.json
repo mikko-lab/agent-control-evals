@@ -35,10 +35,14 @@
             "step": 2
           }
         ],
-        "incomplete": [],
+        "incomplete": [
+          "effect order not established at step 2: output_delivery of e1 relative to its terminal",
+          "terminal evidence missing for e1 in window 3..5"
+        ],
         "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit": 2,
+        "exit_reason": "the premature terminal leaves the witness VIOLATION with incompleteness (the delivery's order relative to the terminal is not established, and terminal evidence is missing in its window), so the report is not technically valid; has_confirmed_violation stays true and profileExitCode returns 2",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "7b18c16db39d75ba1526a3f34d3d43fd0ee880a395dc29de1f170b7e115f6cdb"
     },
@@ -68,7 +72,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "071931d52e53d7b64dd45745403fa533d8335484d2ef31c74e98346ea24222b1"
     },
@@ -98,7 +103,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "862aa8d9c7a4e3013d1fbf7af9cf10134b3c280f1fca36a8dfa8c468b5e33369"
     },
@@ -127,8 +133,9 @@
         ],
         "incomplete": [],
         "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit": 2,
+        "exit_reason": "the witness is a confirmed VIOLATION, but in in-flight-before-commit the mutant delivers output of an execution whose commit was denied, which the evaluator reports as causally_impossible (HARNESS_ERROR of that case); the report is not technically valid, has_confirmed_violation stays true and profileExitCode returns 2",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "90c300f4cf012e3df941b57572b37a66fe68f39f690162779fc17aab38417beb"
     },
@@ -158,7 +165,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "3a1b47b1dc8cba39f6a12d6f886e50c92f844db0b3153ae4fa12b39cf8ff9a7a"
     },
@@ -191,12 +199,21 @@
           {
             "reason": "unexpected_execution_started",
             "step": 2
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 3
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 4
           }
         ],
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "a974cb9e549886bd50defa21f2d0e0b3c8f395beca39ff0adad4d4fab5cf90e2"
     },
@@ -227,14 +244,28 @@
             "step": 2
           },
           {
+            "reason": "missing_tool_commit",
+            "step": 3
+          },
+          {
+            "reason": "missing_output_delivery",
+            "step": 4
+          },
+          {
             "reason": "missing_execution_started",
             "step": 7
           }
         ],
-        "incomplete": [],
+        "incomplete": [
+          "decision unavailable at step 3",
+          "decision unavailable at step 4",
+          "terminal evidence missing for e3 in window 5..9",
+          "terminal evidence missing for e1 in window 8..9"
+        ],
         "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit": 2,
+        "exit_reason": "the over-reaching revocation denies the sibling's and the parent's starts, so their later commit, delivery and terminal steps have no execution: decision unavailable and terminal evidence missing (incompleteness beside the confirmed findings); the report is not technically valid, has_confirmed_violation stays true and profileExitCode returns 2",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "84b82fb37d1457a95b75d13e0c9999ed620287344c9809dec87ef9bbae3ae60c"
     },
@@ -259,12 +290,17 @@
           {
             "reason": "unexpected_execution_started",
             "step": 1
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 2
           }
         ],
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "90c2e63383eb2d773cd53d14ecf1fd1e41866d0bd5dd1fdc82b496cd3a3f58ef"
     },
@@ -289,12 +325,17 @@
           {
             "reason": "unexpected_execution_started",
             "step": 1
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 2
           }
         ],
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "242ac58d2d9bd45d132a57d52d28f7987757cfe7c4d67a6c90bbef9c770a2278"
     },
@@ -312,11 +353,14 @@
         "decision_findings": [],
         "effect_findings": [],
         "incomplete": [
-          "terminal evidence missing for e1 in window 2..3"
+          "observation window not sealed",
+          "expected effect not confirmed: e1 in window 1..4",
+          "execution not observed terminal: e1"
         ],
         "errors": [],
         "exit": 2,
-        "exit_reason": "no execution records a terminal, so terminal evidence is missing in every case that starts one; the report is not technically valid and profileExitCode returns 2. The mutant is detected only through missing evidence, never as a violation"
+        "exit_reason": "no execution records a terminal, so terminal evidence is missing in every case that starts one; the report is not technically valid and profileExitCode returns 2. The witness is detected only through missing evidence, never as a violation (the run's has_confirmed_violation comes from S3, where the missing terminal no longer fences the commit)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "fa2200e3735d5ab6510d1827730bc8b3234a8779a9837e013a766aa5e27d11e5"
     },
@@ -343,7 +387,8 @@
         ],
         "errors": [],
         "exit": 1,
-        "exit_reason": "S4 becomes a confirmed VIOLATION (premature terminal) while its declared incompleteness stays; the report stays technically valid, so profileExitCode returns 1"
+        "exit_reason": "S4 becomes a confirmed VIOLATION (premature terminal) while its declared incompleteness stays; the report stays technically valid, so profileExitCode returns 1",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "6ff9887382fd6ad854b760078864b61b7e567b0d9a79e204b8d8a255df2c0aca"
     },
@@ -386,7 +431,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "ebb8720370d6e4027b4cb0013c933c7fdcd142cfdd4b355d978323c8bfd0213d"
     },
@@ -416,12 +462,25 @@
           {
             "reason": "missing_execution_started",
             "step": 2
+          },
+          {
+            "reason": "missing_tool_commit",
+            "step": 3
+          },
+          {
+            "reason": "missing_output_delivery",
+            "step": 4
           }
         ],
-        "incomplete": [],
+        "incomplete": [
+          "decision unavailable at step 3",
+          "decision unavailable at step 4",
+          "terminal evidence missing for e2 in window 5..7"
+        ],
         "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit": 2,
+        "exit_reason": "the over-reaching tenant revocation denies the other tenant's start, so its later commit, delivery and terminal have no execution: decision unavailable and terminal evidence missing beside the confirmed findings; the report is not technically valid, has_confirmed_violation stays true and profileExitCode returns 2",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "3c4bf018612bba4106ad90404c70362705a988cdded678b8440c78c6c04e9b75"
     },
@@ -456,7 +515,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "924e308a294720dfa84b8397c91374c77415551ee3190633681a2108af6883ce"
     },
@@ -486,12 +546,17 @@
           {
             "reason": "unexpected_execution_started",
             "step": 1
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 6
           }
         ],
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "a2db21884b9679b7061ff86e0b25392d8bd3a83366fda2ca05d656215d6b589d"
     },
@@ -522,14 +587,28 @@
             "step": 2
           },
           {
+            "reason": "missing_tool_commit",
+            "step": 3
+          },
+          {
+            "reason": "missing_output_delivery",
+            "step": 4
+          },
+          {
             "reason": "missing_execution_started",
             "step": 7
           }
         ],
-        "incomplete": [],
+        "incomplete": [
+          "decision unavailable at step 3",
+          "decision unavailable at step 4",
+          "terminal evidence missing for e3 in window 5..9",
+          "terminal evidence missing for e1 in window 8..9"
+        ],
         "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit": 2,
+        "exit_reason": "the lineage walk denies the sibling's and the parent's starts, so their later commit, delivery and terminal steps have no execution: decision unavailable and terminal evidence missing beside the confirmed findings; the report is not technically valid, has_confirmed_violation stays true and profileExitCode returns 2",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "48982c8279d9ff9a68d659a556c371997042fbc749151d75236e00e03ff322de"
     },
@@ -559,12 +638,17 @@
           {
             "reason": "unexpected_execution_started",
             "step": 1
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 2
           }
         ],
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "87015f01c56a60424ec9ebb13b9814e70bc57f5dd1fcf7a7b803a91388263ca8"
     },
@@ -594,12 +678,17 @@
           {
             "reason": "unexpected_execution_started",
             "step": 1
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 2
           }
         ],
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "1ad70ddfc54edc60a3596eed6824d8ce6b9d6193c6f13c74d465d8d56e408194"
     },
@@ -629,12 +718,17 @@
           {
             "reason": "unexpected_execution_started",
             "step": 1
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 2
           }
         ],
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "f4aab7439015299ae98d8576f3abec0ea568425ab7606cefdc83f551c62c4531"
     },
@@ -669,7 +763,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "fb4b80f3234e1d1620e610df7845769402447bbffb8a52f07638065bc0672784"
     },
@@ -704,7 +799,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "e44d30f4e5d8f06f98c66a8519f1b1eb6cec999ec99702607c4f4654b383ba01"
     },
@@ -739,7 +835,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "d04677de140a02e8a93eaa57d5dc796b87abd2f1ab7443cd39baa434a9cd3ad1"
     },
@@ -774,7 +871,8 @@
         "incomplete": [],
         "errors": [],
         "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)"
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
       },
       "patch_sha256": "fff8bf06ec1a970aabe144d0d0f94047cb9e26e9998b2fa93a911260d2b515a0"
     }
