@@ -68,17 +68,19 @@ A new opt-in executor mode, **permit mode** (for example a constructor option `{
 
 One lineage record per approval/permit lineage (= one contract authority), keyed by a runtime-assigned `lineage_id`. It has two parts and a set of immutable bindings:
 
-- **Bindings**, fixed at creation, frozen before the first callback:
-  - `agent_id`, `session_id`, `tenant_id` (tenancy mode; from the verified grant only);
-  - the leaf `capability_id` and its content fingerprint;
-  - the ordered ancestor chain as `capability_id` and fingerprint pairs (parent first);
-  - the tool name;
-  - `arguments_digest`: the SHA-256 of the canonical JSON of the request arguments;
-  - `request_digest`: the SHA-256 of the canonical `{ agent_id, session_id, tool, arguments }`;
-  - the original `request_id`;
-  - the approver identity from `ask_details`.
-- **Approval part:** `approval_state` ∈ {`pending`, `approved`, `rejected`, `expired`}, `approval_expires_at`, `approved_seq`, `approver`.
-- **Permit part:** `permit_state` ∈ {`none`, `issued`, `consumed`, `expired`}, `permit_id`, `permit_expires_at`, `issued_seq`, `consumed_seq`, `execution_id` (once consumed).
+- **Bindings**, fixed at creation and frozen before the first callback. They fall into two groups. §5.1 states, field by field, which operation compares which binding.
+  - **Authority and action bindings**, compared again at later operations:
+    - `agent_id`, `session_id`, `tenant_id` (tenancy mode; from the verified grant only);
+    - the **chain snapshot**: the leaf grant and its ordered ancestors (parent first), each kept with its `capability_id` and content fingerprint;
+    - the tool name;
+    - `arguments_digest`: the SHA-256 of the canonical JSON of the request arguments.
+  - **Approval context**, which belongs to the original request and is compared only at `approve` and `reject`:
+    - the original `request_id`;
+    - `request_digest`: the SHA-256 of the canonical `{ agent_id, session_id, tool, arguments }`;
+    - `authority_fingerprint`: the SHA-256 over the leaf fingerprint and the ancestor fingerprints, in order;
+    - the approver identity from `ask_details`.
+- **Approval part:** `approval_state` ∈ {`pending`, `approved`, `rejected`, `expired`}, `created_seq`, `approval_expires_at`, `approved_seq`, `approver`.
+- **Permit part:** `permit_state` ∈ {`none`, `issued`, `consumed`, `expired`}, `permit_id`, `permit_expires_at`, `issued_seq`, `consumed_seq`, and, once consumed, `execution_id` and `start_request_id` (the fresh request id of the consuming start, §5.1).
 
 The **lifecycle state** used below is derived from the two parts:
 - `pending`;
@@ -99,7 +101,7 @@ All `*_seq` values come from **one monotonic authority sequence** shared with `r
 
 | Operation | Signature (proposal) | Sync / async | Contract op |
 |---|---|---|---|
-| Create lineage | `process(signedRequest)` in permit mode → `{ status: "pending", lineage_id }` (Guardian ASK), `{ status: "approved", lineage_id }` (Guardian ALLOW, approver `policy`), or throws (Guardian DENY or any earlier check) | async (unchanged signature) | none; the contract's `initial` state is created at case setup (§7.2) |
+| Create lineage | `process(signedRequest)` in permit mode → `{ status: "pending", lineage_id }` (Guardian ASK), `{ status: "approved", lineage_id }` (Guardian ALLOW, approver `policy`), or throws (Guardian DENY, any earlier check, or the creation fence of §5.4) | async (unchanged signature); synchronous from the authority verification to the lineage record | none; the contract's `initial` state is created at case setup (§7.2) |
 | Approve | `approve(grant: ApprovalGrantV3)` → `ApprovalReceipt` | **sync** | `approve` |
 | Reject | `reject(grant: ApprovalGrantV3 with decision "reject")` → `RejectionReceipt` | sync | none |
 | Issue | `issuePermit({ lineage_id })` → `PermitReceipt { lineage_id, permit_id, issued_seq, expires_at }` | **sync** | `issue` |
@@ -109,7 +111,7 @@ All `*_seq` values come from **one monotonic authority sequence** shared with `r
 
 `approve` and `issuePermit` are synchronous by design: no Promise turn exists between their final fence and their transition (§5.9).
 
-`ApprovalGrantV3` is `ApprovalGrantV2` plus `lineage_id`, `request_digest` and `authority_fingerprint`, all signed. `authority_fingerprint` is the SHA-256 over the leaf fingerprint and the ancestor fingerprints, in order. With these, a human approves exactly the request and authority snapshot they saw. A V3 grant names one lineage and cannot be replayed on another.
+`ApprovalGrantV3` is `ApprovalGrantV2` (which already signs `session_id`, the original `request_id` and `tool`) plus `lineage_id`, `request_digest` and `authority_fingerprint`, all signed. With these, a human approves exactly the request and authority snapshot they saw. A V3 grant names one lineage and cannot be replayed on another.
 
 ### 3.4 Reasons
 
@@ -127,6 +129,7 @@ Every denial is a typed error with a stage (`approval`, `issue`, `start`) and a 
 | `approval_verification_failed` (with sub-reason) | none | approve, reject |
 | `chain_snapshot_mismatch` | none | approve, issue, start |
 | `lineage_binding_mismatch` (with the field) | none | start |
+| `capability_expired`, `capability_not_yet_valid` | none (runtime-specific) | create, approve, issue, start (re-verification and final fence, §5.4) |
 
 The evaluator compares decisions (ALLOW/DENY), not reasons. Reasons are runtime evidence for the runtime-own tests.
 
@@ -170,13 +173,20 @@ An issued permit whose lineage is then revoked stays `issued`, because it was ne
 
 ### 4.3 Transition table
 
-`fences(stage)` means: every revocation check of the stage for the lineage's bound authority (session, capability, tenant, ancestors), the authority re-verification (§5.2), and the binding comparison. Expiry is evaluated with the executor's clock at the operation and recorded by that operation (§11 D8).
+`fences(stage)` means, in this order (§5.2, §5.4):
+- the early revocation check of the lineage's bound authority (session, capability, tenant, ancestors);
+- the authority re-verification;
+- the binding comparisons of the stage (§5.1);
+- the final fence F(stage): revocation, chain validity, the operation's own expiry, and the state check-and-set.
+
+Expiry is evaluated with the executor's clock at the operation and recorded by that operation (§11 D8).
 
 | # | From | Operation | Conditions | Decision | New state | Observable effect (runtime state) |
 |---|---|---|---|---|---|---|
-| T1 | — | `process(r)` ASK | schema, signature, replay, request-stage revocation, chain verified and bound, Guardian ASK (human) | ALLOW (pending) | `pending` | new lineage with bindings; `approval_requested` audit (diagnostic only) |
-| T2 | — | `process(r)` ALLOW | as T1, Guardian ALLOW | ALLOW (approved) | `approved` (approver `policy`) | new lineage, `approved_seq` |
+| T1 | — | `process(r)` ASK | schema, signature, replay, request-stage revocation, chain verified and bound, Guardian ASK (human), **creation fence** (§5.4) | ALLOW (pending) | `pending` | new lineage with bindings and `created_seq`; `approval_requested` audit (diagnostic only) |
+| T2 | — | `process(r)` ALLOW | as T1, Guardian ALLOW | ALLOW (approved) | `approved` (approver `policy`) | new lineage, `created_seq`, `approved_seq` |
 | T3 | — | `process(r)` DENY or any check fails | — | DENY | none | none |
+| T3a | — | `process(r)` ASK or ALLOW | the authority was revoked, or a chain member's validity window ended, in a callback after its verification (Guardian, `capability_verified` or `guardian_decision` audit sink) | DENY `revoked` (stage `request`) / `capability_expired` | none | no lineage is created |
 | T4 | `pending` | `approve(g)` | not expired; grant valid (signature, approver, `lineage_id`, `request_digest`, `authority_fingerprint`); `fences(approval)` | ALLOW | `approved` | `approval_state = approved`, `approved_seq` → **`approval_granted`** |
 | T5 | `pending` | `approve(g)` | expired | DENY `approval_expired` | `approval_expired` | state recorded |
 | T6 | `pending` | `approve(g)` | revoked (any covering scope) | DENY `revoked` | unchanged | none |
@@ -212,31 +222,54 @@ An issued permit whose lineage is then revoked stays `issued`, because it was ne
 
 ## 5. Security semantics
 
-### 5.1 Immutable permit bindings
+### 5.1 Binding comparisons per operation
 
-The permit inherits the lineage bindings of §3.2. A start compares the fresh, signed start request and the authority resolved for it against **every** binding before any state changes. The comparison is on clones taken at entry, so getters, proxies or later caller mutations cannot change what is compared.
+All comparisons run on clones taken at entry, so getters, proxies or later caller mutations cannot change what is compared (B8). "Snapshot comparison" means the comparison of the provider's raw answer with the lineage's chain snapshot, leaf and every ancestor, member by member by content fingerprint and before verification, as today's `#matchesChainSnapshot`. It is followed by verification of that answer, the first-seen binding (`#bindVerifiedChain`) and the final fence (§5.4).
 
-| Binding | Start-side value | Why it is bound |
-|---|---|---|
-| authority: leaf `capability_id` and fingerprint | provider re-resolution for the start request, verified | a permit of authority A must never start under authority B, not even inside the same session |
-| ancestor chain: ordered ids and fingerprints | the provider's chain for the start request, compared member by member before verification (as `#matchesChainSnapshot`) | a re-issued parent or a dropped ancestor changes which revocations cover the execution |
-| tenant | the tenant of the verified leaf | tenants are revocation scopes; the request's own `tenant_id` claim must also match (as today) |
-| session, agent | the request metadata, and the grant binding | session is a revocation scope; the replay guard is per session |
-| tool | the request's tool name | the approval was for this tool |
-| arguments | `arguments_digest` of the start request | the human approved these arguments; the same tool with other arguments is another action |
+| Binding | `approve` / `reject` (input: `ApprovalGrantV3`) | `issuePermit` (input: `lineage_id` only) | `start` (input: a fresh signed request R′) |
+|---|---|---|---|
+| `lineage_id` | grant field = lineage | names the lineage | names the lineage |
+| original `request_id` | grant field = lineage (the approval context) | — | **not compared.** R′ must carry a **fresh** `request_id` (§5.1.1). |
+| `request_digest` | grant field = lineage | — | **not compared** (§5.1.2) |
+| `authority_fingerprint` | grant field = lineage (what the human approved) | — | not compared as such; the snapshot comparison covers the same members |
+| approver identity | grant approver = the lineage's `ask_details` approver | — | — |
+| `agent_id` | through the provider context (the original context) | through the provider context | R′ `metadata.agent_id` = lineage |
+| `session_id` | grant field = lineage; through the provider context | through the provider context | R′ `metadata.session_id` = lineage |
+| `tenant_id` | the tenant of the re-resolved leaf = lineage | the tenant of the re-resolved leaf = lineage | the tenant of the verified leaf for R′ = lineage; R′'s own `tenant_id` claim, if present, = lineage (as today's `tenant_mismatch`) |
+| chain snapshot (leaf and ancestors, ids and fingerprints) | snapshot comparison of the provider's answer for the **original** context | snapshot comparison of the provider's answer for the **original** context | snapshot comparison of the provider's answer for **R′'s** context. This is the **only** authority comparison at start. |
+| tool | grant field = lineage | — | R′ tool = lineage |
+| `arguments_digest` | covered by `request_digest` | — | digest of R′'s arguments = lineage |
 
-A mismatch is DENY `lineage_binding_mismatch` (with the field). It changes no state (§11 D7). The legitimate start can follow; a mismatching attempt cannot burn the permit.
+A mismatch denies the operation with no state change (§11 D7):
+- `approval_verification_failed` for a grant field;
+- `chain_snapshot_mismatch` for the snapshot comparison;
+- `lineage_binding_mismatch` naming the field for an R′ field.
 
-### 5.2 Approval binding
+A mismatching attempt cannot burn a permit, and the legitimate start can follow.
 
-- The approval is bound to the original request through `request_digest` and to the verified grant chain through `authority_fingerprint`. Both are signed in `ApprovalGrantV3` and compared with the lineage bindings.
-- The approval fence (T4) then re-verifies authority, in the same three steps as today's `#reverifyPendingAuthority`:
-  1. revocation of every bound scope;
+#### 5.1.1 The fresh start request
+
+R′ is a new signed tool-call request: schema, envelope signature and the replay guard apply to it as to any `process()` input. Its `request_id` must be unused in its session. The replay guard already recorded the original `request_id` at lineage creation, so re-using it is rejected as a replay. R′'s `request_id` is not a lineage binding. It becomes:
+- the gate permit's `requestId`, binding the execution to R′ as today;
+- the lineage's `start_request_id`, recorded with `execution_id` at the consumption point.
+
+A start never compares R′'s `request_id` with the original one, except through the replay guard.
+
+#### 5.1.2 `request_digest` belongs to the approval
+
+`request_digest` is the value the human signs. It is compared once, at `approve`/`reject`, between the grant and the lineage. At start, the four fields it is computed from (`agent_id`, `session_id`, tool, arguments) are compared **individually**, and `request_digest` is **not** recomputed or compared. The two would be redundant: equal fields imply an equal digest. Individual comparisons give a field-specific reason. They also keep each comparison the only check that separates its field, which the mutants of §8.2 rely on (M59, M60).
+
+### 5.2 Re-verification of authority
+
+- **At approve.** The approval is bound to the original request through `request_digest` and to the verified grant chain through `authority_fingerprint`. Both are signed in `ApprovalGrantV3` and compared with the lineage bindings (§5.1). `authority_fingerprint` compares what the human approved with the lineage. It says nothing about the provider's current chain, which the snapshot comparison checks.
+- **At approve, issue and start alike**, authority is re-verified in the order below. This is today's `#reverifyPendingAuthority`, with its last revocation check moved into the final fence:
+  1. an early revocation check of every bound scope;
   2. current validity of the snapshot chain;
-  3. the provider still resolves the identical chain for the original context, followed by verification, binding and a second revocation check.
-- A provider answer is evidence only that the context is still authorized. It never replaces the bound authority.
+  3. provider re-resolution (a callback), then the snapshot comparison, verification and the first-seen binding;
+  4. the **final fence** of the operation (§5.4), which re-checks revocation and chain validity after that callback.
+- **The provider answer is evidence only.** It shows that the context is still authorized and never replaces the bound authority.
 
-The same re-verification runs at `issuePermit` (T10) and at the start early check (T14). Every one of approve, issue and start therefore stands on authority that is valid at its own effective point.
+Every one of create, approve, issue and start therefore stands on authority that is valid at its own effective point.
 
 ### 5.3 Revocation of pending approvals and unused permits
 
@@ -252,25 +285,34 @@ Coverage uses the execution predicate on the lineage bindings, for every current
 
 **No lifecycle step revives a revoked lineage:**
 - a later approval, issue or fresh-ID start is denied;
-- a new lineage for the same revoked authority is denied at `process()` (request stage);
+- a new lineage for the same revoked authority is denied at `process()`: by the request-stage checks, or by the creation fence when the revocation happens in a callback after them (§5.4, B13);
 - a permit issued before the cut is never usable after it.
 
 This is the contract's "no late approval, late issue or permit replay can revive a revoked lineage".
 
-### 5.4 Effective points
+### 5.4 Effective points and final fences
 
 Every operation has one **binding effective point**. It is the synchronous check-and-set at which the decision becomes final. It runs **after the operation's last integrator callback**, with no callback and no Promise turn between the final fence and the state transition.
+
+The **final fence** F(op) is evaluated in that segment, on the executor's clock at that moment, and consists of:
+1. **Revocation** of every bound scope: session, leaf capability, ancestors, tenant.
+2. **Chain validity:** the validity window of every chain member contains the clock. A member that expired, or that is not yet valid, is DENY `capability_expired` / `capability_not_yet_valid`. A callback can advance an injected clock, and a slow callback can outlast a window, so the validity checked during re-verification (§5.2 step 2) is not enough.
+3. **The operation's own expiry:**
+   - none at creation;
+   - `approval_expires_at` at approve and issue;
+   - `permit_expires_at` at start.
+4. **The state check-and-set**, on the current state: still absent at creation, still `pending` at approve, still `approved` at issue, still `issued` at start.
 
 | Operation | Last callback before the effective point | Effective point (one synchronous segment) | Callbacks after it |
 |---|---|---|---|
 | `revoke` | none | registry record and sequence (unchanged) | `authority_revoked` audit, cancellation listeners |
-| `process` → lineage | `guardian_decision` audit | lineage record created and frozen | `approval_requested` audit |
-| `approve` | provider re-resolution and the audit of the verification | final revocation check → state still `pending` and not expired → `approved`, `approved_seq` | `approval_granted` audit |
-| `reject` | none after grant verification | state still `pending` → `rejected` | `human_rejection` audit |
-| `issuePermit` | provider re-resolution | final revocation check → state still `approved` and approval not expired → `issued`, `permit_id`, `issued_seq` | `permit_issued` audit |
-| `start` | `tool_execution_started` audit (as today) | inside `beforeInvoke`: final revocation check → lineage still `issued`, not expired, bindings unchanged → `consumed`, `consumed_seq` → managed execution created → **tool function called** | tool body, then the result path and delivery fences (unchanged) |
+| `process` → lineage | `guardian_decision` audit (after `capability_verified` audit and `Guardian.evaluate`) | **creation fence:** F(create) on the just-verified chain → lineage record created, frozen, `created_seq` | `approval_requested` audit |
+| `approve` | provider re-resolution and the audit of the verification | F(approve) → `approved`, `approved_seq` | `approval_granted` audit |
+| `reject` | none after grant verification | state still `pending` → `rejected` (revocation and validity are not checked: a reject only removes authority) | `human_rejection` audit |
+| `issuePermit` | provider re-resolution | F(issue) → `issued`, `permit_id`, `issued_seq` | `permit_issued` audit |
+| `start` | `tool_execution_started` audit (as today) | inside `beforeInvoke`: F(start) → `consumed`, `consumed_seq`, `start_request_id` → managed execution created → **tool function called** | tool body, then the result path and delivery fences (unchanged) |
 
-"Still `pending`", "still `approved`" and "still `issued`" are re-read at the effective point. This is a **check-and-set on the current state**, never on a state seen at an earlier check (§5.9).
+**The creation fence is required.** The request-stage revocation check of `process()` runs before three callbacks: the `capability_verified` audit, `Guardian.evaluate` and the `guardian_decision` audit. Without the creation fence, an authority revoked in one of those callbacks would still get a lineage. That would contradict §5.3: no new lineage for a revoked authority. The creation fence closes this, and its regression is test L15 with mutant M69.
 
 ### 5.5 Atomic single use
 
@@ -340,6 +382,8 @@ A callback may call any public operation re-entrantly, including `revoke`, `appr
 | B10 | An audit sink throws on the start path before the effective point | today `execute()` aborts before `beforeInvoke` | DENY; permit unchanged; no tool call |
 | B11 | An audit sink throws after an effective point | an error after the effective point never undoes it (§4.4) | the transition stands; evidence reported missing |
 | B12 | An audit event, a receipt or a return value claims a permit or a start that runtime state does not show | effects come only from lineage snapshots and tool-double invocation | no effect; the adapter must report none |
+| B13 | The authority is verified in `process()`, then revoked from the `capability_verified` audit sink, from `Guardian.evaluate` or from the `guardian_decision` audit sink, before the lineage is created | the creation fence F(create) after the last callback (§5.4) | DENY `revoked` (stage `request`); no lineage; `lineages()` unchanged |
+| B14 | A callback advances the injected clock, or simply outlasts it, past a chain member's validity end, between the re-verification (§5.2 step 2) and the effective point of create, approve, issue or start | the chain-validity part of every final fence (§5.4) | DENY `capability_expired`; no transition |
 
 **An audit decision event is never evidence by itself.** `approval_granted`, `permit_issued` and `tool_execution_started` audit records show that a code path ran, not that a transition happened or that the tool was called. The evidence is the lineage snapshot (approval state, permit state, `*_seq`) and the tool double's own entry probe (§7.1).
 
@@ -405,11 +449,17 @@ The classifier marks a case `OUT_OF_SCOPE` by capability class (`src/profile/rev
 | **Runtime-own tests** | `acs-guardrail-demo` test suite and its mutant gate (§8.2) | what the contract cannot express: expiry, reject, binding mismatches, chain changes, concurrent and re-entrant starts, callback ordering, failed starts | the lock's baseline and runtime gate evidence, never profile or supplement |
 | **Component tests** | runtime unit tests of single comparators (binding comparison, digest) | check points masked on every production path (§8.2 M55, M56) | `component_check_point` only, never production-path evidence |
 
-**Effect sources:**
-- `approval_granted`: the first probe in which the lineage snapshot shows `approval_state = approved`;
-- `permit_issued`: the first probe in which it shows `permit_state` ∈ {`issued`, `consumed`};
-- `execution_started`: the tool double's entry probe, attributed from the runtime binding, as today;
-- permit consumption: `permit_state = consumed` with `execution_id`. This is a runtime-own and supplement observation; the contract has no `permit_consumed` effect.
+**The setup baseline.** After setup and before step 0, the adapter takes one **baseline probe** (a new probe point, `setup_baseline`). It records every lineage snapshot and the authority sequence value at that moment (`baseline_seq`).
+- The baseline only **confirms the initial state.** Every lineage must be exactly in its authority's `initial` state: `pending`, or `issued` with permit `issued` and unconsumed. A lineage in another state, a missing lineage, or an extra one is `identity_mapping_invalid` (a harness error of the case).
+- The baseline **never produces an effect.** The setup transitions of an `initial: issued` authority (its setup approve and issue) carry `approved_seq` and `issued_seq` ≤ `baseline_seq`. They are not effects of any step.
+
+**Effect sources (after the baseline only):**
+- **Lifecycle effects come only from transitions caused by assessed operations.** A lifecycle effect is a **transition** that the probes after the baseline observe and whose sequence value is greater than `baseline_seq`. It is attributed to the step whose own runtime call made it (AM18's `lifecycle_transition_mismatch` rejects any other step):
+  - `approval_granted`: the first probe after the baseline that shows `approval_state` changed from `pending` to `approved`, with `approved_seq` > `baseline_seq`;
+  - `permit_issued`: the first probe after the baseline that shows `permit_state` changed from `none` to `issued` (or on to `consumed` within the same step), with `issued_seq` > `baseline_seq`.
+- **No transition, no effect.** A state already present at the baseline is never an effect, however often it is observed.
+- `execution_started`: the tool double's entry probe, attributed from the runtime binding, as today.
+- **Permit consumption:** `permit_state = consumed` with `execution_id` and `start_request_id`. This is a runtime-own and supplement observation; the contract has no `permit_consumed` effect.
 
 **Decision source.** Decisions come from the call answer of the step's own runtime call: a receipt is ALLOW, a typed error is DENY. Audit records stay diagnostics.
 
@@ -419,7 +469,7 @@ The classifier marks a case `OUT_OF_SCOPE` by capability class (`src/profile/rev
   - `initial: pending`: `process(r)` with an ASK tool;
   - `initial: issued`: `process(r)` with an ASK tool, then `approve(g)` with a signed human `ApprovalGrantV3`, then `issuePermit`.
 
-  The request `r` uses the authority's fixed tool and arguments under its grant chain. Any setup denial is a harness error (`setup_failed`), never a decision. The identity mapping gains `lineages: { lineage_id → authority }`. The evaluator checks it as it checks capabilities. The first probe must show each lineage in exactly its authority's `initial` state (pending, or issued and unconsumed).
+  The request `r` uses the authority's fixed tool and arguments under its grant chain. Any setup denial is a harness error (`setup_failed`), never a decision. The identity mapping gains `lineages: { lineage_id → authority }`. The evaluator checks it as it checks capabilities. The setup ends with the baseline probe (§7.1). It confirms each lineage's `initial` state and is the reference for every later lifecycle effect; it never produces one.
 - **Steps:**
   - `approve(a)` → `approve(gV3)` on a's lineage;
   - `issue(a)` → `issuePermit({ lineage_id })`;
@@ -451,8 +501,11 @@ These run on the injected clock and the deterministic test doubles of the runtim
 | L4b | Concurrent: two `start()` under `Promise.all` | exactly one ALLOW and one DENY `permit_consumed`; tool calls 1 |
 | L4c | Re-entrant start from the first start's `tool_execution_started` audit sink | the inner one ALLOW, the outer one DENY `permit_consumed`; tool calls 1 |
 | L4d | Re-entrant start from the provider callback, and from the tool body | tool calls 1; the loser DENY |
-| L5 | Wrong tenant, session, authority, tool or arguments, one field per test. The start request comes with a grant that is valid for its own context, so only the lineage binding can reject (§8.2 masking). | DENY `lineage_binding_mismatch` naming that field; the lineage stays `issued`; a following correct start ALLOW with tool calls 1 |
-| L6 | The grant chain changes at approve, at issue and at start: a re-issued parent with a new fingerprint, a dropped ancestor, a different leaf | DENY `chain_snapshot_mismatch` at that stage; state unchanged; tool calls 0 |
+| L5-tool | R′ names tool T2 instead of T1. Same arguments, session and agent; the provider returns the lineage's own chain A, whose leaf allows T1 and T2. | DENY `lineage_binding_mismatch:tool`; lineage `issued`; T2 calls 0; a following correct start ALLOW, T1 calls 1 |
+| L5-arguments | R′ names T1 with arguments `{ n: 2 }` instead of `{ n: 1 }`; everything else equal | DENY `lineage_binding_mismatch:arguments`; lineage `issued`; tool calls 0; a following correct start ALLOW |
+| L5-session, L5-agent | R′ in session s2, or for agent g2. (a) The provider answers with the s2/g2 grant, which has another `capability_id`. (b) The provider answers with A's grant. | DENY: (a) `chain_snapshot_mismatch`, (b) `capability_session_mismatch` / `capability_agent_mismatch`; tool calls 0. These kept checks reject before the session/agent comparison (§8.2 M55). |
+| L5-tenant | R′ carries a `tenant_id` claim of t2; the chain is A's | DENY `tenant_mismatch` (today's claim check); tool calls 0 (§8.2 M56) |
+| L6 | The provider's chain changes, at approve, at issue and at start. Three variants: **(i)** same capability ids, changed content (a re-signed member); **(ii)** a valid chain of another authority B with fresh capability ids and the same agent, session, tenant and tool scope; **(iii)** a dropped ancestor, or a re-issued parent with a new id under the old leaf | DENY `chain_snapshot_mismatch` at that stage in every variant (the snapshot comparison runs first); state unchanged; tool calls 0. The checks behind it: (i) the first-seen binding (`capability_id_conflict`); (iii) chain verification (`capability_chain_link_mismatch` / `capability_malformed_chain`); (ii) nothing else. |
 | L7a | Revoke inside the last callback before issuance (provider re-resolution in `issuePermit`) | DENY `revoked`; permit `none` |
 | L7b | Revoke inside the last callback before the tool call (`tool_execution_started` audit sink) | DENY `revoked`; permit `issued`; tool calls 0 |
 | L7c | Revoke inside the `permit_issued` audit sink (after the transition) | the permit stays `issued`; the next start DENY |
@@ -463,14 +516,25 @@ These run on the injected clock and the deterministic test doubles of the runtim
 | L12 | Permit-mode `resolveApproval` and legacy-mode lifecycle methods | `LifecycleModeError`; the legacy suite is unchanged |
 | L13 | An audit sink that throws, and one that emits fake `permit_issued` / `tool_execution_started` events | lineage state and tool calls unaffected |
 | L14 | Aliasing and input mutation (B8, B9) | bindings and digests unchanged; the tool receives the entry arguments |
+| L15 | Creation-fence callback regression (B13). `process()` of an ASK request whose authority is revoked from (a) the `capability_verified` audit sink, (b) `Guardian.evaluate` (a Guardian test double), (c) the `guardian_decision` audit sink. Each is run with a capability, ancestor, session and tenant revocation. | `process` DENY `AuthorityRevokedError` (stage `request`); `lineages()` unchanged; no `approval_requested` audit; a later `approve` has nothing to name (`unknown_lineage`) |
+| L16 | Chain validity at the final fences (B14). The leaf's validity ends at T. The clock moves to T+1 inside the last callback of create (`guardian_decision` sink), approve (provider), issue (provider) and start (`tool_execution_started` sink). For start, the permit's own expiry is capped at T (D16). | DENY `capability_expired` at that stage; no transition (no lineage; `pending`; permit `none`; permit `issued` and tool calls 0) |
 
 ### 7.5 Component tests
 
-- Binding comparator: one assertion per field.
+- Binding comparator: one assertion per field (session, agent, tenant, tool, arguments).
 - Digest canonicalization: key order, Unicode, numbers.
 - Authority-fingerprint computation.
 
-These back only the check points no production path separates (§8.2).
+These back only the check points no production path separates (§8.2 M55, M56).
+
+### 7.6 Adapter and evaluator regressions (eval)
+
+| Regression | Input | Required result |
+|---|---|---|
+| AR1 setup state is no step effect | A recorded observation of `permit-single-use` (`a` is `initial: issued`), whose baseline shows `a`'s lineage `approved` and `issued` with seq values ≤ `baseline_seq`: (a) the correct report, without lifecycle effects; (b) a report that adds `approval_granted@0` and `permit_issued@0` (the AM19 defect) | (a) PASS; (b) HARNESS_ERROR `effect_without_probe_evidence` for both effects |
+| AR2 baseline confirms the initial state | `pending-approval` with a baseline that shows `a`'s lineage `approved` (as AM15 would produce) | HARNESS_ERROR `identity_mapping_invalid`; no lifecycle effect is derived from the baseline |
+| AR3 no effect without a post-baseline transition | `approval-before-cut` where the baseline shows `pending` but a later probe shows `approved` with `approved_seq` ≤ `baseline_seq` (a setup-time approval surfacing late) | contradictory state evidence: no `approval_granted` is derived; the case is incomplete (`inconsistent state evidence … approved_seq ≤ baseline_seq`) and never PASS; the expected `approval_granted@0` stays unconfirmed |
+| AR4 transition attributed to its own step | `issue-after-cut` where `permit_issued` first appears in the probe of a `revoke` step | `lifecycle_transition_mismatch` (HARNESS_ERROR), as AM18 |
 
 ## 8. Mutants
 
@@ -491,38 +555,42 @@ Lifecycle state is runtime state. Its change is reported under a separate label,
 
 Numbers M12–M14, M24 and M25 are those of the coverage plan. M49 and later are new; M15–M48 are taken by package 1. The findings listed are the minimum. The complete values, run exits and run exceptions are pinned in the eval manifest before the gate run, as for package 1.
 
-| Mutant | Removes | Witness | Minimum findings | Kind | Masking analysis |
+| Mutant | Exact check removed | Kept checks on the witness path | Witness and separating input | Minimum findings (control: PASS) | Kind |
 |---|---|---|---|---|---|
-| M12 | revocation check at the approval fence | `pending-approval` | `false_allow@1`, `unexpected_approval_granted@1` | check and lifecycle | The issue and start fences still deny steps 2–3, so containment is unaffected. The witness asserts the approval itself, which nothing else masks. |
-| M13 | revocation check at the issue fence | `issue-after-cut` | `false_allow@2`, `unexpected_permit_issued@2` | check and lifecycle | The start fence masks step 3. The permit record at step 2 is unmasked. |
-| M14 | the start's lineage-state requirement (a start without an issued permit) | `fresh-id-retry-unused-permit` | `false_allow@0`, `unexpected_execution_started@0` | both | Nothing else denies step 0: no revocation, valid authority. |
-| M24 | consumption not recorded at the final guard | `permit-single-use` | `false_allow@1`, `unexpected_execution_started@1` | both | The gate permit is per request and the fresh retry has its own request, so it does not mask. |
-| M25 | over-fencing control: the issue step checks the wrong state (requires `pending` instead of `approved`) | `approval-before-cut` | `false_deny@1`, `missing_permit_issued@1` | check and lifecycle | A valid lifecycle with no revocation before step 6, so only the wrong state check denies. It catches an over-blocking fix of M12–M14. |
-| M49 | all revocation checks on the start-with-permit path (early and final) | `fresh-id-retry-unused-permit` | `false_allow@4`, `unexpected_execution_started@4` | both | The permit is issued and unused, so only revocation denies. Removing one start check alone is masked by the other (runtime-own M54, M57). |
-| M50 | session and tenant coverage of lineages at the approval fence | S11 | `false_allow@1`, `unexpected_approval_granted@1` | check and lifecycle | The issue fence still checks the scope, so the witness is the approval step. |
-| M51 | tenant coverage at start for permits issued before the cut | S12 | `false_allow@5`, `unexpected_execution_started@5` | both | — |
-| M52 | ancestor coverage at the issue fence | S14 | `false_allow@2`, `unexpected_permit_issued@2` | check and lifecycle | The start fence masks step 3. |
+| M12 | the revocation part of the approval fence: the early approval check and F(approve) | grant verification, snapshot comparison, approval expiry, state check; the issue and start fences later | `pending-approval` step 1: `a` revoked at step 0, the approve grant is otherwise valid | `false_allow@1`, `unexpected_approval_granted@1` | check and lifecycle (issue and start still deny) |
+| M13 | the revocation part of the issue fence: the early issue check and F(issue) | snapshot comparison, approval expiry, state check; the start fences later | `issue-after-cut` step 2: approved at step 0, revoked at step 1 | `false_allow@2`, `unexpected_permit_issued@2` | check and lifecycle |
+| M14 | the lineage-state requirement of start (early check and F(start)) | every revocation and binding check (nothing is revoked, R′ matches) | `fresh-id-retry-unused-permit` step 0: lineage `pending` | `false_allow@0`, `unexpected_execution_started@0` | both |
+| M24 | the consumption transition (`issued → consumed`) at F(start) | the gate's per-request permit (each R′ has its own); the replay guard (fresh ids) | `permit-single-use` step 1: a fresh-ID retry after a consumed start | `false_allow@1`, `unexpected_execution_started@1` | both |
+| M25 | over-fencing control: the issue state check requires `pending` instead of `approved` | — | `approval-before-cut` step 1: a valid lifecycle, no revocation before step 6 | `false_deny@1`, `missing_permit_issued@1` | check and lifecycle |
+| M49 | every revocation check on the start-with-permit path: the request-stage checks (session and bound tenant before resolution, capability after verification), the early start check and the revocation part of F(start) | snapshot comparison, binding comparisons, permit state (`issued`, unused) | `fresh-id-retry-unused-permit` step 4: `a` revoked at step 3 with its permit issued and unused | `false_allow@4`, `unexpected_execution_started@4` | both. Removing only one of these checks is masked by the others (runtime-own M54, M57). |
+| M50 | session and tenant coverage in the approval fence's revocation checks (early and F(approve)) | capability and ancestor coverage (not involved); the issue fence later | S11 step 1: session (t1,s1) revoked at step 0 | `false_allow@1`, `unexpected_approval_granted@1` | check and lifecycle |
+| M51 | tenant coverage on the whole start path: the request-stage session-tenant check, the early start check, F(start) | session and capability coverage (not involved); binding comparisons | S12 step 5: tenant t1 revoked at step 4, permit issued at step 1 | `false_allow@5`, `unexpected_execution_started@5` | both |
+| M52 | ancestor coverage in the issue fence (early and F(issue)) | leaf, session and tenant coverage (not involved); the start fences later | S14 step 2: parent `p` revoked at step 1 after `c`'s approval | `false_allow@2`, `unexpected_permit_issued@2` | check and lifecycle |
 
 ### 8.2 Runtime-own mutants (runtime mutant gate, new manifest `mutants/lifecycle/manifest.json`)
 
-| Mutant | Removes | Control → mutant (exact assertion) | Witness | Kind | Masking analysis |
+Each row names the one check the mutant removes, the checks that stay on the witness path, the input that separates control from mutant, and the exact assertion. Where a kept check still blocks the effect, the row is `check_point` or `component_check_point` evidence. No row removes another safeguard to obtain a witness.
+
+| Mutant | Exact check removed | Kept checks on the witness path | Separating input | Assertion (control → mutant) | Kind |
 |---|---|---|---|---|---|
-| M53 | check-and-set: consumption checks a state read at an early check | L4c: tool calls `1 → 2`; outer start `permit_consumed → ok` | L4c, L4b | both | Only the final-guard re-read prevents the second call. The gate permit is per request and does not mask. |
-| M54 | final revocation check of the start guard on the permit path | L7b: tool calls `0 → 1`; stage `start → none` | L7b | both | The early start check passed before the revocation, so nothing else denies. |
-| M55 | session comparison of the lineage binding | component: comparator result `session → null` | component test | component_check_point | **Masked on every production path:** a request in another session needs a grant bound to that session, whose `capability_id` differs. The authority comparison (M58) rejects it first. Gap recorded, like M33. |
-| M56 | tenant comparison of the lineage binding | component: comparator result `tenant → null` | component test | component_check_point | Masked by the authority comparison, because the tenant comes from the grant. Gap recorded. |
-| M57 | early start check on the permit path | stage `start (early) → start (final)` | L2 | check_point | The final guard still denies. Containment is unchanged. |
-| M58 | authority (leaf and chain fingerprint) comparison at start | L5 (authority): tool calls `0 → 1`; reason `lineage_binding_mismatch:authority → ok` | L5-authority | both | The witness grant for B is valid for the same session, tenant and tool, so only the binding rejects. |
-| M59 | tool comparison | L5 (tool): tool calls `0 → 1` | L5-tool | both | The witness grant allows both tools, so the capability scope does not mask. |
-| M60 | arguments-digest comparison | L5 (arguments): tool calls `0 → 1` | L5-arguments | both | Same tool, other arguments, within the grant: no other check separates. |
-| M61 | chain snapshot comparison at approval | L6 (approve): approval state `pending → approved` | L6-approve | check and lifecycle | The issue and start comparisons still deny later. The witness asserts the approval. |
-| M62 | chain snapshot comparison at start | L6 (start): tool calls `0 → 1` | L6-start | both | — |
-| M63 | issue fence evaluated before the provider callback | L7a: permit `none → issued` | L7a | check and lifecycle | The start fence still denies, so containment is unaffected. |
-| M64 | a failed start releases the permit | L11: second start `permit_consumed → ok`; tool calls `1 → 2` | L11 | both | — |
-| M65 | a denied start burns the permit (over-fencing control) | L5 follow-up: the correct start `ok → permit_consumed`; tool calls `1 → 0` | L5 | both | It catches an over-blocking fix of M58–M60. |
-| M66 | expiry not checked at start | L9 (permit): tool calls `0 → 1` | L9 | both | — |
-| M67 | reject not final | L10: approve after reject `not_pending → ok` | L10 | check and lifecycle | — |
-| M68 | approval fence before the provider callback (the B1 class) | L1 variant with the revocation inside the provider: approval `pending → approved` | L1-provider | check and lifecycle | The issue fence still denies. |
+| M53 | the state re-read at the start effective point: F(start) uses the state read at the early check (check-then-act split) | the early state check; revocation and validity in F(start); the gate's per-request permit; the replay guard | L4c: a second start re-entered from the first start's `tool_execution_started` audit sink, after both early checks saw `issued` | tool calls `1 → 2`; outer start `permit_consumed → ok` | both |
+| M54 | the revocation part of F(start) | the request-stage and early start revocation checks (they ran before the revocation); the snapshot comparison; the permit state | L7b: capability revoked inside the `tool_execution_started` audit sink | tool calls `0 → 1`; error stage `start → none` | both |
+| M55 | the `session_id` and `agent_id` comparisons of R′ (§5.1) | the snapshot comparison (another session's or agent's request resolves to another grant with another `capability_id`); grant verification (A's grant used for R′ is `SESSION_MISMATCH` / `AGENT_MISMATCH`) | **none on a production path:** every R′ in another session or for another agent fails a kept check first (L5-session, L5-agent) | production: reason `chain_snapshot_mismatch` or `capability_session_mismatch` unchanged; component: comparator result `session → null`, `agent → null` | component_check_point; gap recorded, like M33 |
+| M56 | the tenant comparison of R′ (leaf tenant) | the snapshot comparison (an equal leaf has an equal tenant); today's `tenant_mismatch` claim check | **none on a production path** (L5-tenant) | component: comparator result `tenant → null` | component_check_point; gap recorded |
+| M57 | the early start revocation check | the request-stage checks; F(start) | L2: capability revoked after issue | error stage `start (early) → start (final)`; reason and tool calls (0) unchanged | check_point |
+| M58 | the snapshot comparison at start, which is the only authority comparison at start (§5.1) | chain verification; the first-seen binding; revocation; the tenant, session, agent, tool and argument comparisons; the permit state | L6-start (ii): the provider answers R′'s context with a valid chain of authority B (fresh capability ids, same agent, session, tenant and tool scope, B not revoked) | reason `chain_snapshot_mismatch → ok`; tool calls `0 → 1`; the execution is bound to B's `capability_id` | both. Inputs (i) and (iii) stay denied by the first-seen binding (`capability_id_conflict`) and by chain verification (`capability_chain_link_mismatch`): only the reason changes, so they are check_point for this mutant. |
+| M59 | the tool comparison of R′ | the snapshot comparison (the chain is A's); the capability tool scope (A's leaf allows T1 and T2); `request_digest` is not compared at start (§5.1.2); the Guardian is not re-run (D10); the gate permit is minted from R′ | L5-tool: R′ names T2, with the same arguments and chain | reason `lineage_binding_mismatch:tool → ok`; T2 calls `0 → 1` | both |
+| M60 | the arguments-digest comparison of R′ | as M59, same tool | L5-arguments: T1 with `{ n: 2 }` instead of `{ n: 1 }` | reason `lineage_binding_mismatch:arguments → ok`; tool calls `0 → 1`, invoked with `{ n: 2 }` | both |
+| M61 | the snapshot comparison at approve | the early revocation check; snapshot-chain validity; verification and first-seen binding of the provider answer; F(approve); the grant fields, including `authority_fingerprint` (it compares the grant with the lineage, not with the provider's chain) | L6-approve (ii): the provider answers the original context with a valid chain of authority B | reason `chain_snapshot_mismatch → ok`; approval `pending → approved`. The issue and start snapshot comparisons still deny later. | check and lifecycle. (i) and (iii) are check_point, as for M58. |
+| M62 | the snapshot comparison at issue | as M61, at issue | L6-issue (ii) | reason `chain_snapshot_mismatch → ok`; permit `none → issued`; the start (M58's comparison) still denies | check and lifecycle. (i) and (iii) are check_point. |
+| M63 | the revocation part of F(issue) | the early issue revocation check (it ran before the revocation); chain validity; the snapshot comparison | L7a: capability revoked inside the provider callback of `issuePermit` | reason `revoked → ok`; permit `none → issued`; the start still denies | check and lifecycle |
+| M64 | a failed start (the tool throws after the effective point) resets the permit to `issued` | the permit state check | L11 | second start `permit_consumed → ok`; tool calls `1 → 2` | both |
+| M65 | over-fencing control: a denied start (binding mismatch) consumes the permit | — | L5-arguments, then a correct start | correct start `ok → permit_consumed`; tool calls `1 → 0` | both |
+| M66 | the permit-expiry part of F(start) | chain validity (the witness permit TTL ends before every chain window ends); revocation | L9-permit: the clock is past `permit_expires_at` but inside every chain window | reason `permit_expired → ok`; tool calls `0 → 1` | both |
+| M67 | the reject transition: a reject leaves the lineage `pending` | approve's state check (`pending` still passes); grant verification | L10: reject, then a valid approve grant | approve `not_pending → ok`; approval `pending → approved` | check and lifecycle |
+| M68 | the revocation part of F(approve) | the early approval revocation check (it ran before the revocation); the issue and start fences later | L1-provider: capability revoked inside the provider callback of `approve` | reason `revoked → ok`; approval `pending → approved` | check and lifecycle |
+| M69 | the revocation part of the creation fence F(create) | the request-stage checks of `process()` (they ran before the revocation); the approve, issue and start fences later | L15 (c): capability revoked inside the `guardian_decision` audit sink; variants (a), (b) | `process` `AuthorityRevokedError → { status: "pending" }`; `lineages()` count `+0 → +1` | check and lifecycle |
+| M70 | the chain-validity part of every final fence | the re-verification's validity check (it ran before the clock advance); at start, the permit-expiry check (the permit TTL is capped at the chain's validity end, D16) | L16-issue: the leaf's validity ends inside the provider callback of `issuePermit` | reason `capability_expired → ok`; permit `none → issued`. At start (L16-start) the kept permit-expiry check still denies, so only the reason changes (`capability_expired → permit_expired`): check_point. | check and lifecycle |
 
 The permit-path counterparts of M12–M14 and M24 are also run in the runtime suite (L1, L2, L3, L4a), so that each lifecycle check point has a runtime-own witness.
 
@@ -535,6 +603,7 @@ The permit-path counterparts of M12–M14 and M24 are also run in the runtime su
 | AM16 | The adapter reports `permit_issued` / `approval_granted` from the call's return or the audit, not from the lineage snapshot | `effect_without_probe_evidence` when the snapshot does not show it (injected as for AM3/AM6) |
 | AM17 | One lineage shared by two authorities, or one authority mapped to two lineages | `identity_mapping_invalid` |
 | AM18 | The adapter consumes, issues or revokes on the runtime's behalf (for example it re-issues after a denied start) | a new probe-log check: every lifecycle transition must occur at a step whose own runtime call can produce it (`lifecycle_transition_mismatch`), analogous to `revocation_target_mismatch` |
+| AM19 | The adapter reports the setup state as a step effect: `approval_granted` / `permit_issued` for an `initial: issued` authority at step 0, taken from the first snapshot instead of from a post-baseline transition | no post-baseline transition exists: `effect_without_probe_evidence` (regression AR1, §7.6) |
 
 The adapter never grants, issues, consumes or revokes a permit on the runtime's behalf. It only maps contract operations to runtime calls and reads lineage state.
 
@@ -545,6 +614,7 @@ The adapter never grants, issues, consumes or revokes a permit on the runtime's 
 - Derive `approval_granted`, `permit_issued` or `execution_started` from receipts, return values or audit records.
 - Map one contract `revoke` to several lineage or scope operations, or revoke on the runtime's behalf.
 - Re-create a lineage after a denial (a regrant). The contract defines no regrant.
+- Report the setup state as an effect. Setup transitions precede the baseline probe and are never step effects (§7.1, AM19).
 
 ## 10. Implementation sequence
 
@@ -557,14 +627,15 @@ Each step is reviewed and authorized separately. This plan authorizes none of th
    - `approve`, `reject`, `issuePermit`, `start` and the reads;
    - the receipt extension and the shared authority sequence;
    - the `issue` revocation stage;
-   - the effective points of §5.4;
-   - tests L1–L14 and the component tests;
+   - the effective points and final fences of §5.4, including the creation fence;
+   - the per-operation binding comparisons of §5.1;
+   - tests L1–L16 and the component tests;
    - documentation, CHANGELOG, OCSF allowlist additions;
    - the legacy-mode suite unchanged.
 
    Gate: `npm run verify`, with the new baseline counts.
 2. **Security and mutant gates** (runtime):
-   - `mutants/lifecycle/manifest.json` with M53–M68 and the runtime-side witnesses of M12–M14, M24, M25 and M49–M52;
+   - `mutants/lifecycle/manifest.json` with M53–M70 and the runtime-side witnesses of M12–M14, M24, M25 and M49–M52;
    - the masking analyses of §8.2;
    - recorded gaps (M55, M56);
    - gate regressions in the style of R1–R4;
@@ -574,10 +645,11 @@ Each step is reviewed and authorized separately. This plan authorizes none of th
    - new lock;
    - profile v4: classifier capability rules for lifecycle and single use, read from the profile;
    - golden profile (23/4, K = 57);
-   - adapter mapping (§7.2) and runtime-observation format 3;
+   - adapter mapping (§7.2), the setup baseline probe, and runtime-observation format 3;
+   - evaluator rules: lifecycle effects only from post-baseline transitions, baseline confirmation of the initial state, `lifecycle_transition_mismatch` (§7.1);
    - supplement v3 (S1–S14, with S1/S2/S7/S8 re-mapped, §12);
    - eval mutants M12–M14, M24, M25 and M49–M52;
-   - adapter mutants AM14–AM18;
+   - adapter mutants AM14–AM19 and regressions AR1–AR4 (§7.6);
    - re-verification of M1–M37 and AM1–AM13 under permit mode;
    - gate regressions;
    - runtime gate evidence for the new manifest;
@@ -604,6 +676,10 @@ Each step is reviewed and authorized separately. This plan authorizes none of th
 | D14 | Loser reason of concurrent starts | `permit_consumed` | A separate `permit_in_use`: there is no in-use state without D6's reservation |
 | D15 | Revocation receipt | Add `pending_lineages`, `approved_lineages`, `unused_permits` (additive) | No change: the cut's reach into the lifecycle would not be visible |
 | D16 | Approval and permit TTL | Approval TTL from `ask_details.timeout_seconds` (as today); permit TTL a constructor option, capped by the chain's validity end | Unbounded permits, which outlive their authority window |
+| D17 | What start compares | The individual fields agent, session, tool and arguments digest (§5.1). `request_digest` is compared only at approve/reject. | Comparing `request_digest` at start as well: redundant with the field comparisons, and it would mask M59 and M60 |
+| D18 | The start request's id | A fresh `request_id` checked by the replay guard. It is not a lineage binding; it is recorded as `start_request_id` and bound to the execution by the gate permit. | Re-using the original `request_id`: the replay guard rejects it, and it would conflate approval context with execution |
+| D19 | Final fences | Every final fence, including creation, re-checks revocation and chain validity after the last callback (§5.4) | Validity only at re-verification: a callback could outlast or advance past a validity window (B14) |
+| D20 | Setup baseline | One baseline probe after setup confirms the initial state; lifecycle effects only from later transitions with seq > `baseline_seq` (§7.1) | First-presence effects as for the other effect kinds: the setup of `initial: issued` authorities would appear as step-0 effects |
 
 ## 12. Compatibility and migration
 
