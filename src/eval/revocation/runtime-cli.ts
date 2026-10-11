@@ -200,6 +200,8 @@ async function runAdapter(args: string[]): Promise<number> {
   return exit;
 }
 
+/** Adapter diagnostics that mean the harness process itself failed (never SUT behaviour). */
+const HARNESS_PROCESS_CODES = new Set(['adapter_abort', 'setup_failed', 'constructor_getter_ran']);
 const sameEvidence = (a: Evidence | undefined, b: Evidence | undefined) => !!a && !!b && canonicalJson({ ...a, case_id: '' }) === canonicalJson({ ...b, case_id: '' });
 /** Every evaluated case of a run, corpus then supplement, by case id. */
 const casesOf = (x: ReturnType<typeof evaluateRecorded>): Map<string, Evidence> => new Map([...x.evidence, ...x.supplement.map(y => [y.c.id, y.e] as [string, Evidence])]);
@@ -238,14 +240,18 @@ async function mutants(args: string[]): Promise<number> {
     const all = casesOf(evaluated);
     const e = all.get(m.witness.case_id);
     const failures = witnessFailures(m.witness, e, exit);
-    const harness = [...all].filter(([, x]) => x.verdict === 'HARNESS_ERROR').map(([id, x]) => `${id}: ${x.errors.map(y => y.code).join(',')}`);
-    // Detected: exactly the manifest values and no harness error anywhere. Survived: the witness case and the exit are
-    // exactly the control's. Anything else (other values, a harness error, a timeout shown as one) is technical.
-    const outcome = failures.length === 0 && harness.length === 0 ? 'detected' : harness.length === 0 && exit === baseExit && sameEvidence(e, baseCases.get(m.witness.case_id)) ? 'survived' : 'technical_failure';
-    const changed = [...all].filter(([id, x]) => id !== m.witness.case_id && !sameEvidence(x, baseCases.get(id))).map(([id, x]) => ({ case_id: id, verdict: x.verdict, decision_findings: x.decision_findings, effect_findings: x.effect_findings }));
+    // Harness process problems anywhere in the run, and barrier timeouts unless the mutant is declared to be detected
+    // through missing evidence (M10), are technical failures: never a kill.
+    const diags = [...run.corpus.map(x => x.run.observation), ...run.supplement.map(x => x.run.observation)].flatMap(o => o.diagnostics.map(d => ({ case_id: o.case_id, ...d })));
+    const technicalDiags = diags.filter(d => HARNESS_PROCESS_CODES.has(d.code) || (d.code === 'barrier_timeout' && m.evidence_kind !== 'missing_evidence')).map(d => `${d.case_id}@${d.step}: ${d.code}`);
+    if (report.has_confirmed_violation !== m.witness.run_confirmed_violation) failures.push(`has_confirmed_violation ${report.has_confirmed_violation} != ${m.witness.run_confirmed_violation}`);
+    // Detected: exactly the manifest values and no technical diagnostic. Survived: the witness case and the exit are
+    // exactly the control's. Anything else (other values, a timeout, a harness process error) is technical.
+    const outcome = failures.length === 0 && technicalDiags.length === 0 ? 'detected' : technicalDiags.length === 0 && exit === baseExit && sameEvidence(e, baseCases.get(m.witness.case_id)) ? 'survived' : 'technical_failure';
+    const changed = [...all].filter(([id, x]) => id !== m.witness.case_id && !sameEvidence(x, baseCases.get(id))).map(([id, x]) => ({ case_id: id, verdict: x.verdict, decision_findings: x.decision_findings, effect_findings: x.effect_findings, errors: x.errors.map(y => y.code) }));
     results.push({ id: m.id, description: m.description, patch: m.patch, patch_sha256: m.patch_sha256, source: m.source, target: m.target, typechecked: true, build_sha256: env.build_sha256, evidence_kind: m.evidence_kind, witness: m.witness,
       exit, verdict: e?.verdict ?? null, decision_findings: e?.decision_findings ?? [], effect_findings: e?.effect_findings ?? [], incomplete: e?.incomplete ?? [], errors: e?.errors.map(x => x.code) ?? [],
-      outcome, detected: outcome === 'detected', failures, harness_errors: harness, other_changed_cases: changed });
+      outcome, detected: outcome === 'detected', failures, technical_diagnostics: technicalDiags, run_confirmed_violation: report.has_confirmed_violation, other_changed_cases: changed });
   }
   const adapter = only || control.length ? [] : await adapterMutantChecks(builds, s.cases, s.truths, s.profile, s.supplement, mm);
   const technical = control.length > 0 || results.some(r => r.outcome === 'technical_failure');
@@ -262,7 +268,7 @@ async function mutants(args: string[]): Promise<number> {
       adapter_detected: adapter.filter(a => a.detected).map(a => a.id),
     },
     gate_passed: gate,
-    note: 'Patches, witnesses, exact values, exit codes and evidence kinds are fixed before the run in the golden-hashed mutations/revocation/manifest.json. A patch that does not apply, changes another file or does not typecheck aborts the gate as a technical failure; a harness error or a value that is neither the control\'s nor the manifest\'s is a technical failure too. Neither is ever counted as a kill. other_changed_cases are diagnostics and never count.',
+    note: 'Patches, witnesses, exact values, exit codes and evidence kinds are fixed before the run in the golden-hashed mutations/revocation/manifest.json. A patch that does not apply, changes another file or does not typecheck aborts the gate as a technical failure; a harness process error, a barrier timeout (except for a mutant declared to be detected through missing evidence) or a value that is neither the control\'s nor the manifest\'s is a technical failure too. Neither is ever counted as a kill. other_changed_cases are diagnostics and never count.',
   }) + '\n');
   writeFileSync(join(s.out, 'manifest.json'), manifest(s, baseline, files, { mutant_manifest: { path: MUTANT_MANIFEST, sha256: manifestSha256 }, mutant_patches: mm.mutants.map(m => ({ id: m.id, patch: m.patch, sha256: m.patch_sha256 })) }));
   console.log(canonicalJson({ baseline_exit: baseExit, control_failures: control, sut_mutants: results.map(r => ({ id: r.id, outcome: r.outcome, exit: r.exit })), adapter_mutants: adapter.map(a => ({ id: a.id, detected: a.detected })), gate_passed: gate }));

@@ -28,6 +28,8 @@ export interface Witness {
   errors: string[];
   /** The run's exit code, and why it is that code. */
   exit: number;
+  /** The run's has_confirmed_violation (distinguishes a detected exit 2 from a run without findings). */
+  run_confirmed_violation: boolean;
   exit_reason: string;
 }
 export interface MutantSource { repository: string; commit: string; path: string; sha256: string }
@@ -94,7 +96,7 @@ export function loadMutantManifest(root: string, lock: { sut_repository: string;
     if (!KINDS.includes(x.evidence_kind)) bad(`${x.id}: unknown evidence kind ${x.evidence_kind}`);
     const w = x.witness;
     if (!w || !['corpus', 'supplement'].includes(w.set) || typeof w.case_id !== 'string') bad(`${x.id}: invalid witness`);
-    if (!Array.isArray(w.incomplete) || !Array.isArray(w.errors) || !Number.isInteger(w.exit) || !w.exit_reason) bad(`${x.id}: witness needs exact incomplete, errors, exit and exit_reason`);
+    if (!Array.isArray(w.incomplete) || !Array.isArray(w.errors) || !Number.isInteger(w.exit) || !w.exit_reason || typeof w.run_confirmed_violation !== 'boolean') bad(`${x.id}: witness needs exact incomplete, errors, exit, exit_reason and run_confirmed_violation`);
     if (witnessKind(w) !== x.evidence_kind) bad(`${x.id}: evidence kind ${x.evidence_kind} does not match its expected values (${witnessKind(w)})`);
   }
   return { manifest: m, sha256 };
