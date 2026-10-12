@@ -391,7 +391,7 @@ test('CLI: run-adapter, mutants and runtime-gates fail closed before any runtime
 test('mutant manifest v3: re-verified witnesses, plan rows M12-M52, masked legacy-path mutants, M25 not run; tampering fails closed', () => {
   const { manifest } = loadMutantManifest(root, lock, VERSION);
   assert.equal(manifest.sut_commit, lock.sut_commit);
-  assert.deepEqual(manifest.mutants.map(m => m.id), ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M10', 'M11', 'M15', 'M16', 'M21', 'M37', 'M28', 'M29', 'M35', 'M36', 'M12', 'M13', 'M14', 'M24', 'M49', 'M50', 'M51', 'M52']);
+  assert.deepEqual(manifest.mutants.map(m => m.id), ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M10', 'M11', 'M15', 'M16', 'M21', 'M37', 'M28', 'M29', 'M35', 'M36', 'M12', 'M13', 'M14', 'M24', 'M49', 'M50', 'M51', 'M52', 'M25-overreach']);
   assert.deepEqual(manifest.masked.map(m => m.id), ['M8', 'M9', 'M22', 'M20', 'M26', 'M34']);
   assert.deepEqual(manifest.not_run.map(m => m.id), ['M25']);
   const by = (id: string) => manifest.mutants.find(m => m.id === id)!;
@@ -413,6 +413,14 @@ test('mutant manifest v3: re-verified witnesses, plan rows M12-M52, masked legac
   for (const id of ['M12', 'M13', 'M50', 'M52']) assert.deepEqual(by(id).parts, ['lifecycle'], id);
   for (const id of ['M14', 'M24', 'M49', 'M51']) assert.ok(by(id).parts.includes('containment'), id);
   for (const id of ['M7', 'M16', 'M37']) assert.deepEqual(by(id).parts, ['availability'], id);
+  // M25-overreach: a separately authorized mechanism at the issue fence, witnessed by S11 step 5; availability only,
+  // never containment, and not a variant of M25 (which stays not run with its coverage gap).
+  const overreach = by('M25-overreach');
+  assert.equal(overreach.witness.case_id, 'sup-session-revoke-pending-approval');
+  assert.deepEqual([...overreach.witness.decision_findings, ...overreach.witness.effect_findings].map(f => `${f.reason}@${f.step}`), ['false_deny@5', 'false_deny@6', 'missing_permit_issued@5', 'missing_execution_started@6']);
+  assert.deepEqual(overreach.parts, ['availability']);
+  assert.notEqual(overreach.patch_sha256, sha256Hex(readFileSync(join(root, 'mutations/revocation/M25-issue-requires-pending-over-fencing.patch'))));
+  assert.deepEqual(overreach.run_exceptions, { harness_errors: [], barrier_timeouts: [] });
   for (const m of manifest.mutants) {
     if (m.source) assert.equal(m.source.commit, lock.sut_commit, m.id);
     const ids = m.witness.set === 'corpus' ? profile.cases.filter(c => c.applicability === 'IN_PROFILE').map(c => c.id) : supplement.cases.map(c => c.id);

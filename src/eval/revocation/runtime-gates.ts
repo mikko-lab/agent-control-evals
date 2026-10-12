@@ -72,8 +72,10 @@ function checkGate(name: string, gate: RuntimeTestGate, dir: string): GateOutcom
   if (r.status === 2 || sum.technical_failures !== 0) issues.push(`runtime gate reports ${sum.technical_failures} technical failures (exit ${r.status})`);
   for (const k of KINDS) if (canonicalJson(sorted(sum.evidence?.[k] ?? [])) !== canonicalJson(sorted(gate.evidence[k] ?? []))) issues.push(`${k} evidence ${JSON.stringify(sum.evidence?.[k] ?? null)} != lock ${JSON.stringify(gate.evidence[k])}`);
   if (canonicalJson(sum.recorded_gaps ?? null) !== canonicalJson(gate.recorded_gaps)) issues.push(`recorded gaps ${JSON.stringify(sum.recorded_gaps ?? null)} != lock ${JSON.stringify(gate.recorded_gaps)}`);
+  // The shared gate driver reports every kind it knows; a kind outside this gate's own kinds must be empty.
   const evidenceKeys = Object.keys(sum.evidence ?? {}).sort();
-  if (canonicalJson(evidenceKeys) !== canonicalJson([...KINDS].sort())) issues.push(`report evidence kinds ${JSON.stringify(evidenceKeys)} != ${JSON.stringify([...KINDS].sort())}`);
+  for (const k of KINDS) if (!evidenceKeys.includes(k)) issues.push(`report evidence kind ${k} missing`);
+  for (const k of evidenceKeys) if (!(KINDS as readonly string[]).includes(k) && (!(LIFECYCLE_GATE_KINDS as readonly string[]).includes(k) || (sum.evidence[k] ?? []).length)) issues.push(`report evidence kind ${k} outside this gate's kinds is not empty or unknown: ${JSON.stringify(sum.evidence[k])}`);
   if (name === 'lifecycle') {
     if (canonicalJson(sum.counts ?? null) !== canonicalJson(gate.counts ?? null)) issues.push(`counts ${JSON.stringify(sum.counts ?? null)} != lock ${JSON.stringify(gate.counts ?? null)}`);
     if (canonicalJson(sum.variants ?? null) !== canonicalJson(gate.variants ?? null)) issues.push(`variants ${JSON.stringify(sum.variants ?? null)} != lock ${JSON.stringify(gate.variants ?? null)}`);

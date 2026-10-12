@@ -228,7 +228,7 @@ jobs:
           grep -q '^# fail 0$' out/revocation-runtime-sut.tap
         env:
           ACE_REVOCATION_WORK: ${{ github.workspace }}/.work/revocation
-      - name: 4. SUT mutants (25 with exact witnesses, 6 masked legacy-path mutants pinned to the control, M25 not run with its recorded conflict) and adapter mutants AM1-AM19; exit 0 = every mutant detected and every masking pin holds
+      - name: 4. SUT mutants (26 with exact witnesses, M25-overreach included, 6 masked legacy-path mutants pinned to the control, M25 not run with its recorded conflict) and adapter mutants AM1-AM19; exit 0 = every mutant detected and every masking pin holds
         run: node dist/src/revocation-cli.js mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-mutants
       - name: 4b. mutant gate regressions G1-G8 (real pinned runtime; unchanged M1 and M10 detected, M8 masked; a malformed observation in another case, an extra timeout, another error beside M4's predeclared one, a masked run that differs or a setup failure rejected as technical)
         run: node dist/scripts/mutant-gate-regressions.js --out out/revocation-mutant-gate-regressions.json

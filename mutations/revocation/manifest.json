@@ -1274,6 +1274,56 @@
         "barrier_timeouts": []
       },
       "patch_sha256": "45e11e4ae7c6815ce03cb9e99c15d3740b2c2cbaab432f2b49f46a5908136bf8"
+    },
+    {
+      "id": "M25-overreach",
+      "patch": "M25-overreach-issue-session-revocation-covers-other-sessions.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "Over-reach at the issue fence only: a session revocation of another session of the same tenant also covers the issued lineage (#denyIfLineageRevoked, stage issue). The setup runs unchanged runtime API calls; no revocation precedes it.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "availability"
+      ],
+      "plan_kind": "separately authorized mechanism (not a plan section 8.1 row): unjustified denial at a check point of the lifecycle right to a permit; never containment",
+      "kind_note": "A new mechanism. It is not evidence of the original M25 property (the issue state requirement) and not a variant of the M25 patch. In S11 the uncovered authority b (t1, s2) is issued after the session (t1, s1) is revoked: ALLOW in the control, DENY under the mutant, so its permit and its start are missing (availability).",
+      "witness": {
+        "set": "supplement",
+        "case_id": "sup-session-revoke-pending-approval",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_deny",
+            "step": 5
+          },
+          {
+            "reason": "false_deny",
+            "step": 6
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "missing_permit_issued",
+            "step": 5
+          },
+          {
+            "reason": "missing_execution_started",
+            "step": 6
+          }
+        ],
+        "incomplete": [
+          "terminal evidence missing for e2 in window 8..9"
+        ],
+        "errors": [],
+        "exit": 2,
+        "exit_reason": "the witness is a confirmed VIOLATION with incompleteness (the uncovered execution e2 is never started, so its expected terminal in window 8..9 has no evidence); the report is not technically valid, has_confirmed_violation stays true and profileExitCode returns 2",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "14f4969bf0d281cd3b9df9da7650265659cf7b3e8adc2e8e56e030dc41d567ef"
     }
   ],
   "masked": [

@@ -107,9 +107,22 @@ Every existing patch was run against `ef775db` in permit mode, with the whole pr
 | Mutant | Result under permit mode |
 |---|---|
 | M1–M7, M10, M11, M15, M16, M21, M28, M29, M35–M37 | **Same witness, identical values** (verdict, findings, incompleteness, errors, exit, `has_confirmed_violation`) |
+| **M25-overreach** (new, authorized) | S11 step 5, availability (§5a); not evidence of the original M25 property |
 | M10 | Same witness values. Its predeclared barrier timeouts change from 24 to 29: the moved cases `approval-before-cut`@5 and `permit-single-use`@4, the new S11–S13 (step 8), and S2's re-mapped finish (step 3 instead of 1). They are pinned case by case. |
 | **M8, M9, M20, M22, M26, M34** | **Masked: no case changes. They are not detected mutants; their earlier legacy-path witnesses (at `a9deab6`) stay historical evidence.** They remove or weaken checks on the legacy paths (`resolveApproval()`, the start inside `process()`, and the `#denyIfRevoked` stage checks), which permit mode reaches only at setup, before any revocation. M9's request- and start-stage checks are masked by the kept lineage fences (plan §8.1, M49). They are pinned as `masked`: their whole run must equal the control, they are never a detection, and their earlier witnesses are recorded. The permit-mode counterparts are witnessed: M12 and M50 (approval fence), M13 and M52 (issue fence), M49 and M51 (start path); also the runtime-own lifecycle gate. |
 | AM1–AM13 | Re-verified against the real build in permit mode (AM3 on `sibling-isolation`, AM5 on S4 and M10, AM10 on M11, AM11–AM13 as before) |
+
+## 5a. Precheck of M25-overreach
+
+Patch `mutations/revocation/M25-overreach-issue-session-revocation-covers-other-sessions.patch` (one file, `src/guarded-executor.ts`). The precheck ran it with the whole profile and supplement against `ef775db`, through the gate's own path: fresh checkout, patch-effect check, SUT typecheck and build.
+- **Setup.** Every case's setup succeeded with unchanged runtime API calls. There is no `setup_failed`, no diagnostic and no harness error.
+- **Changed cases.** Only S11 `sup-session-revoke-pending-approval` changes:
+  - findings: `false_deny@5`, `missing_permit_issued@5`, `false_deny@6`, `missing_execution_started@6`;
+  - incompleteness: `terminal evidence missing for e2 in window 8..9`, because e2 never starts;
+  - run exit 2, with `has_confirmed_violation` true.
+- **Evidence kind:** availability, an unjustified denial of the lifecycle right at the issue fence. It is not containment.
+
+The manifest pins exactly these values and no run exceptions.
 
 ## 6. Deviations from the plan and refinements
 
