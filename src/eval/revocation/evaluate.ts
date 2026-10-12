@@ -1,7 +1,7 @@
 import { canonicalJson } from '../../util/canonical-json';
 import { Case, Decision, DRIFT_POINTS, Effect, EffectKind, Evidence, Expected, ExpectedEffect, RuntimeObservation } from '../../spec/revocation/model';
-import { observationIssues, runtimeObservationIssues } from '../../report/revocation/validate';
-import { bindingIssues, decisionFromCall, derive, effectSlot, identityIssues, probeLogIssues, receiptIssues, DECISION_PROVENANCE, EFFECT_PROVENANCE } from '../../spec/revocation/runtime-observation';
+import { observationIssues, runtimeObservationFormat, runtimeObservationIssues } from '../../report/revocation/validate';
+import { bindingIssues, decisionFromCall, derive, effectSlot, identityIssues, lineageIssues, probeLogIssues, receiptIssues, DECISION_PROVENANCE, EFFECT_PROVENANCE, PERMIT_API } from '../../spec/revocation/runtime-observation';
 
 const EXECUTION_KINDS = new Set(['execution_started', 'tool_commit', 'output_delivery', 'cancellation_ack', 'execution_terminal']);
 const NEEDS_START = new Set(['tool_commit', 'output_delivery', 'cancellation_ack', 'execution_terminal']);
@@ -17,7 +17,7 @@ export function withinWindow(step: number, expected: ExpectedEffect): boolean {
  * adapter observation: effects are ordered by (step, seq), the report is checked against the probe log and call
  * records, and the decisions of `controlSteps` (finish, seal) are harness control: not assessed and never reported.
  */
-export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps?: readonly number[]; observationFormat?: 1 | 2 }
+export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps?: readonly number[]; observationFormat?: 1 | 2 | 3 }
 
 /**
  * Contradictory state evidence of one fact (probe_seq mode): the effect kind and execution it concerns (null when the
@@ -48,7 +48,7 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
   const o = input as { case_id: string; complete: boolean; decisions: unknown[]; effects: unknown[] };
   if (o.case_id !== c.id) { error('case_identity_mismatch', '/case_id', `observation for ${JSON.stringify(o.case_id)} supplied for case ${JSON.stringify(c.id)}`); return finish(e); }
   // A profile that binds an observation format accepts no other revision.
-  const format = (o as { format?: string }).format === undefined ? 1 : 2;
+  const format = runtimeObservationFormat(o);
   if (probeMode && options.observationFormat !== undefined && format !== options.observationFormat) { error('observation_format_mismatch', '/format', `observation format ${format}, the profile requires format ${options.observationFormat}`); return finish(e); }
   const malformed = new Set<string>();
   for (const i of issues) { const [, list, index] = ITEM.exec(i.path)!; const path = `/${list}/${index}`; if (!malformed.has(path)) { malformed.add(path); error('malformed_item', path, i.message); } }
@@ -193,10 +193,23 @@ function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<strin
   // pair, one runtime tenant per tenant, the supplied chain equal to the contract ancestry), every execution the
   // runtime ran must be bound to exactly that tenant and chain, and every contract revocation must be exactly one
   // runtime revocation of its mapped target. Effects are still evaluated beside these errors.
+  const format3 = runtimeObservationFormat(o) === 3;
   if (o.format !== undefined) {
     for (const issue of identityIssues(c.authorities, o.identity)) error('identity_mapping_invalid', '/identity', issue);
-    for (const issue of bindingIssues(c.authorities, o.probes, o.identity)) error('runtime_binding_mismatch', '/probes', issue);
+    for (const issue of bindingIssues(c.authorities, o.probes, o.identity, format3 ? { steps: c.steps, calls: o.calls } : undefined)) error('runtime_binding_mismatch', '/probes', issue);
     for (const issue of receiptIssues(c.steps, o.probes, o.identity)) error('revocation_target_mismatch', '/probes', issue);
+  }
+  // Format 3 (approval-permit lifecycle plan sections 7.1, 8.3): one lineage per authority, confirmed in its initial
+  // state by the setup baseline and never re-created; every lifecycle transition made by its own step's runtime call;
+  // every step call the lifecycle API of its operation.
+  if (format3) {
+    const li = lineageIssues(c.authorities, c.steps, o.probes, o.calls, o.identity);
+    for (const issue of li.identity) error('identity_mapping_invalid', '/identity', issue);
+    for (const issue of li.transitions) error('lifecycle_transition_mismatch', '/probes', issue);
+    for (const call of o.calls) {
+      const s = c.steps[call.step];
+      if (s && s.op !== 'finish' && s.op !== 'seal' && PERMIT_API[s.op] !== call.api) error('call_api_mismatch', '/calls', `the call of step ${call.step} (${s.op}) is ${call.api}, not ${PERMIT_API[s.op]}`);
+    }
   }
   const logIssues = probeLogIssues(o.probes);
   for (const issue of logIssues) error('sequence_inconsistent', '/probes', issue);

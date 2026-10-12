@@ -9,6 +9,8 @@ import { join } from "node:path";
 export interface RevocationSut {
   GuardedExecutor: any;
   AuthorityRevokedError: any;
+  LifecycleDeniedError: any;
+  LifecycleModeError: any;
   CommitRejectedError: any;
   RevocationTargetError: any;
   SchemaValidator: any;
@@ -32,6 +34,8 @@ export function loadRevocationSut(buildDir: string): RevocationSut {
   return {
     GuardedExecutor: ge.GuardedExecutor,
     AuthorityRevokedError: ge.AuthorityRevokedError,
+    LifecycleDeniedError: m("approval-lifecycle").LifecycleDeniedError,
+    LifecycleModeError: m("approval-lifecycle").LifecycleModeError,
     CommitRejectedError: me.CommitRejectedError,
     RevocationTargetError: ar.RevocationTargetError,
     SchemaValidator: m("schema-validator").SchemaValidator,

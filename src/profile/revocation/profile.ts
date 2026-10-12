@@ -29,7 +29,7 @@ export interface Profile {
   control_ops: string[];
   supported: { revoke: { scopes: string[] } } & Record<string, unknown>;
   /** Runtime observation format the profile accepts (absent: format 1). */
-  observation_format?: 1 | 2;
+  observation_format?: 1 | 2 | 3;
   uncovered_design_fences: string[];
   barrier_watchdog_ms: number;
   cases: ProfileCase[];
@@ -74,9 +74,13 @@ export function loadProfile(root: string, path: string, corpus: Case[], corpusSh
   if (canonicalJson(p.control_ops) !== canonicalJson(["finish", "seal"])) fail("control_ops must be finish and seal");
   if (!Number.isSafeInteger(p.barrier_watchdog_ms) || p.barrier_watchdog_ms <= 0) fail("barrier_watchdog_ms must be a positive integer");
   if (p.cases.length !== corpus.length || p.cases.some((x, i) => x.id !== corpus[i].id)) fail("cases must list every corpus case in corpus order");
-  if (p.observation_format !== undefined && p.observation_format !== 1 && p.observation_format !== 2) fail("observation_format must be 1 or 2");
+  if (p.observation_format !== undefined && p.observation_format !== 1 && p.observation_format !== 2 && p.observation_format !== 3) fail("observation_format must be 1, 2 or 3");
+  const lifecycle = (p.supported as { lifecycle?: unknown }).lifecycle;
+  if (lifecycle !== undefined && (!Array.isArray(lifecycle) || lifecycle.some((x) => typeof x !== "string"))) fail("supported.lifecycle must be a list of capability classes");
+  // Lifecycle capability classes need the format 3 observation (lineage state, setup baseline) and vice versa.
+  if ((p.observation_format === 3) !== (Array.isArray(lifecycle) && lifecycle.length > 0)) fail("supported.lifecycle is declared exactly with observation_format 3");
   let rules;
-  try { rules = rulesOf(p.supported?.revoke?.scopes ?? []); } catch (e) { return fail(String((e as Error).message)); }
+  try { rules = rulesOf(p.supported?.revoke?.scopes ?? [], (lifecycle as string[] | undefined) ?? []); } catch (e) { return fail(String((e as Error).message)); }
   // Applicability is the classifier's, computed from the corpus, the oracle and the profile's capability rules only.
   corpus.forEach((c, i) => {
     const want = classify(c, expected(c), rules);

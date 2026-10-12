@@ -3,18 +3,25 @@
   "contract": "revocation-0.4.0",
   "sut": "acs-guardrail-demo",
   "sut_repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-  "sut_commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
-  "sut_tree": "dc25f122da3183c14cd70fa14deabdd4d1b1fe45",
-  "sut_version": "0.5.0",
-  "sut_tag": { "name": "v0.5.0", "object": "f0626086faf5757e58fa1a746d4b12fe1ceb3e47" },
-  "sut_package_lock_sha256": "6d40e36d07aeaaa8546be5c1c223ede585828db72d26d067c399988c27649e4c",
+  "sut_commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
+  "sut_tree": "7eb9f3368df5c83d6fb65c79ca867df0bf19e41c",
+  "sut_version": "0.6.0",
+  "sut_tag": {
+    "name": "v0.6.0",
+    "object": "c83cd669d3b7bdea203d368102cb266e669f7752"
+  },
+  "sut_package_lock_sha256": "b8be539447e54a3cca6b2011df3cce7396f9f73a37ffb0cc6cc419fcd76b7c3d",
   "sut_runtime_mode": "tenancy",
+  "sut_lifecycle_mode": "permit",
   "max_chain_length": 8,
-  "approved_via": "mikko-lab/acs-guardrail-demo release v0.5.0: merge commit of mikko-lab/acs-guardrail-demo#13 (validated head c715a747f8bfd14a8dde3655cf0ba2927cf95098); runtime packages 1a (#11, approved at 81a51a9) and 1b (#12, approved at c871d71)",
+  "approved_via": "mikko-lab/acs-guardrail-demo release v0.6.0: merge commit ef775db of mikko-lab/acs-guardrail-demo#16 (validated head dcb5c96d07c3cddd337fabde65967073bf446278); approval-permit lifecycle (G3/G4) and its runtime mutant gate (#14, approved at 05e4174, merged as 855a9b9) and the legacy request-snapshot fix (#15, approved at d028ee2, merged as e40c664)",
   "baseline_at_pin": {
-    "test_suites": 30,
-    "tests": 628,
-    "ci_node_versions": [22, 24],
+    "test_suites": 33,
+    "tests": 774,
+    "ci_node_versions": [
+      22,
+      24
+    ],
     "verify_command": "npm run verify"
   },
   "runtime_test_gates": {
@@ -25,12 +32,37 @@
       "report": "out/mutants-tenant/report.json",
       "expected_exit": 0,
       "evidence": {
-        "both": ["M15", "M16", "M22", "M26", "M27c", "M28", "M28b", "M30", "M30b", "M31", "M32"],
-        "containment_effect": ["M29"],
-        "check_point": ["M26a", "M27a", "M27e", "M27f", "M28a", "M33b"],
-        "component_check_point": ["M33"]
+        "both": [
+          "M15",
+          "M16",
+          "M22",
+          "M26",
+          "M27c",
+          "M28",
+          "M28b",
+          "M30",
+          "M30b",
+          "M31",
+          "M32"
+        ],
+        "containment_effect": [
+          "M29"
+        ],
+        "check_point": [
+          "M26a",
+          "M27a",
+          "M27e",
+          "M27f",
+          "M28a",
+          "M33b"
+        ],
+        "component_check_point": [
+          "M33"
+        ]
       },
-      "recorded_gaps": ["M33: no production-path witness; component_check_point only (docs/tenant-scope.md)"]
+      "recorded_gaps": [
+        "M33: no production-path witness; component_check_point only (docs/tenant-scope.md)"
+      ]
     },
     "ancestor": {
       "command": "npm run mutants:ancestor",
@@ -39,21 +71,180 @@
       "report": "out/mutants-ancestor/report.json",
       "expected_exit": 0,
       "evidence": {
-        "both": ["M20", "M21", "M27d", "M34", "M35", "M35b", "M37", "M38", "M39", "M41", "M42b", "M42c", "M43", "M44", "M45", "M46"],
-        "containment_effect": ["M36"],
-        "check_point": ["M27b", "M27g", "M34a", "M35a", "M40", "M42a", "M47", "M48"],
+        "both": [
+          "M20",
+          "M21",
+          "M27d",
+          "M34",
+          "M35",
+          "M35b",
+          "M37",
+          "M38",
+          "M39",
+          "M41",
+          "M42b",
+          "M42c",
+          "M43",
+          "M44",
+          "M45",
+          "M46"
+        ],
+        "containment_effect": [
+          "M36"
+        ],
+        "check_point": [
+          "M27b",
+          "M27g",
+          "M34a",
+          "M35a",
+          "M40",
+          "M42a",
+          "M47",
+          "M48"
+        ],
         "component_check_point": []
       },
       "recorded_gaps": []
     },
+    "lifecycle": {
+      "command": "npm run mutants:lifecycle",
+      "manifest": "mutants/lifecycle/manifest.json",
+      "manifest_sha256": "80952ae5ba267500860c09ce121649b4f96e28478d8a305982eb0b3d696e2298",
+      "report": "out/mutants-lifecycle/report.json",
+      "expected_exit": 0,
+      "evidence": {
+        "both": [
+          "M53",
+          "M54",
+          "M58",
+          "M59",
+          "M60",
+          "M64",
+          "M66"
+        ],
+        "containment_effect": [],
+        "check_point": [
+          "M57",
+          "M58-i",
+          "M58-iii",
+          "M61-i",
+          "M61-iii",
+          "M62-i",
+          "M62-iii",
+          "M70-start"
+        ],
+        "component_check_point": [
+          "M55",
+          "M56",
+          "M71"
+        ],
+        "lifecycle_effect": [],
+        "check_and_lifecycle": [
+          "M61",
+          "M62",
+          "M63",
+          "M67",
+          "M68",
+          "M69",
+          "M70-create"
+        ],
+        "availability_effect": [],
+        "check_and_availability": [
+          "M65"
+        ]
+      },
+      "recorded_gaps": [
+        "M55: the session and agent comparisons of R' have no production-path witness; component_check_point only (the snapshot comparison and grant verification reject first).",
+        "M56: the tenant comparison of R' is structurally masked on the production path: it runs only after the snapshot comparison matched the provider's leaf to the lineage's leaf by content, and the compared tenants are both read from that leaf, so they are equal by construction. The request's tenant claim check (tenant_mismatch) compares another input. component_check_point only.",
+        "M71: the execution's binding to the lineage's authority has no production-path witness while the snapshot comparison is kept; component_check_point only. M58 combined with M71 is not a mutant of this gate (it would remove a kept safeguard).",
+        "M70 (approve) and M70 (issue): the chain-validity part of F(approve) and F(issue) is masked by the verification of the provider's answer that directly precedes F; precheck at this head: the patched trees typecheck and all 746 tests pass (jest exit 0). Recorded, not witnessed; not counted as evidence.",
+        "Labels beyond the claimed kind change in several entries (reported under observed_beyond_kind, never counted): M67 also runs the tool (LC-L10-calls 0 -> 1; its kind check_and_lifecycle is kept, conservatively); M70 (start) records the permit as expired; M59 shows an availability effect; several both entries also change the lifecycle state.",
+        "Plan section 8.1 mutants (M12-M14, M24, M25, M49-M52) are eval-gate mutants and belong to the later eval integration; they are not part of this manifest.",
+        "M65 is availability evidence (check_and_availability): the allowed follow-up start is denied. It is not containment evidence; an unapproved action does not run.",
+        "Variants M58-i/iii, M61-i/iii and M62-i/iii have the patch of their main entry (an identical jest run); they show changed denial reasons and are not independent failure mechanisms (report: counts, variants).",
+        "M61, M62, M63, M68, M69 and M70 (create) are lifecycle evidence only; that a later fence still denies the start is inferred from the stage-specific patches, not shown by a run."
+      ],
+      "counts": {
+        "manifest_entries": 26,
+        "distinct_patches": 20,
+        "mechanisms": 20,
+        "variants": 6,
+        "witness_tests": 41,
+        "control_witness_tests": 4
+      },
+      "variants": {
+        "M58": [
+          "M58-i",
+          "M58-iii"
+        ],
+        "M61": [
+          "M61-i",
+          "M61-iii"
+        ],
+        "M62": [
+          "M62-i",
+          "M62-iii"
+        ]
+      },
+      "observed_beyond_kind": [
+        "M54",
+        "M58",
+        "M59",
+        "M60",
+        "M64",
+        "M65",
+        "M66",
+        "M67",
+        "M70-start"
+      ]
+    },
     "regressions": {
       "command": "npm run mutants:tenant:regressions",
       "expected_exit": 0,
-      "cases": { "R1-inventory": 2, "R2-syntax": 2, "R3-m27e": 0, "R4-crash": 2 }
+      "cases": {
+        "R1-inventory": 2,
+        "R2-syntax": 2,
+        "R3-m27e": 0,
+        "R4-crash": 2
+      }
+    },
+    "lifecycle_regressions": {
+      "command": "npm run mutants:lifecycle:regressions",
+      "expected_exit": 0,
+      "cases": {
+        "RL1-detected": 0,
+        "RL2-inventory": 2,
+        "RL3-value": 2,
+        "RL4-error": 2,
+        "RL5-other-failure": 2,
+        "RL6-crash": 2,
+        "RL7-timeout": 2,
+        "RL8-signal": 2,
+        "RL9-unchanged": 1,
+        "RL10-kinds": 0,
+        "RL11-no-log": 2,
+        "RL12-no-witness": 2,
+        "RL13-collateral-syntax": 2,
+        "RL14-collateral-assertion": 2,
+        "RL15-error-suffix": 2,
+        "RL16-m58": 0,
+        "RL17-m57": 0,
+        "RL18-witness-aftereach": 2,
+        "RL19-unbound-beforeall": 2,
+        "RL20-same-name-files": 0,
+        "RL21-ambiguous-name": 2,
+        "RL22-tmpdir-worktree": 0,
+        "RL23-patch-context": 2,
+        "RL24-unknown-only": 2
+      }
+    },
+    "lifecycle_determinism": {
+      "command": "npm run mutants:lifecycle:determinism",
+      "expected_exit": 0
     }
   },
-  "profile": "profiles/revocation/acs-guardrail-demo-a9deab6.profile.json",
-  "supplement": "profiles/revocation/acs-guardrail-demo-a9deab6.supplement.json",
+  "profile": "profiles/revocation/acs-guardrail-demo-ef775db.profile.json",
+  "supplement": "profiles/revocation/acs-guardrail-demo-ef775db.supplement.json",
   "follow_upstream": false,
-  "note": "Pinned SUT of the revocation track only. The ACS v0.1 track keeps sut.lock.json (403d315). The commit, tree and package-lock.json hash identify the SUT; the tag is an additional identifier that must agree. A different commit is a different SUT and requires a new review. The previous pin (a682e44) is kept in profiles/revocation/history/ for the recorded-observation regressions only."
+  "note": "Pinned SUT of the revocation track only. The ACS v0.1 track keeps sut.lock.json (403d315). The commit, tree and package-lock.json hash identify the SUT; the tag is an additional identifier that must agree. A different commit is a different SUT and requires a new review. The adapter drives the runtime in tenancy mode with the opt-in approval-permit lifecycle (sut_lifecycle_mode permit). The previous pins (a682e44, a9deab6) are kept in profiles/revocation/history/ for the recorded-observation re-evaluation only."
 }

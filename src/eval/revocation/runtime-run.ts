@@ -26,8 +26,10 @@ export async function runProfile(build: string, cases: Case[], truths: Expected[
   }
   for (const s of supplement.cases) {
     if (o.only && !o.only(s.id)) continue;
+    // The permit-mode adapter has no legacy pending-request setup: approve, issue and start are steps.
+    if ('setup' in s || 'approve_starts' in s) throw new Error(`supplement case ${s.id} uses the legacy setup or approve_starts, which the permit-mode adapter does not run`);
     const control = controlSteps(s);
-    const run = await runCase({ id: s.id, authorities: s.authorities, steps: s.steps, setup: s.setup, approve_starts: s.approve_starts, double: s.double }, sut, { watchdogMs: o.watchdogMs ?? profile.barrier_watchdog_ms, controlSteps: control, fault: o.fault, oracle: o.fault === 'AM1_backfill_from_oracle' ? s.expected : undefined });
+    const run = await runCase({ id: s.id, authorities: s.authorities, steps: s.steps, double: s.double }, sut, { watchdogMs: o.watchdogMs ?? profile.barrier_watchdog_ms, controlSteps: control, fault: o.fault, oracle: o.fault === 'AM1_backfill_from_oracle' ? s.expected : undefined });
     const c: Case = { id: s.id, family: s.family, authorities: s.authorities, steps: s.steps };
     out.supplement.push({ c: s, run, evidence: evaluate(c, s.expected, run.observation, { ordering: 'probe_seq', controlSteps: control, observationFormat: profile.observation_format ?? 1 }) });
   }

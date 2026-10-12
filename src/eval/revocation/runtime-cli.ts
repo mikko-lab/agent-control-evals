@@ -40,7 +40,7 @@ const IMPLEMENTATION = [
   'dist/src/sut/checkout.js', 'dist/src/sut/revocation-lock.js', 'dist/src/sut/revocation-env.js',
   'dist/src/mutation/revocation/mutants.js', 'dist/src/mutation/revocation/adapter-mutants.js',
   'dist/src/util/canonical-json.js', 'dist/src/util/hash.js',
-  'dist/schemas/revocation/observation.schema.json', 'dist/schemas/revocation/runtime-observation.schema.json', 'dist/schemas/revocation/runtime-observation-2.schema.json',
+  'dist/schemas/revocation/observation.schema.json', 'dist/schemas/revocation/runtime-observation.schema.json', 'dist/schemas/revocation/runtime-observation-2.schema.json', 'dist/schemas/revocation/runtime-observation-3.schema.json',
   'dist/schemas/revocation/report.schema.json', 'dist/schemas/revocation/profile-report.schema.json',
   'package-lock.json',
 ];
@@ -180,14 +180,19 @@ function manifest(s: Setup, env: RevocationEnv | null, files: { path: string; sh
   }) + '\n';
 }
 
-/** The adapter drives the pinned runtime in tenancy mode only; a lock of another mode is refused before any runtime. */
-function requireTenancy(s: Setup): void {
-  if ((s.lock.sut_runtime_mode ?? 'legacy') !== 'tenancy' || (s.profile.observation_format ?? 1) !== 2) throw new Error(`the runtime adapter needs a tenancy-mode lock and a format 2 profile; ${s.lockPath} is ${s.lock.sut_runtime_mode ?? 'legacy'} (its recorded observations can still be re-evaluated with evaluate --observations)`);
+/**
+ * The adapter drives the pinned runtime in tenancy mode with the approval-permit lifecycle (permit mode) only; a lock
+ * of another mode is refused before any runtime. Recorded observations of earlier pins (formats 1 and 2) can still be
+ * re-evaluated under their historical locks with evaluate --observations.
+ */
+function requirePermitMode(s: Setup): void {
+  const mode = `${s.lock.sut_runtime_mode ?? 'legacy'}/${s.lock.sut_lifecycle_mode ?? 'legacy'}`;
+  if (mode !== 'tenancy/permit' || (s.profile.observation_format ?? 1) !== 3) throw new Error(`the runtime adapter needs a tenancy-mode, permit-mode lock and a format 3 profile; ${s.lockPath} is ${mode} with a format ${s.profile.observation_format ?? 1} profile (its recorded observations can still be re-evaluated with evaluate --observations)`);
 }
 
 async function runAdapter(args: string[]): Promise<number> {
   const s = setup('run-adapter', args);
-  requireTenancy(s);
+  requirePermitMode(s);
   const env = prepareRevocationEnv(s.lock, 'baseline', { workDir: s.work, harnessRoot: s.root, sourceOverride: s.sourceOverride, verifyBaseline: s.flags.has('--verify-baseline') });
   const run = await runProfile(env.build, s.cases, s.truths, s.profile, s.supplement);
   // Fresh observations go through exactly the path recorded observations take.
@@ -214,7 +219,7 @@ const factsOf = (evaluated: ReturnType<typeof evaluateRecorded>, observed: Recor
 
 async function mutants(args: string[]): Promise<number> {
   const s = setup('mutants', args);
-  requireTenancy(s);
+  requirePermitMode(s);
   // Patches, witnesses, exact values and evidence kinds are bound before any runtime is built.
   const { manifest: mm, sha256: manifestSha256 } = loadMutantManifest(s.root, s.lock, VERSION);
   const only = s.options.get('--only')?.split(',');
