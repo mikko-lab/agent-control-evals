@@ -96,7 +96,49 @@ Within the gates, the evidence parts are reported separately and never merged:
 
 ## 4a. Gate results
 
-(Filled in from the final runs on the final committed head; see §7.)
+Bound to the final committed head named in the pull request; §7 lists the runs. The mutant manifest is `mutations/revocation/manifest.json`, SHA-256 `29cd7ef3d0688040a18574990aef9fa3ab177f6d26edaeab0b60185996bd17c3`. It was committed before the final gate run.
+
+**Eval mutant gate** (`mutants --lock --profile`):
+- **Control:** exit 3, without any exception.
+- **Detected: 26/26 SUT mutants.** Each matched exactly its manifest values and run exceptions: M4 has 1 predeclared harness error, M10 has 29 predeclared barrier timeouts, the others have none. 0 survived, 0 technical failures.
+- **Masked: 6/6 as pinned** (M8, M9, M20, M22, M26, M34). Each run equals the control. They are recorded gaps, not detections.
+- **Not run: M25**, with its conflict, reproduction and coverage gap.
+- **Adapter mutants: AM1–AM19, 19/19 detected.**
+- Gate exit 0.
+
+| Evidence part | Mutants (detected) |
+|---|---|
+| Containment | M2, M3, M4, M6, M15, M21, M28, M35, M14, M24, M49, M51 |
+| Lifecycle | M12, M13, M50, M52 |
+| Availability | M7, M16, M37, M25-overreach |
+| Signal | M1, M5, M6, M11, M29, M36, M14, M24, M49, M51 |
+| Check point only | — |
+| Missing evidence | M10 |
+| Component | none in the eval gate |
+
+A mutant whose witness shows several parts is listed under each, and the parts are never merged.
+
+| Mutant | Witness | Exit | Why that exit |
+|---|---|---|---|
+| M12, M13, M24, M49–M52 | as in plan §8.1 | 1 | confirmed VIOLATION, every case technically valid |
+| M14 | `fresh-id-retry-unused-permit` | 2 | confirmed VIOLATION with contradictory permit evidence (a permit consumed without an issue sequence value) |
+| M25-overreach | S11 | 2 | confirmed VIOLATION; the only incompleteness is the pinned missing evidence `terminal evidence missing for e2 in window 8..9` (e2 is never started). The findings `false_deny@5`, `missing_permit_issued@5`, `false_deny@6` and `missing_execution_started@6` are retained. No harness error, no barrier timeout, no other changed case. |
+| M1, M4, M7, M10, M16, M37 | unchanged from the earlier pin | 2 | unchanged reasons (pin review a9deab6 §5) |
+
+**Gate regressions G1–G8** (real pinned runtime): all as required.
+- G1, G5: detected, exit 0.
+- G6: masked, exit 0.
+- G2, G3, G4, G7 and G8: technical failure, exit 2, each with its required reason.
+
+**Evaluator regressions** (0.3.0 step path): all four regression mutants caught; control 135/135, self-test exit 0.
+
+**Runtime-own gates** (`runtime-gates --lock`, every pinned gate), compared with the lock:
+- tenant 19/19 and ancestor 25/25, with the four evidence kinds of the lock. The v0.6.0 driver also reports the lifecycle and availability kinds for these gates. They are accepted only when empty (`evidenceKindIssues`, with a regression test), and they are empty.
+- lifecycle 26/26 with the lock's eight kind lists, counts, variants, entries beyond their kind and recorded gaps;
+- R1–R4 and RL1–RL24 with their pinned exits;
+- witness determinism: three identical runs.
+
+These results are runtime-own evidence and are reported apart from the eval gate.
 
 ## 5. Re-verification of the existing mutants under permit mode
 
@@ -153,7 +195,14 @@ The manifest pins exactly these values and no run exceptions.
 
 ## 7. Final validation
 
-(Filled in from the final runs on the final committed head.)
+Every run below was made on the final committed head with a clean worktree. The pull request names that head; the runs on earlier heads, `0d4d375` and `3bdb879`, are intermediate results.
+- `npm run build`, `npm run typecheck`, `npm run check:oracle-boundary` (no violations) and `npm test` (every test passes; the skipped tests are the pinned-SUT tests, which need a prepared runtime and run separately).
+- Pinned-SUT tests (`runtime-sut.test.ts` with `ACE_REVOCATION_WORK`): 7/7, 0 skipped.
+- Two clean `run-adapter --verify-baseline` runs: exit 3, `diff -r` identical, and observations equal to the committed fixture.
+- Recorded re-evaluation: byte-identical evidence, supplement evidence and observations, exit 3.
+- Earlier pins re-evaluated under their historical locks: `a9deab6` 17/17 (K = 43) and `a682e44` 14/14, both exit 3.
+- Eval mutant gate, gate regressions G1–G8, evaluator regressions and the runtime-own gates: §4a.
+- CI on Node 22 and 24 runs the same steps on the pushed head.
 
 ## 8. Open risks and limits
 
