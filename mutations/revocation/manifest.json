@@ -1072,7 +1072,7 @@
         "signal"
       ],
       "plan_kind": "both",
-      "kind_note": "containment: the fresh-ID retry runs the tool a second time (false_allow@1, unexpected_execution_started@1); its unexpected terminal is signal evidence",
+      "kind_note": "containment: the fresh-ID retry runs the tool a second time (false_allow@1, unexpected_execution_started@1); its unexpected terminal is signal evidence. The missing consumption itself is incomplete start evidence, never a PASS",
       "witness": {
         "set": "corpus",
         "case_id": "permit-single-use",
@@ -1093,10 +1093,13 @@
             "step": 5
           }
         ],
-        "incomplete": [],
+        "incomplete": [
+          "inconsistent state evidence (probe 2): start:e1: execution started with no permit consumption of its own: lineage lineage-1 shows no permit consumption",
+          "inconsistent state evidence (probe 5): start:retry: execution started with no permit consumption of its own: lineage lineage-1 shows no permit consumption"
+        ],
         "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "exit": 2,
+        "exit_reason": "the witness is a confirmed VIOLATION with incompleteness: the patched runtime never records a consumption, so the start of e1 (probe 2) and of the fresh-ID retry (probe 5) show no permit consumption of their own, which is inconsistent start evidence (format 3, two-way consumption binding). Every other case with an observed start is UNASSESSABLE for the same reason (23 cases, sup-unobservable-pending-settlement among them, which is UNASSESSABLE in the control too; no harness error, no barrier timeout); the report is not technically valid, has_confirmed_violation stays true and profileExitCode returns 2",
         "run_confirmed_violation": true
       },
       "run_exceptions": {

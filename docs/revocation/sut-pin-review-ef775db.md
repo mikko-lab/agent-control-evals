@@ -100,7 +100,7 @@ Within the gates, the evidence parts are reported separately and never merged:
 
 **This section states expected values, not results.** They are the values the lock and the mutant manifest pin, and every gate run must reproduce them exactly. Whether the final run on the final committed head did so is recorded separately (§7): a document cannot record a run of the commit that contains it.
 
-The mutant manifest is `mutations/revocation/manifest.json`, SHA-256 `29cd7ef3d0688040a18574990aef9fa3ab177f6d26edaeab0b60185996bd17c3`. It was committed before any final gate run. Intermediate runs on `0d4d375` and `3bdb879` showed these values; they are not the final evidence.
+The mutant manifest is `mutations/revocation/manifest.json`, SHA-256 `77f62e6f6481587a117fc06c5516289aff5ca4dfea2c6a81d9894c05b3281fcf`. It was committed before any final gate run. It replaces the pin `29cd7ef3…`, which the evaluator fix of §6 (two-way consumption binding) invalidated for M24 only. Intermediate runs on `0d4d375`, `3bdb879` and `31ff08e` showed the earlier values; they are not the final evidence.
 
 **Eval mutant gate** (`mutants --lock --profile`), expected:
 - **Control:** exit 3, without any exception.
@@ -124,7 +124,8 @@ A mutant whose witness shows several parts is listed under each, and the parts a
 
 | Mutant | Witness | Exit | Why that exit |
 |---|---|---|---|
-| M12, M13, M24, M49–M52 | as in plan §8.1 | 1 | confirmed VIOLATION, every case technically valid |
+| M12, M13, M49–M52 | as in plan §8.1 | 1 | confirmed VIOLATION, every case technically valid |
+| M24 | `permit-single-use` | 2 | confirmed VIOLATION (`false_allow@1`, `unexpected_execution_started@1`, `unexpected_execution_terminal@5`) with incompleteness: the patched runtime records no consumption, so the starts of e1 (probe 2) and of the retry (probe 5) have no permit consumption of their own. The 23 other cases with an observed start are UNASSESSABLE for the same reason. No harness error, no barrier timeout. |
 | M14 | `fresh-id-retry-unused-permit` | 2 | confirmed VIOLATION with contradictory permit evidence (a permit consumed without an issue sequence value) |
 | M25-overreach | S11 | 2 | confirmed VIOLATION; the only incompleteness is the pinned missing evidence `terminal evidence missing for e2 in window 8..9` (e2 is never started). The findings `false_deny@5`, `missing_permit_issued@5`, `false_deny@6` and `missing_execution_started@6` are retained. No harness error, no barrier timeout, no other changed case. |
 | M1, M4, M7, M10, M16, M37 | unchanged from the earlier pin | 2 | unchanged reasons (pin review a9deab6 §5) |
@@ -155,6 +156,7 @@ Every existing patch was run against `ef775db` in permit mode, with the whole pr
 | Mutant | Result under permit mode |
 |---|---|
 | M1–M7, M10, M11, M15, M16, M21, M28, M29, M35–M37 | **Same witness, identical values** (verdict, findings, incompleteness, errors, exit, `has_confirmed_violation`) |
+| **M24** (after the evaluator fix, §6) | Same witness and findings; now incomplete and exit 2 (§4a). A full precheck of every mutant with the fixed evaluator changed no other mutant, masked mutant or the control. |
 | **M25-overreach** (new, authorized) | S11 step 5, availability (§5a); not evidence of the original M25 property |
 | M10 | Same witness values. Its predeclared barrier timeouts change from 24 to 29: the moved cases `approval-before-cut`@5 and `permit-single-use`@4, the new S11–S13 (step 8), and S2's re-mapped finish (step 3 instead of 1). They are pinned case by case. |
 | **M8, M9, M20, M22, M26, M34** | **Masked: no case changes. They are not detected mutants; their earlier legacy-path witnesses (at `a9deab6`) stay historical evidence.** They remove or weaken checks on the legacy paths (`resolveApproval()`, the start inside `process()`, and the `#denyIfRevoked` stage checks), which permit mode reaches only at setup, before any revocation. M9's request- and start-stage checks are masked by the kept lineage fences (plan §8.1, M49). They are pinned as `masked`: their whole run must equal the control, they are never a detection, and their earlier witnesses are recorded. The permit-mode counterparts are witnessed: M12 and M50 (approval fence), M13 and M52 (issue fence), M49 and M51 (start path); also the runtime-own lifecycle gate. |
@@ -197,6 +199,11 @@ The manifest pins exactly these values and no run exceptions.
 - **M12, M13, M50 and M52 are lifecycle evidence only.** The issue and the start of each witness are still denied by their own fences, so no tool runs. The plan's kind "check and lifecycle" matches.
 - **M14, M24, M49 and M51.** The plan's kind is "both". The eval gate reports them as containment plus signal: the started execution also ends with an unexpected terminal.
 - **The execution label in permit mode.** Arguments are bound by digest, so the request marker can no longer name the execution. The label comes from the runtime's `request_id` of the execution: the R′ of exactly one start step. The evaluator checks it (`runtime_binding_mismatch`). The consumption's `start_request_id` and `execution_id` must also match their own start step (`lifecycle_transition_mismatch`).
+- **Evaluator fix after review of `31ff08e`: two-way consumption binding and authority-scoped lifecycle contradictions.** Two evidence evaluation defects were reproduced on recorded observations (direct and through `evaluate --observations`):
+  - `permit-single-use` with the consumption state, `consumed_seq`, execution id and start request id removed gave PASS; a consumption bound to an execution id no observed execution has also gave PASS.
+  - In S11, with b's permit effect removed at step 5 the case is VIOLATION `missing_permit_issued@5`; adding a contradictory permit sequence of a turned it UNASSESSABLE and the finding disappeared. The same held for `approval_granted` (`missing_approval_granted@4` in `approval-before-cut`).
+
+  The fix (§14.3 and §14.5 of the compatibility spec): every observed start needs its own lineage's consumption with the right request and execution ids, or its evidence is incomplete; a consumption naming an unobserved execution is `lifecycle_transition_mismatch`; a lifecycle contradiction concerns only its own authority (and named execution), with the barrier-based temporal scope kept. The regressions (`runtime-permit.test.ts`) fail at `31ff08e` and pass after the fix, on both paths. The corpus, the oracle and the runtime pin are unchanged. Only M24 changed (§5).
 - **Decision mapping.** Only the contract's lifecycle denials are DENY: `not_pending`, `not_approved`, `permit_not_issued` and `permit_consumed`. Any other `LifecycleDeniedError` is UNKNOWN, so an adapter or binding defect cannot pass as a contract denial. A call through another API than its operation's is `call_api_mismatch`.
 
 ## 7. Final validation

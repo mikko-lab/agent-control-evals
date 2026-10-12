@@ -55,7 +55,11 @@ export const commitValueJson = (label: string, n: number) => canonicalJson({ lab
  * A contradictory fact is not an effect: it is incomplete evidence, whatever the SUT's API answered.
  */
 /** A fact whose evidence is contradictory: why, and the effect kind and execution label it concerns (null if none). */
-export interface Contradiction { reason: string; kind: EffectKind; execution: string | null }
+/**
+ * authority: the contract authority the fact belongs to, when it is known (format 3 lifecycle facts); absent or null
+ * means the fact names no authority and concerns that kind and execution for every authority.
+ */
+export interface Contradiction { reason: string; kind: EffectKind; execution: string | null; authority?: string | null }
 
 export function facts(state: ProbeState, identity: IdentityMapping): { present: Map<string, Omit<Effect, 'step'>>; inconsistent: Map<string, Contradiction> } {
   const out = new Map<string, Omit<Effect, 'step'>>();
@@ -107,7 +111,12 @@ export function derive(probes: Probe[], identity: IdentityMapping): Derivation {
   // Format 3: lifecycle effects are transitions after the setup baseline (lifecycleTransitions), never first presence.
   const lifecycle = lifecycleTransitions(probes);
   result.regressions.push(...lifecycle.regressions);
-  for (const x of lifecycle.inconsistent) flag(x.key, x.probe, { reason: x.reason, kind: x.kind, execution: null });
+  // A lifecycle contradiction concerns its own lineage's authority only (and, for a consumption, the execution it names
+  // when an observed execution has that id); it never concerns another authority's expectations.
+  for (const x of lifecycle.inconsistent) {
+    const label = x.execution_id === null ? null : probes[x.probe].state.executions.find(e => e.execution_id === x.execution_id)?.label ?? null;
+    flag(x.key, x.probe, { reason: x.reason, kind: x.kind, execution: label, authority: identity.lineages?.[x.lineage_id] ?? `unmapped:${x.lineage_id}` });
+  }
   const transitionsAt = new Map<number, LifecycleTransition[]>();
   for (const t of lifecycle.transitions) if (t.kind !== 'permit_consumed') transitionsAt.set(t.probe, [...(transitionsAt.get(t.probe) ?? []), t]);
   probes.forEach((p, k) => {
@@ -155,8 +164,9 @@ const PERMIT_RANK: Record<string, number> = { none: 0, issued: 1, consumed: 2, e
  * at the baseline is never a transition. A lineage that disappears, an authority sequence that decreases and a state
  * that moves backwards are regressions of the log.
  */
-export function lifecycleTransitions(probes: Probe[]): { transitions: LifecycleTransition[]; inconsistent: { key: string; probe: number; kind: EffectKind; reason: string }[]; regressions: string[] } {
-  const out = { transitions: [] as LifecycleTransition[], inconsistent: [] as { key: string; probe: number; kind: EffectKind; reason: string }[], regressions: [] as string[] };
+export interface LifecycleContradiction { key: string; probe: number; kind: EffectKind; reason: string; lineage_id: string; execution_id: string | null }
+export function lifecycleTransitions(probes: Probe[]): { transitions: LifecycleTransition[]; inconsistent: LifecycleContradiction[]; regressions: string[] } {
+  const out = { transitions: [] as LifecycleTransition[], inconsistent: [] as LifecycleContradiction[], regressions: [] as string[] };
   let prev: Map<string, LineageObservation> | null = null;
   let prevSeq = 0;
   let baselineSeq: number | null = null;
@@ -181,17 +191,17 @@ export function lifecycleTransitions(probes: Probe[]): { transitions: LifecycleT
       if (b.approval_state === 'pending' && l.approval_state === 'approved') {
         const key = `approve:${id}`;
         if (within(l.approved_seq)) out.transitions.push({ key, kind: 'approval_granted', lineage_id: id, probe: k, seq: l.approved_seq });
-        else out.inconsistent.push({ key, probe: k, kind: 'approval_granted', reason: why('approved_seq', l.approved_seq) });
+        else out.inconsistent.push({ key, probe: k, kind: 'approval_granted', reason: why('approved_seq', l.approved_seq), lineage_id: id, execution_id: null });
       }
       if (b.permit_state === 'none' && (l.permit_state === 'issued' || l.permit_state === 'consumed')) {
         const key = `permit:${id}`;
         if (within(l.issued_seq)) out.transitions.push({ key, kind: 'permit_issued', lineage_id: id, probe: k, seq: l.issued_seq });
-        else out.inconsistent.push({ key, probe: k, kind: 'permit_issued', reason: why('issued_seq', l.issued_seq) });
+        else out.inconsistent.push({ key, probe: k, kind: 'permit_issued', reason: why('issued_seq', l.issued_seq), lineage_id: id, execution_id: null });
       }
       if (b.permit_state !== 'consumed' && l.permit_state === 'consumed') {
         const key = `consume:${id}`;
         if (within(l.consumed_seq)) out.transitions.push({ key, kind: 'permit_consumed', lineage_id: id, probe: k, seq: l.consumed_seq });
-        else out.inconsistent.push({ key, probe: k, kind: 'execution_started', reason: why('consumed_seq', l.consumed_seq) });
+        else out.inconsistent.push({ key, probe: k, kind: 'execution_started', reason: why('consumed_seq', l.consumed_seq), lineage_id: id, execution_id: l.execution_id });
       }
     }
     prev = cur; prevSeq = seqNow;
@@ -216,9 +226,13 @@ const TRANSITION_OP: Record<LifecycleTransition['kind'], Step['op']> = { approva
  *    consumption's start_request_id and whose execution, when the runtime started one, is the consumption's
  *    execution_id (AM18).
  */
-export function lineageIssues(authorities: Authority[], steps: Step[], probes: Probe[], calls: CallRecord[], identity: IdentityMapping): { identity: string[]; transitions: string[] } {
+/** An observed start without its own permit consumption: incomplete state evidence of that execution (format 3). */
+export interface MissingConsumption { probe: number; execution: string; authority: string | null; reason: string }
+
+export function lineageIssues(authorities: Authority[], steps: Step[], probes: Probe[], calls: CallRecord[], identity: IdentityMapping): { identity: string[]; transitions: string[]; missing: MissingConsumption[] } {
   const idIssues: string[] = [];
   const trIssues: string[] = [];
+  const missing: MissingConsumption[] = [];
   const lineages = identity.lineages ?? {};
   const byAuthority = new Map<string, string[]>();
   for (const [lid, a] of Object.entries(lineages)) {
@@ -259,7 +273,9 @@ export function lineageIssues(authorities: Authority[], steps: Step[], probes: P
     }
   });
   const last = probes[probes.length - 1]?.state;
-  for (const t of lifecycleTransitions(probes).transitions) {
+  const transitions = lifecycleTransitions(probes).transitions;
+  const knownExecutions = new Set(probes.flatMap(p => [...p.state.executions.map(x => x.execution_id), ...p.state.entries.map(x => x.execution_id)]));
+  for (const t of transitions) {
     const p = probes[t.probe];
     if (DRIFT_POINTS.includes(p.point)) continue;
     const s = steps[p.step];
@@ -273,10 +289,31 @@ export function lineageIssues(authorities: Authority[], steps: Step[], probes: P
       const label = (s as { execution: string }).execution;
       if (l.start_request_id !== (call.request_id ?? null)) trIssues.push(`permit of lineage ${t.lineage_id} consumed by start request ${l.start_request_id}, step ${p.step} submitted ${call.request_id ?? 'none'}`);
       const started = last?.executions.find(x => x.execution_id === l.execution_id);
-      if (l.execution_id !== null && started && started.label !== label) trIssues.push(`permit of lineage ${t.lineage_id} consumed for execution ${started.label}, step ${p.step} starts ${label}`);
+      if (l.execution_id !== null && !knownExecutions.has(l.execution_id)) trIssues.push(`permit of lineage ${t.lineage_id} consumed for execution ${l.execution_id}, which no observed execution has (step ${p.step} starts ${label})`);
+      else if (l.execution_id !== null && started && started.label !== label) trIssues.push(`permit of lineage ${t.lineage_id} consumed for execution ${started.label}, step ${p.step} starts ${label}`);
     }
   }
-  return { identity: [...new Set(idIssues)], transitions: [...new Set(trIssues)] };
+  // The other direction: every observed start needs the permit consumption of its own authority's lineage, first shown
+  // at the start's own step, naming exactly that execution and that step's start request. Missing or other consumption
+  // evidence leaves the start's state evidence incomplete (never PASS); its findings stay.
+  for (const entry of last?.entries ?? []) {
+    const record = last!.executions.find(x => x.execution_id === entry.execution_id);
+    const startSteps = steps.map((s, i) => ({ s, i })).filter(({ s }) => s.op === 'start' && s.execution === entry.label);
+    const own = startSteps.map(({ i }) => ({ i, call: calls.find(c => c.step === i && c.api === 'start') })).find(({ call }) => call && (!record || call.request_id === record.request_id));
+    const authority = record ? identity.capabilities[record.capability_id] ?? null : entry.request_authority;
+    const lineageId = Object.entries(lineages).find(([, a]) => a === authority)?.[0];
+    const at = probes.findIndex(p => p.state.entries.some(x => x.label === entry.label));
+    const l = lineageId ? last!.lineages?.find(x => x.lineage_id === lineageId) : undefined;
+    const consumption = lineageId ? transitions.find(t => t.kind === 'permit_consumed' && t.lineage_id === lineageId) : undefined;
+    const why = !own ? `no start call of step starting ${entry.label} names its request` : !l ? `its authority ${authority ?? 'unmapped'} has no observed lineage`
+      : l.permit_state !== 'consumed' || !consumption ? `lineage ${l.lineage_id} shows no permit consumption`
+      : probes[consumption.probe].step !== own.i ? `the consumption of lineage ${l.lineage_id} is first shown at step ${probes[consumption.probe].step}, the start is step ${own.i}`
+      : l.execution_id !== entry.execution_id ? `the consumption of lineage ${l.lineage_id} names execution ${l.execution_id ?? 'none'}, the start ran ${entry.execution_id}`
+      : l.start_request_id !== (own.call!.request_id ?? null) ? `the consumption of lineage ${l.lineage_id} names start request ${l.start_request_id ?? 'none'}, step ${own.i} submitted ${own.call!.request_id ?? 'none'}`
+      : null;
+    if (why) missing.push({ probe: Math.max(at, 0), execution: entry.label, authority, reason: `execution started with no permit consumption of its own: ${why}` });
+  }
+  return { identity: [...new Set(idIssues)], transitions: [...new Set(trIssues)], missing };
 }
 
 /** Structural defects of a probe log: indices are positions, steps never decrease. */

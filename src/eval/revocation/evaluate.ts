@@ -26,8 +26,12 @@ export interface EvaluateOptions { ordering?: 'step' | 'probe_seq'; controlSteps
  * that kind and execution that was still open at that probe; never one whose window had already closed, nor any
  * other kind or execution.
  */
-export interface EvidenceGap { kind: EffectKind; execution: string | null; probe: number }
-const gapConcerns = (g: EvidenceGap, kind: EffectKind, execution: string | null) => g.kind === kind && (g.execution === null || g.execution === execution);
+export interface EvidenceGap { kind: EffectKind; execution: string | null; probe: number; authority?: string | null }
+/**
+ * A gap concerns an effect of its kind and execution (every execution when it names none) and, when it names an
+ * authority (format 3 lifecycle facts), only that authority's effects.
+ */
+const gapConcerns = (g: EvidenceGap, kind: EffectKind, execution: string | null, authority: string | null) => g.kind === kind && (g.execution === null || g.execution === execution) && (g.authority == null || g.authority === authority);
 
 const sameIdentity = (f: Effect, x: ExpectedEffect) => f.kind === x.kind && f.authority === x.authority && f.execution === x.execution && canonicalJson(f.target) === canonicalJson(x.target);
 const executionKey = (f: Effect) => `${f.authority}/${f.execution}`;
@@ -118,7 +122,7 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
     if (commits.some(y => unordered(y, x.f))) { orderUnknown(x.f, 'its commit'); continue; }
     // A commit of this execution whose contradictory state evidence was first shown no later than the delivery is
     // unconfirmed, not absent: the delivery is not impossible.
-    if (gaps.some(g => gapConcerns(g, 'tool_commit', x.f.execution) && g.probe <= seqOf(x.f))) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
+    if (gaps.some(g => gapConcerns(g, 'tool_commit', x.f.execution, x.f.authority) && g.probe <= seqOf(x.f))) { e.incomplete.push(`output_delivery at step ${x.f.step} of ${x.f.execution}: its commit's state evidence is contradictory`); continue; }
     rejected.add(x.path); error('causally_impossible', x.path, `output_delivery at step ${x.f.step} precedes every observed commit of ${x.f.execution}`);
   }
   const terminals = new Map<string, string[]>();
@@ -158,7 +162,7 @@ export function evaluate(c: Case, truth: Expected, input: unknown, options: Eval
     // never missing, when it was first shown while that effect's window was still open (at or before the window's
     // closing barrier probe). A window closed by its barrier without the effect stays closed: a contradiction first
     // shown after it (the next pre_action, a later step, seal_settle) does not reopen it.
-    const gap = gaps.some(g => gapConcerns(g, x.kind, x.execution) && g.probe <= windowClose(x.latest));
+    const gap = gaps.some(g => gapConcerns(g, x.kind, x.execution, x.authority) && g.probe <= windowClose(x.latest));
     if (!o.complete || effectsExcluded || gap) e.incomplete.push(`expected effect not confirmed: ${at}`);
     else if (x.kind === 'execution_terminal') e.incomplete.push(`terminal evidence missing for ${at}`);
     else e.effect_findings.push({ step: x.earliest, reason: `missing_${x.kind}` });
@@ -202,8 +206,13 @@ function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<strin
   // Format 3 (approval-permit lifecycle plan sections 7.1, 8.3): one lineage per authority, confirmed in its initial
   // state by the setup baseline and never re-created; every lifecycle transition made by its own step's runtime call;
   // every step call the lifecycle API of its operation.
+  const missingConsumption: { kind: EffectKind; execution: string | null; probe: number; authority: string | null }[] = [];
   if (format3) {
     const li = lineageIssues(c.authorities, c.steps, o.probes, o.calls, o.identity);
+    for (const m of li.missing) {
+      e.incomplete.push(`inconsistent state evidence (probe ${m.probe}): start:${m.execution}: ${m.reason}`);
+      missingConsumption.push({ kind: 'execution_started', execution: m.execution, probe: m.probe, authority: m.authority });
+    }
     for (const issue of li.identity) error('identity_mapping_invalid', '/identity', issue);
     for (const issue of li.transitions) error('lifecycle_transition_mismatch', '/probes', issue);
     for (const call of o.calls) {
@@ -247,7 +256,7 @@ function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<strin
   for (const call of o.calls) {
     if (call.step < c.steps.length && !control.has(call.step) && !reported.has(call.step) && decisionFromCall(c.steps[call.step], call) !== undefined) error('decision_not_reported', '/decisions', `the SUT call of step ${call.step} is recorded, but its decision is not reported`);
   }
-  const gaps = derived.inconsistent.map(x => ({ kind: x.kind, execution: x.execution, probe: x.probe }));
+  const gaps = [...derived.inconsistent.map(x => ({ kind: x.kind, execution: x.execution, probe: x.probe, authority: x.authority ?? null })), ...missingConsumption];
   // A window ending at step `latest` closes at the last barrier-bound probe of a step <= latest: an effect first shown
   // after it is drift or belongs to a later step (derive()). Without such a probe the window never closed.
   const windowClose = (latest: number) => {

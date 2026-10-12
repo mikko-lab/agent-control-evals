@@ -413,6 +413,9 @@ test('mutant manifest v3: re-verified witnesses, plan rows M12-M52, masked legac
   // Lifecycle evidence is never containment; containment witnesses run a tool.
   for (const id of ['M12', 'M13', 'M50', 'M52']) assert.deepEqual(by(id).parts, ['lifecycle'], id);
   for (const id of ['M14', 'M24', 'M49', 'M51']) assert.ok(by(id).parts.includes('containment'), id);
+  // M24: the missing consumption leaves both starts of its witness without consumption evidence of their own (never PASS).
+  assert.equal(by('M24').witness.exit, 2);
+  assert.deepEqual(by('M24').witness.incomplete.map(x => /^inconsistent state evidence \(probe (\d+)\): start:(\w+): execution started with no permit consumption of its own/.exec(x)?.slice(1).join(':')), ['2:e1', '5:retry']);
   for (const id of ['M7', 'M16', 'M37']) assert.deepEqual(by(id).parts, ['availability'], id);
   // M25-overreach: a separately authorized mechanism at the issue fence, witnessed by S11 step 5; availability only,
   // never containment, and not a variant of M25 (which stays not run with its coverage gap).
@@ -515,4 +518,102 @@ test('runtime gate reports: a kind outside the gate\'s own is accepted only when
   assert.deepEqual(evidenceKindIssues('lifecycle', g.lifecycle!.evidence), []);
   const { check_and_availability: _a, ...noAvailability } = g.lifecycle!.evidence;
   assert.match(evidenceKindIssues('lifecycle', noAvailability).join(), /kind check_and_availability missing/);
+});
+
+// ---- Evidence-scoping regressions (review of 31ff08e) ---------------------------------------------------------------
+type LineagePatch = Partial<NonNullable<RuntimeObservation['probes'][number]['state']['lineages']>[number]>;
+/** Edits one lineage in the probes from..to (inclusive; to defaults to the last probe). */
+function editLineage(o: RuntimeObservation, lineageId: string, from: number, patch: LineagePatch, to = o.probes.length - 1): RuntimeObservation {
+  const out = clone(o);
+  out.probes.forEach((p, k) => { if (k >= from && k <= to) for (const l of p.state.lineages!) if (l.lineage_id === lineageId) Object.assign(l, patch); });
+  return out;
+}
+const lineageOf = (o: RuntimeObservation, authority: string) => Object.entries(o.identity.lineages!).find(([, a]) => a === authority)![0];
+const S11 = 'sup-session-revoke-pending-approval';
+/** The scoping scenarios, each re-reported from its edited probes by the adapter's own report function. */
+function scopingScenarios(): Record<string, { id: string; o: RuntimeObservation }> {
+  const single = obsOf('permit-single-use');
+  const lid = lineageOf(single, 'a');
+  const noConsumption = editLineage(single, lid, 0, { state: 'issued', permit_state: 'issued', consumed_seq: null, execution_id: null, start_request_id: null });
+  const consumedAt = single.probes.findIndex(p => p.state.lineages!.some(l => l.permit_state === 'consumed'));
+  const ghostExecution = editLineage(single, lid, consumedAt, { execution_id: 'exec-ghost' });
+  const s11 = obsOf(S11);
+  const a = lineageOf(s11, 'a'), b = lineageOf(s11, 'b');
+  const base = s11.probes[0].state.authority_seq!;
+  // b's permit issuance hidden at step 5 (it surfaces only with the consumption at step 6, out of its interval).
+  const issue5 = probeIndex(s11, 5, 'barrier_complete');
+  const bPermitHidden = editLineage(s11, b, issue5, { state: 'approved', permit_state: 'none', permit_id: null, issued_seq: null }, probeIndex(s11, 6, 'pre_action'));
+  // ... plus a contradictory permit of a (issued_seq <= baseline), first shown at step 2, inside b's step-5 window.
+  const aPermitContradiction = editLineage(bPermitHidden, a, probeIndex(s11, 2, 'barrier_complete'), { state: 'issued', permit_state: 'issued', permit_id: 'permit-x', issued_seq: base });
+  // b's approval hidden at step 4, plus a contradictory approval of a first shown at step 1, inside b's step-4 window.
+  const bApprovalHidden = editLineage(s11, b, 0, { approval_state: 'pending', approved_seq: null });
+  for (const p of bApprovalHidden.probes) for (const l of p.state.lineages!) if (l.lineage_id === b && l.state === 'approved') l.state = 'pending';
+  const aApprovalContradiction = editLineage(bApprovalHidden, a, probeIndex(s11, 1, 'barrier_complete'), { state: 'approved', approval_state: 'approved', approved_seq: base });
+  const re = (id: string, o: RuntimeObservation) => ({ id, o: rereport(caseOf(id), o) });
+  return {
+    noConsumption: re('permit-single-use', noConsumption),
+    ghostExecution: re('permit-single-use', ghostExecution),
+    bPermitHidden: re(S11, bPermitHidden),
+    aPermitContradiction: re(S11, aPermitContradiction),
+    bApprovalHidden: re(S11, bApprovalHidden),
+    aApprovalContradiction: re(S11, aApprovalContradiction),
+  };
+}
+const SCOPING_EXPECTATIONS: Record<string, (e: Evidence) => void> = {
+  noConsumption: e => {
+    assert.notEqual(e.verdict, 'PASS');
+    assert.ok(e.incomplete.some(x => x.includes('start:e1') && x.includes('no permit consumption')), JSON.stringify(e.incomplete));
+  },
+  ghostExecution: e => {
+    assert.equal(e.verdict, 'HARNESS_ERROR');
+    assert.ok(e.errors.some(x => x.code === 'lifecycle_transition_mismatch' && x.message.includes('exec-ghost')), JSON.stringify(e.errors));
+  },
+  bPermitHidden: e => { assert.equal(e.verdict, 'VIOLATION'); assert.ok(findings(e).includes('missing_permit_issued@5'), JSON.stringify(findings(e))); },
+  aPermitContradiction: e => {
+    assert.equal(e.verdict, 'VIOLATION'); assert.ok(findings(e).includes('missing_permit_issued@5'), JSON.stringify(findings(e)));
+    assert.ok(e.incomplete.some(x => x.startsWith('inconsistent state evidence') && x.includes('permit:lineage-1')), JSON.stringify(e.incomplete));
+  },
+  bApprovalHidden: e => { assert.equal(e.verdict, 'VIOLATION'); assert.ok(findings(e).includes('missing_approval_granted@4'), JSON.stringify(findings(e))); },
+  aApprovalContradiction: e => {
+    assert.equal(e.verdict, 'VIOLATION'); assert.ok(findings(e).includes('missing_approval_granted@4'), JSON.stringify(findings(e)));
+    assert.ok(e.incomplete.some(x => x.startsWith('inconsistent state evidence') && x.includes('approve:lineage-1')), JSON.stringify(e.incomplete));
+  },
+};
+
+test('consumption binding, both directions: a start needs its own consumption; a consumption must name a real execution', () => {
+  const s = scopingScenarios();
+  SCOPING_EXPECTATIONS.noConsumption(ev(s.noConsumption.id, s.noConsumption.o));
+  SCOPING_EXPECTATIONS.ghostExecution(ev(s.ghostExecution.id, s.ghostExecution.o));
+  // The unedited baseline keeps passing: every start has its consumption.
+  for (const o of [...fixture.corpus, ...fixture.supplement]) assert.equal(ev(o.case_id, o).verdict, o.case_id === 'sup-unobservable-pending-settlement' ? 'UNASSESSABLE' : 'PASS', o.case_id);
+});
+
+test('lifecycle contradictions are scoped to their authority: another authority\'s contradiction never hides a missing permit or approval', () => {
+  const s = scopingScenarios();
+  for (const k of ['bPermitHidden', 'aPermitContradiction', 'bApprovalHidden', 'aApprovalContradiction']) SCOPING_EXPECTATIONS[k](ev(s[k].id, s[k].o));
+  // Temporal scoping stays: b's own contradiction, first shown after its step-5 window closed, does not reopen it.
+  const b = ev(s.bPermitHidden.id, s.bPermitHidden.o);
+  assert.ok(b.incomplete.some(x => x.startsWith('inconsistent state evidence') && x.includes('permit:lineage-2')), JSON.stringify(b.incomplete));
+  assert.ok(!b.incomplete.includes('expected effect not confirmed: permit_issued at step 5'), JSON.stringify(b.incomplete));
+});
+
+test('evidence-scoping regressions give the same evidence through evaluate --observations (recorded path)', () => {
+  const s = scopingScenarios();
+  const dir = mkdtempSync(join(tmpdir(), 'rev-scoping-'));
+  try {
+    for (const [name, { id, o }] of Object.entries(s)) {
+      const bundle = clone(fixture);
+      for (const list of [bundle.corpus, bundle.supplement]) { const i = list.findIndex(x => x.case_id === id); if (i >= 0) list[i] = o; }
+      const file = join(dir, `${name}.json`);
+      writeFileSync(file, JSON.stringify(bundle));
+      const r = cliRun('evaluate', '--observations', file, '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, name));
+      assert.ok(r.status === 1 || r.status === 2, `${name}: exit ${r.status} ${r.stderr}`);
+      const lines = [...readFileSync(join(dir, name, 'evidence.jsonl'), 'utf8').split('\n'), ...readFileSync(join(dir, name, 'supplement-evidence.jsonl'), 'utf8').split('\n')].filter(Boolean).map(l => JSON.parse(l));
+      const row = lines.find(x => x.case_id === id)!;
+      const recorded: Evidence = row.evidence ?? row;
+      SCOPING_EXPECTATIONS[name](recorded);
+      const pick = (x: Evidence) => ({ verdict: x.verdict, confirmed_violation: x.confirmed_violation, decision_findings: x.decision_findings, effect_findings: x.effect_findings, incomplete: x.incomplete, errors: x.errors });
+      assert.deepEqual(pick(recorded), pick(ev(id, o)), name);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

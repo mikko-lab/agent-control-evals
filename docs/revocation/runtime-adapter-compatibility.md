@@ -793,8 +793,9 @@ The baseline's value is `baseline_seq`.
 
   The transition's own sequence value (`approved_seq`, `issued_seq`) must lie after `baseline_seq` and inside the interval in which it is first shown: after the previous probe's `authority_seq`, at most this probe's. The effect's step is that probe's step and its `seq` the probe index. Its provenance is `sut_state`. A transition first shown at `pre_action` or `seal_settle` is drift. A state already present at the baseline is never an effect.
 - **Contradictory transitions.** A transition with a sequence value outside that interval, or none, is contradictory state evidence. No effect is derived from it, and the expected effect of its kind stays unconfirmed (incomplete), never missing. An example is a setup-time approval that surfaces after the baseline.
+  - **Scope.** The contradiction concerns only its own lineage's authority (`identity.lineages`) and, for a consumption, the execution it names when an observed execution has that id. An expected effect of another authority is never left unconfirmed by it: a missing effect of that authority stays a finding (for example, a contradictory permit sequence of `a` never hides `missing_permit_issued@5` of `b`). The temporal scope is unchanged: it concerns an expected effect only while that effect's window is still open at its probe (closed by the window's last barrier probe, §12).
 - **Regressions of the log** (`sequence_inconsistent`): an approval or permit state that moves backwards, a lineage that disappears, or an `authority_seq` that decreases.
-- **Permit consumption.** `permit_state` changing to `consumed` is no contract effect. It is checked for attribution (§14.5).
+- **Permit consumption.** `permit_state` changing to `consumed` is no contract effect. It is checked for attribution in both directions (§14.5).
 - **No other source of lifecycle effects.** A receipt, a return value or an audit record is never an effect.
 
 ### 14.4 Decisions
@@ -816,7 +817,10 @@ Other lifecycle denials are no contract answer, so they are UNKNOWN. These are b
   - an issue at an `issue` step, with an `issuePermit` call;
   - a consumption at a `start` step, with a `start` call. The consumption's `start_request_id` must be that call's R′, and its `execution_id` the execution that step started.
 
+  A consumption whose `execution_id` no observed execution has is also `lifecycle_transition_mismatch`: it is never skipped.
+
   This catches an adapter that approves, issues or consumes on the runtime's behalf (AM18).
+- **Start without its own consumption** (incomplete, never PASS). The other direction: every observed start (a tool-double entry) needs the permit consumption of its own authority's lineage, first shown at the start's own step, whose `execution_id` is that execution and whose `start_request_id` is that step's R′. Without it (no consumption, a consumption first shown at another step, or one naming another execution or request) the start's state evidence is inconsistent. The case reports it as incomplete (`inconsistent state evidence (probe k): start:L: execution started with no permit consumption of its own: …`) and the expected start of that execution and authority stays unconfirmed. Findings already shown stay: an unexpected start is still a finding.
 - **`runtime_binding_mismatch`**, in addition to §13.2. Every execution record's runtime `request_id` must be the R′ of exactly one start step, and that step must start the record's label.
 - **`identity_mapping_invalid`**, in addition to §13.2. The identity mapping declares `lineages` (runtime lineage → contract authority): exactly one lineage per authority (AM17), confirmed by the baseline (§14.3, AM15).
 
