@@ -134,8 +134,8 @@ test('profile v4: 23 IN_PROFILE / 4 OUT_OF_SCOPE from the revoke scopes and the 
   assert.equal(inProfile.reduce((n, c) => n + c.not_assessed_requirements.length, 0), 57);
   const moved = profile.cases.filter(c => MOVED.includes(c.id));
   assert.deepEqual(moved.map(c => c.not_assessed_requirements.length), [2, 2, 3, 2, 3, 2]);
-  // Plan section 6 says 28; the per-case ranges give 27: approval-before-cut has 6 assessed decisions (steps 0-4 and the
-  // revoke at 6), its step 5 is a finish (K). 41 decisions of the six cases minus K = 14.
+  // Plan section 6 (corrected from 28): approval-before-cut has 6 assessed decisions (steps 0-4 and the revoke at 6), its
+  // step 5 is a finish (K). 41 decisions of the six cases minus K = 14.
   assert.deepEqual(moved.map(c => caseOf(c.id).steps.length - c.not_assessed_requirements.length), [4, 4, 5, 4, 4, 6]);
   assert.equal(moved.reduce((n, c) => n + caseOf(c.id).steps.length - c.not_assessed_requirements.length, 0), 27);
   // The permit caveats are gone: these authorities now start with a real, unused permit.
@@ -420,6 +420,7 @@ test('mutant manifest v3: re-verified witnesses, plan rows M12-M52, masked legac
   }
   for (const m of manifest.masked) assert.ok(m.reason.length > 80 && m.previous_witness?.pin === 'a9deab6', m.id);
   assert.match(manifest.not_run[0].reproduction, /setup_failed/);
+  assert.match(manifest.not_run[0].coverage_gap, /no eval mutant evidence/);
   const dir = mkdtempSync(join(tmpdir(), 'rev-mutants-permit-'));
   try {
     mkdirSync(join(dir, 'mutations/revocation'), { recursive: true });
@@ -437,6 +438,7 @@ test('mutant manifest v3: re-verified witnesses, plan rows M12-M52, masked legac
       ['masked patch hash', m => { m.masked[1].patch_sha256 = '0'.repeat(64); }, /SHA-256/],
       ['masked twice', m => { m.masked.push(clone(m.masked[0])); }, /duplicate mutant id/],
       ['not run without reproduction', m => { m.not_run[0].reproduction = ''; }, /reproduction/],
+      ['not run without coverage gap', m => { m.not_run[0].coverage_gap = ''; }, /coverage gap/],
       ['not run also a mutant', m => { m.not_run[0].id = 'M12'; }, /duplicate mutant id/],
       ['no masked list', m => { delete (m as Partial<typeof manifest>).masked; }, /masked and not_run/],
     ];

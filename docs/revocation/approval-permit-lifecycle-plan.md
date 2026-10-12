@@ -477,7 +477,7 @@ The classifier marks a case `OUT_OF_SCOPE` by capability class (`src/profile/rev
 - **Moved cases.** Six move into the profile: `pending-approval`, `issue-after-cut`, `fresh-id-retry-unused-permit`, `derived-authority` (it needs G2 too, which v0.5.0 has), `permit-single-use` and `approval-before-cut`. Corpus coverage becomes **23/27**, from 17/27.
 - **Remaining `OUT_OF_SCOPE`.** Four cases stay out, and this plan does not promise them: `late-commit-after-terminal` and `cancel-is-not-rollback` need G6, `retry-after-revocation` needs G5(b), and `execution-id-reuse` needs G5(a) and G5(b).
 - **Unassessed finish/seal decisions (K).** K rises from **43 to 57**: +2, +2, +3, +2, +3 and +2 for the six moved cases. The four remaining cases hold 10 more, so 67 in all 27 cases.
-- **Newly assessed decisions.** 28 non-K decisions of the six moved cases become assessed: steps 0–3, 0–3, 0–4, 0–3, 0–3 and 0–6.
+- **Newly assessed decisions.** 27 non-K decisions of the six moved cases become assessed: steps 0–3, 0–3, 0–4, 0–3, 0–3, and 0–4 and 6. The six cases have 41 decisions, of which 14 are K. *(Corrected during the eval integration: an earlier revision said 28 and counted `approval-before-cut` as 0–6, but its step 5 is a finish, which is K. The coverage target is unchanged: 23/27, K = 57, exit 3. Neither the corpus nor the oracle changes.)*
 - **Acceptance.** `contract_acceptance_passed` stays false and the declared-profile exit stays 3. G3/G4 do not touch K (G5–G7 and coverage plan §5).
 
 **Changes to the cases already in the profile.**

@@ -100,8 +100,11 @@ export interface MaskedMutant {
   /** The witness it had under the previous pin, if any. */
   previous_witness: { set: 'corpus' | 'supplement'; case_id: string; pin: string } | null;
 }
-/** A plan mutant that is not run, with the concrete conflict and its reproduction (never evidence, never a detection). */
-export interface NotRunMutant { id: string; plan_row: string; reason: string; reproduction: string }
+/**
+ * A plan mutant that is not run, with the concrete conflict and its reproduction (never evidence, never a detection).
+ * coverage_gap states the property that thereby has no mutant evidence in the eval gate.
+ */
+export interface NotRunMutant { id: string; plan_row: string; reason: string; reproduction: string; coverage_gap: string }
 export interface MutantManifest {
   manifest: string; version: string; sut_repository: string; sut_commit: string; profile: string; supplement: string;
   baseline: { exit: number; exit_reason: string };
@@ -115,6 +118,8 @@ export interface MutantManifest {
 export class MutantManifestError extends Error {}
 
 const KINDS: MutantEvidenceKind[] = ['decision_and_effect', 'effect', 'missing_evidence'];
+/** A mutant id: M<number>, optionally with a lowercase name for a separately authorized mechanism (M25-overreach). */
+const MUTANT_ID = /^M\d+(-[a-z]+)?$/;
 const HEX = /^[0-9a-f]{64}$/;
 
 /** The evidence kind a witness shows, derived from its expected values alone. */
@@ -145,7 +150,7 @@ export function loadMutantManifest(root: string, lock: { sut_repository: string;
   if (!Array.isArray(m.masked) || !Array.isArray(m.not_run)) bad('masked and not_run must be lists');
   const ids = new Set<string>();
   const checkPatch = (x: Pick<RevocationMutant, 'id' | 'patch' | 'patch_sha256' | 'target' | 'source'>) => {
-    if (!/^M\d+$/.test(x.id) || ids.has(x.id)) bad(`invalid or duplicate mutant id ${x.id}`);
+    if (!MUTANT_ID.test(x.id) || ids.has(x.id)) bad(`invalid or duplicate mutant id ${x.id}`);
     ids.add(x.id);
     if (!/^[A-Za-z0-9.-]+\.patch$/.test(x.patch) || !/^src\/[A-Za-z0-9/-]+\.ts$/.test(x.target)) bad(`${x.id}: invalid patch or target path`);
     if (!HEX.test(x.patch_sha256)) bad(`${x.id}: invalid patch_sha256`);
@@ -164,9 +169,9 @@ export function loadMutantManifest(root: string, lock: { sut_repository: string;
     if (!x.reason || (x.previous_witness !== null && (!['corpus', 'supplement'].includes(x.previous_witness?.set) || !x.previous_witness.case_id || !x.previous_witness.pin))) bad(`${x.id}: a masked mutant needs its reason and a previous witness or null`);
   }
   for (const x of m.not_run) {
-    if (!/^M\d+$/.test(x.id) || ids.has(x.id)) bad(`invalid or duplicate mutant id ${x.id}`);
+    if (!MUTANT_ID.test(x.id) || ids.has(x.id)) bad(`invalid or duplicate mutant id ${x.id}`);
     ids.add(x.id);
-    if (!x.plan_row || !x.reason || !x.reproduction) bad(`${x.id}: a mutant that is not run needs its plan row, reason and reproduction`);
+    if (!x.plan_row || !x.reason || !x.reproduction || !x.coverage_gap) bad(`${x.id}: a mutant that is not run needs its plan row, reason, reproduction and coverage gap`);
   }
   for (const x of m.mutants) {
     checkPatch(x);

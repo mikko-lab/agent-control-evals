@@ -844,7 +844,7 @@ Lineage snapshots carry no timestamps. Additional fields are refused.
 **Profile `acs-guardrail-demo-ef775db/revocation-0.4.0/4`** binds observation format 3. It declares `supported.lifecycle`: `initial_pending_authority`, `approve`, `issue`, `single_use_permit`. The classifier reads these capability rules from the profile, besides the revoke scopes. A profile declares lifecycle rules exactly when it binds format 3.
 - **Coverage: 23 IN_PROFILE / 4 OUT_OF_SCOPE.** The cases that move in are `pending-approval`, `issue-after-cut`, `fresh-id-retry-unused-permit`, `derived-authority`, `permit-single-use` and `approval-before-cut`. The four that stay out need G5 or G6.
 - **K = 57 unassessed finish/seal decisions.**
-- **27 newly assessed decisions.** The plan's §6 says 28, but its per-case ranges give 27. In `approval-before-cut`, step 5 is a finish, which is K, so 6 of its 8 decisions are assessed. In all, the six cases have 41 decisions, 14 of them K.
+- **27 newly assessed decisions** (plan §6, corrected from 28). In `approval-before-cut`, step 5 is a finish, which is K, so 6 of its 8 decisions are assessed. In all, the six cases have 41 decisions, 14 of them K. The coverage target is unchanged: neither the corpus nor the oracle changes.
 - **Removed caveats.** The family caveats of `issued-permit`, `cut-before-start` and `duplicate-revocation` ("no permit object") are removed: their authorities now start with a real, unused permit.
 - **Design fences.** The only fence still uncovered is "execution identity".
 
@@ -868,7 +868,9 @@ Lineage snapshots carry no timestamps. Additional fields are refused.
 
 **Masked mutants.** A mutant that changes a check no case can reach under the pinned mode is pinned as `masked`. Its whole run must equal the control: the exit, every case's evidence and the diagnostics. It is a recorded gap, never a detection. A masked run that differs is a technical failure.
 
-**Mutants not run.** `not_run` lists a plan mutant with a recorded conflict and its reproduction. It is never evidence. This is M25 (§14.9).
+**Mutants not run.** `not_run` lists a plan mutant with a recorded conflict, its reproduction and the coverage gap it leaves. It is never evidence. This is M25 (§14.9).
+
+**Named mechanisms.** A mutant id is `M<n>`, or `M<n>-<name>` for a separately authorized mechanism. `M25-overreach` (§14.9) is such a mechanism: a new mutant, not a variant of M25.
 
 **Gate regressions.** G1–G5 are unchanged. G6–G8 are new:
 
@@ -902,4 +904,14 @@ AR1–AR4 (plan §7.6) are tests in `test/revocation/runtime-permit.test.ts`. Th
 | AR3 | `approval-before-cut` with `approved_seq` ≤ `baseline_seq` | inconsistent state evidence, `approval_granted@0` unconfirmed, UNASSESSABLE, never PASS |
 | AR4 | `issue-after-cut` with the permit first shown at the revoke step | `lifecycle_transition_mismatch` |
 
-**M25 is not run.** The plan's M25 is an over-fencing control: issue requires `pending` instead of `approved`. Its patch also denies the setup issue of every `initial: issued` authority (`not_approved`). Every case with such an authority then fails its setup (`setup_failed`), so the whole mutant run is a technical failure, never a detection. Choosing another over-fencing mutant would deviate from the approved plan. The conflict and its reproduction are recorded in the manifest's `not_run` and in the pin review, and nothing replaces M25 until a decision is made.
+**M25 is not run (decided).** The plan's M25 is an over-fencing control: issue requires `pending` instead of `approved`. Its patch also denies the setup issue of every `initial: issued` authority (`not_approved`). Every case with such an authority then fails its setup (`setup_failed`), so the whole mutant run is a technical failure, never a detection.
+- A setup failure is never accepted as a safety finding.
+- A mutant is never switched off for the setup.
+- M25 stays under `not_run`, with its reproduction.
+- **Coverage gap.** The loss of the issue state requirement has no eval mutant evidence. The requirement itself is still observed (for example, `pending-approval` step 2), and the runtime-own test L10 asserts it.
+
+**`M25-overreach` (separately authorized).** It changes the issue fence only: a session revocation of another session of the same tenant also covers the issued lineage.
+- **Witness:** S11 step 5. The uncovered authority `b` (`t1`, `s2`) is issued after the session (`t1`, `s1`) is revoked: ALLOW in the control, DENY under the mutant.
+- **Setup.** It runs unchanged runtime API calls; no revocation precedes it.
+- **Evidence kind:** unjustified denial at a check point of the lifecycle right to a permit (availability). It is never containment.
+- It is a new mechanism. It is neither evidence of the original M25 property nor a variant of the M25 patch.

@@ -108,18 +108,27 @@ Every existing patch was run against `ef775db` in permit mode, with the whole pr
 |---|---|
 | M1–M7, M10, M11, M15, M16, M21, M28, M29, M35–M37 | **Same witness, identical values** (verdict, findings, incompleteness, errors, exit, `has_confirmed_violation`) |
 | M10 | Same witness values. Its predeclared barrier timeouts change from 24 to 29: the moved cases `approval-before-cut`@5 and `permit-single-use`@4, the new S11–S13 (step 8), and S2's re-mapped finish (step 3 instead of 1). They are pinned case by case. |
-| **M8, M9, M20, M22, M26, M34** | **Masked: no case changes.** They remove or weaken checks on the legacy paths (`resolveApproval()`, the start inside `process()`, and the `#denyIfRevoked` stage checks), which permit mode reaches only at setup, before any revocation. M9's request- and start-stage checks are masked by the kept lineage fences (plan §8.1, M49). They are pinned as `masked`: their whole run must equal the control, they are never a detection, and their earlier witnesses are recorded. The permit-mode counterparts are witnessed: M12 and M50 (approval fence), M13 and M52 (issue fence), M49 and M51 (start path); also the runtime-own lifecycle gate. |
+| **M8, M9, M20, M22, M26, M34** | **Masked: no case changes. They are not detected mutants; their earlier legacy-path witnesses (at `a9deab6`) stay historical evidence.** They remove or weaken checks on the legacy paths (`resolveApproval()`, the start inside `process()`, and the `#denyIfRevoked` stage checks), which permit mode reaches only at setup, before any revocation. M9's request- and start-stage checks are masked by the kept lineage fences (plan §8.1, M49). They are pinned as `masked`: their whole run must equal the control, they are never a detection, and their earlier witnesses are recorded. The permit-mode counterparts are witnessed: M12 and M50 (approval fence), M13 and M52 (issue fence), M49 and M51 (start path); also the runtime-own lifecycle gate. |
 | AM1–AM13 | Re-verified against the real build in permit mode (AM3 on `sibling-isolation`, AM5 on S4 and M10, AM10 on M11, AM11–AM13 as before) |
 
 ## 6. Deviations from the plan and refinements
 
-- **M25 is not run (conflict, reported before any substitute).**
+- **M25 is not run (conflict reported before any substitute; decided).**
   - **The plan.** M25 is an over-fencing control: "the issue state check requires `pending` instead of `approved`", with its witness at `approval-before-cut` step 1.
   - **The conflict.** The plan's own setup (§7.2, D2) creates every `initial: issued` authority through `approve()` and `issuePermit()`. The patch therefore also denies those setup issues (`not_approved`). Every case with such an authority fails its setup, which is a harness process error that no manifest entry may predeclare.
   - **Reproduction.** Precheck of `mutations/revocation/M25-issue-requires-pending-over-fencing.patch`: 19 corpus and 9 supplement cases report `setup_failed` ("setup approve and issue of a's lineage failed: Lifecycle issue denied: not_approved [lineage-1]") and HARNESS_ERROR `identity_mapping_invalid`, because no setup baseline was taken. The witness alone would show `false_deny@1`, `missing_permit_issued@1` and more. The whole run is a technical failure.
-  - **Status.** The manifest records M25 under `not_run` with this reproduction. The patch file is kept for it, and nothing replaces M25.
-  - **A possible substitute, for decision.** An over-reach mutant at the issue fence. For example, a session revocation also covers the other sessions of its tenant when the permit is issued. It would be witnessed by S11 step 5 (`false_deny@5`, `missing_permit_issued@5`, availability), and the setup would not touch it.
-- **27 newly assessed decisions, not 28.** Plan §6 counts step range 0–6 for `approval-before-cut`, but its step 5 is a finish (K). The six moved cases have 41 decisions, 14 of them K.
+  - **Decision.** M25 stays under `not_run` with this reproduction; the patch file is kept for it.
+    - A setup failure is never accepted as a safety finding.
+    - The mutant is never switched off for the setup.
+    - The loss of the issue state requirement is recorded as a **coverage gap**: it has no eval mutant evidence. The requirement itself is still observed: `pending-approval` step 2, and the runtime-own test L10.
+  - **`M25-overreach` (separately authorized).** A new mechanism:
+    - only the issue fence changes: a session revocation of another session of the same tenant also covers the issued lineage;
+    - witness: S11 step 5 (ALLOW in the control, DENY under the mutant);
+    - the setup runs unchanged runtime API calls;
+    - evidence kind: an unjustified denial at a check point of the lifecycle right (availability), never containment.
+
+    It is neither evidence of the original M25 property nor a variant of the M25 patch. Its precheck values are in §5a.
+- **27 newly assessed decisions, not 28 (decision: corrected in the plan).** The earlier plan §6 counted step range 0–6 for `approval-before-cut`, but its step 5 is a finish (K). The six moved cases have 41 decisions, 14 of them K. The plan and every reference now say 27. The coverage target is unchanged (23/27, K = 57, exit 3), and the corpus and the oracle are unchanged.
 - **M14's witness exceeds the plan's minimum.** The patched runtime consumes a permit that was never issued: `permit_state` goes `none → consumed`, with no `issued_seq`.
   - By the §7.1 rule this is contradictory permit evidence. The expected `permit_issued@2` stays unconfirmed, and the run exits 2.
   - The witness also shows `false_deny@2`: the issue is denied because the lineage is consumed. It also shows the started execution's unexpected terminal.
@@ -137,7 +146,7 @@ Every existing patch was run against `ef775db` in permit mode, with the whole pr
 
 - **Declared profile.** Exit 3 is never a contract pass. 4 corpus cases (G5, G6) and 57 finish/seal decisions stay unassessed.
 - **Masked mutants.** In permit mode, six existing mutants (M8, M9, M20, M22, M26, M34) are recorded gaps of the eval gate. Their checks remain covered by the runtime-own tenant and ancestor gates, and their permit-mode counterparts by M12, M13 and M49–M52.
-- **M25** has no replacement until it is decided (§6).
+- **M25:** the loss of the issue state requirement has no eval mutant evidence (coverage gap, §6). `M25-overreach` is a separate mechanism and does not close this gap.
 - **Runtime-own gaps**, from the lock and the lifecycle gate report:
   - M55, M56 and M71 are component evidence only;
   - M70 at approve and issue is masked;
