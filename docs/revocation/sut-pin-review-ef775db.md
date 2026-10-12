@@ -37,6 +37,8 @@ The `a9deab6` and `a682e44` locks are kept in `profiles/revocation/history/`, ea
 
 ## 2. Baseline at the pin
 
+*Observed in the integration runs before the final head. These are the values the final validation must reproduce; its confirmed results are recorded per §7.*
+
 - **Adapter run.** `run-adapter --verify-baseline` reproduced the SUT baseline (33 suites / 774 tests) and verified the tag.
 - **Corpus.** **23/23 IN_PROFILE PASS**; 4 OUT_OF_SCOPE without verdict: `late-commit-after-terminal` and `cancel-is-not-rollback` (G6), `retry-after-revocation` (G5b), `execution-id-reuse` (G5a, G5b). Corpus coverage is 23/27.
 - **Unassessed finish/seal decisions: 57.** The six moved cases add 14 (2, 2, 3, 2, 3, 2). A test checks this against the profile and the classifier.
@@ -94,11 +96,13 @@ Within the gates, the evidence parts are reported separately and never merged:
 - **Containment and signal:** M6, M14, M24, M49 and M51. A tool that must not run did run, and its execution also ended with an unexpected terminal.
 - **Lifecycle only:** M12, M13, M50 and M52. The later fences still deny the start, and this is observed in the same witness (decision DENY, no tool call).
 
-## 4a. Gate results
+## 4a. Gate expectations (pinned values)
 
-Bound to the final committed head named in the pull request; §7 lists the runs. The mutant manifest is `mutations/revocation/manifest.json`, SHA-256 `29cd7ef3d0688040a18574990aef9fa3ab177f6d26edaeab0b60185996bd17c3`. It was committed before the final gate run.
+**This section states expected values, not results.** They are the values the lock and the mutant manifest pin, and every gate run must reproduce them exactly. Whether the final run on the final committed head did so is recorded separately (§7): a document cannot record a run of the commit that contains it.
 
-**Eval mutant gate** (`mutants --lock --profile`):
+The mutant manifest is `mutations/revocation/manifest.json`, SHA-256 `29cd7ef3d0688040a18574990aef9fa3ab177f6d26edaeab0b60185996bd17c3`. It was committed before any final gate run. Intermediate runs on `0d4d375` and `3bdb879` showed these values; they are not the final evidence.
+
+**Eval mutant gate** (`mutants --lock --profile`), expected:
 - **Control:** exit 3, without any exception.
 - **Detected: 26/26 SUT mutants.** Each matched exactly its manifest values and run exceptions: M4 has 1 predeclared harness error, M10 has 29 predeclared barrier timeouts, the others have none. 0 survived, 0 technical failures.
 - **Masked: 6/6 as pinned** (M8, M9, M20, M22, M26, M34). Each run equals the control. They are recorded gaps, not detections.
@@ -106,7 +110,7 @@ Bound to the final committed head named in the pull request; §7 lists the runs.
 - **Adapter mutants: AM1–AM19, 19/19 detected.**
 - Gate exit 0.
 
-| Evidence part | Mutants (detected) |
+| Evidence part | Mutants (expected detections) |
 |---|---|
 | Containment | M2, M3, M4, M6, M15, M21, M28, M35, M14, M24, M49, M51 |
 | Lifecycle | M12, M13, M50, M52 |
@@ -125,15 +129,15 @@ A mutant whose witness shows several parts is listed under each, and the parts a
 | M25-overreach | S11 | 2 | confirmed VIOLATION; the only incompleteness is the pinned missing evidence `terminal evidence missing for e2 in window 8..9` (e2 is never started). The findings `false_deny@5`, `missing_permit_issued@5`, `false_deny@6` and `missing_execution_started@6` are retained. No harness error, no barrier timeout, no other changed case. |
 | M1, M4, M7, M10, M16, M37 | unchanged from the earlier pin | 2 | unchanged reasons (pin review a9deab6 §5) |
 
-**Gate regressions G1–G8** (real pinned runtime): all as required.
+**Gate regressions G1–G8** (real pinned runtime), required results:
 - G1, G5: detected, exit 0.
 - G6: masked, exit 0.
 - G2, G3, G4, G7 and G8: technical failure, exit 2, each with its required reason.
 
-**Evaluator regressions** (0.3.0 step path): all four regression mutants caught; control 135/135, self-test exit 0.
+**Evaluator regressions** (0.3.0 step path), required: all four regression mutants caught, the control passing and the self-test exit 0.
 
-**Runtime-own gates** (`runtime-gates --lock`, every pinned gate), compared with the lock:
-- tenant 19/19 and ancestor 25/25, with the four evidence kinds of the lock. The v0.6.0 driver also reports the lifecycle and availability kinds for these gates. They are accepted only when empty (`evidenceKindIssues`, with a regression test), and they are empty.
+**Runtime-own gates** (`runtime-gates --lock`, every pinned gate), expected as pinned in the lock:
+- tenant 19/19 and ancestor 25/25, with the four evidence kinds of the lock. The v0.6.0 driver also reports the lifecycle and availability kinds for these gates. They are accepted only when empty (`evidenceKindIssues`, with a regression test).
 - lifecycle 26/26 with the lock's eight kind lists, counts, variants, entries beyond their kind and recorded gaps;
 - R1–R4 and RL1–RL24 with their pinned exits;
 - witness determinism: three identical runs.
@@ -141,6 +145,8 @@ A mutant whose witness shows several parts is listed under each, and the parts a
 These results are runtime-own evidence and are reported apart from the eval gate.
 
 ## 5. Re-verification of the existing mutants under permit mode
+
+*Precheck observations: they were made before the manifest was pinned, and the manifest pins them. The final gate run must reproduce them (§7).*
 
 Every existing patch was run against `ef775db` in permit mode, with the whole profile and supplement, and compared case by case with the control. Applying the patch was not taken as evidence.
 - **Eval-side patches.** They were regenerated against `ef775db`: the same changed lines, with the hunk offsets and index lines of the new tree.
@@ -195,14 +201,18 @@ The manifest pins exactly these values and no run exceptions.
 
 ## 7. Final validation
 
-Every run below was made on the final committed head with a clean worktree. The pull request names that head; the runs on earlier heads, `0d4d375` and `3bdb879`, are intermediate results.
-- `npm run build`, `npm run typecheck`, `npm run check:oracle-boundary` (no violations) and `npm test` (every test passes; the skipped tests are the pinned-SUT tests, which need a prepared runtime and run separately).
-- Pinned-SUT tests (`runtime-sut.test.ts` with `ACE_REVOCATION_WORK`): 7/7, 0 skipped.
-- Two clean `run-adapter --verify-baseline` runs: exit 3, `diff -r` identical, and observations equal to the committed fixture.
-- Recorded re-evaluation: byte-identical evidence, supplement evidence and observations, exit 3.
-- Earlier pins re-evaluated under their historical locks: `a9deab6` 17/17 (K = 43) and `a682e44` 14/14, both exit 3.
-- Eval mutant gate, gate regressions G1–G8, evaluator regressions and the runtime-own gates: §4a.
-- CI on Node 22 and 24 runs the same steps on the pushed head.
+**Procedure.** The final validation runs on the final committed head, with a clean worktree, in two parts. Each run must show the stated result:
+- **Part 1 (harness):**
+  - `npm run build`, `npm run typecheck`, `npm run check:oracle-boundary` (no violations) and `npm test` (no failure; the skipped tests are the pinned-SUT tests, run separately);
+  - the pinned-SUT tests (`runtime-sut.test.ts` with `ACE_REVOCATION_WORK`): no failure and **no skip**;
+  - two clean `run-adapter --verify-baseline` runs: exit 3, `diff -r` identical, and observations equal to the committed fixture;
+  - recorded re-evaluation: byte-identical evidence, supplement evidence and observations, exit 3;
+  - the earlier pins under their historical locks: `a9deab6` 17/17 (K = 43) and `a682e44` 14/14, both exit 3;
+  - the eval mutant gate (§4a, exit 0), gate regressions G1–G8 (runner exit 0) and evaluator regressions (exit 0).
+- **Part 2 (runtime-own):** `runtime-gates` with every pinned gate (§4a, exit 0).
+- **CI** on Node 22 and 24 runs the same steps on the pushed head.
+
+**Confirmed results.** The confirmed results of the final head are recorded in the pull request, mikko-lab/agent-control-evals#17. They give the commit SHA, the exit of every run and the evidence values, and they rest on the run outputs (reports and SHA-256 of the manifests). They are not restated here, because this file is part of the commit they validate.
 
 ## 8. Open risks and limits
 
