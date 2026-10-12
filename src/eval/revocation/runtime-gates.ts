@@ -72,10 +72,7 @@ function checkGate(name: string, gate: RuntimeTestGate, dir: string): GateOutcom
   if (r.status === 2 || sum.technical_failures !== 0) issues.push(`runtime gate reports ${sum.technical_failures} technical failures (exit ${r.status})`);
   for (const k of KINDS) if (canonicalJson(sorted(sum.evidence?.[k] ?? [])) !== canonicalJson(sorted(gate.evidence[k] ?? []))) issues.push(`${k} evidence ${JSON.stringify(sum.evidence?.[k] ?? null)} != lock ${JSON.stringify(gate.evidence[k])}`);
   if (canonicalJson(sum.recorded_gaps ?? null) !== canonicalJson(gate.recorded_gaps)) issues.push(`recorded gaps ${JSON.stringify(sum.recorded_gaps ?? null)} != lock ${JSON.stringify(gate.recorded_gaps)}`);
-  // The shared gate driver reports every kind it knows; a kind outside this gate's own kinds must be empty.
-  const evidenceKeys = Object.keys(sum.evidence ?? {}).sort();
-  for (const k of KINDS) if (!evidenceKeys.includes(k)) issues.push(`report evidence kind ${k} missing`);
-  for (const k of evidenceKeys) if (!(KINDS as readonly string[]).includes(k) && (!(LIFECYCLE_GATE_KINDS as readonly string[]).includes(k) || (sum.evidence[k] ?? []).length)) issues.push(`report evidence kind ${k} outside this gate's kinds is not empty or unknown: ${JSON.stringify(sum.evidence[k])}`);
+  issues.push(...evidenceKindIssues(name, sum.evidence));
   if (name === 'lifecycle') {
     if (canonicalJson(sum.counts ?? null) !== canonicalJson(gate.counts ?? null)) issues.push(`counts ${JSON.stringify(sum.counts ?? null)} != lock ${JSON.stringify(gate.counts ?? null)}`);
     if (canonicalJson(sum.variants ?? null) !== canonicalJson(gate.variants ?? null)) issues.push(`variants ${JSON.stringify(sum.variants ?? null)} != lock ${JSON.stringify(gate.variants ?? null)}`);
@@ -102,6 +99,25 @@ function checkGate(name: string, gate: RuntimeTestGate, dir: string): GateOutcom
     ...(name === 'lifecycle' ? { counts: sum.counts, variants: sum.variants, observed_beyond_kind: sum.observed_beyond_kind } : {}),
     recorded_gaps: sum.recorded_gaps,
   };
+}
+
+/**
+ * The evidence kinds of a runtime gate report. The shared gate driver of the pinned runtime reports every kind it
+ * knows, for every gate: each of the gate's own kinds must be present, and a known kind outside them (the lifecycle
+ * and availability kinds in a tenant or ancestor report) is accepted only when its list is empty. An unknown kind, or
+ * a non-empty one outside the gate's kinds, is a technical issue.
+ */
+export function evidenceKindIssues(gate: string, evidence: Record<string, unknown> | undefined): string[] {
+  const own: readonly string[] = gate === 'lifecycle' ? LIFECYCLE_GATE_KINDS : GATE_KINDS;
+  const keys = Object.keys(evidence ?? {}).sort();
+  const issues: string[] = [];
+  for (const k of own) if (!keys.includes(k)) issues.push(`report evidence kind ${k} missing`);
+  for (const k of keys) {
+    if (own.includes(k)) continue;
+    const list = evidence![k];
+    if (!(LIFECYCLE_GATE_KINDS as readonly string[]).includes(k) || !Array.isArray(list) || list.length) issues.push(`report evidence kind ${k} outside this gate's kinds is not empty or unknown: ${JSON.stringify(list)}`);
+  }
+  return issues;
 }
 
 /** Runs a gate-regression script and compares each case's gate exit with the lock (an R or RL case id). */

@@ -24,6 +24,7 @@ import { runtimeObservationIssues, validateProfileReport } from '../../src/repor
 import { identityFor } from '../../src/adapter/revocation-runtime/runner';
 import { editProbes, probeIndex, rereport } from '../../src/mutation/revocation/adapter-mutants';
 import { decisionFromCall, derive, lifecycleTransitions } from '../../src/spec/revocation/runtime-observation';
+import { evidenceKindIssues } from '../../src/eval/revocation/runtime-gates';
 import { loadRevocationLock, RevocationLockError } from '../../src/sut/revocation-lock';
 import { classifyMaskedRun, classifyMutantRun, loadMutantManifest, MUTANT_MANIFEST, MutantManifestError, RevocationMutant, RunFacts, unexpectedTechnical, witnessParts } from '../../src/mutation/revocation/mutants';
 import { canonicalJsonLines } from '../../src/util/canonical-json';
@@ -496,4 +497,22 @@ test('mutant gate classification: whole run first, exceptions only as predeclare
   assert.deepEqual(witnessParts({ verdict: 'VIOLATION', decision_findings: [{ reason: 'false_deny', step: 1 }], effect_findings: [{ reason: 'missing_permit_issued', step: 1 }] }), ['availability']);
   assert.deepEqual(witnessParts({ verdict: 'VIOLATION', decision_findings: [{ reason: 'false_allow', step: 1 }], effect_findings: [] }), ['check_point']);
   assert.deepEqual(witnessParts({ verdict: 'UNASSESSABLE', decision_findings: [], effect_findings: [] }), ['missing_evidence']);
+});
+
+test('runtime gate reports: a kind outside the gate\'s own is accepted only when empty; own kinds are required', () => {
+  const g = lock.runtime_test_gates!;
+  const empty = { lifecycle_effect: [], check_and_lifecycle: [], availability_effect: [], check_and_availability: [] };
+  // The v0.6.0 driver reports all eight kinds for the tenant and ancestor gates, the lifecycle ones empty.
+  for (const gate of ['tenant', 'ancestor'] as const) {
+    const evidence = { ...g[gate].evidence, ...empty };
+    assert.deepEqual(evidenceKindIssues(gate, evidence), [], gate);
+    assert.deepEqual(evidenceKindIssues(gate, g[gate].evidence), [], `${gate}: the four kinds alone`);
+    assert.match(evidenceKindIssues(gate, { ...evidence, check_and_lifecycle: ['M15'] }).join(), /check_and_lifecycle outside this gate's kinds is not empty/);
+    assert.match(evidenceKindIssues(gate, { ...evidence, invented_kind: [] }).join(), /invented_kind outside this gate's kinds/);
+    const { both: _both, ...withoutBoth } = evidence;
+    assert.match(evidenceKindIssues(gate, withoutBoth).join(), /kind both missing/);
+  }
+  assert.deepEqual(evidenceKindIssues('lifecycle', g.lifecycle!.evidence), []);
+  const { check_and_availability: _a, ...noAvailability } = g.lifecycle!.evidence;
+  assert.match(evidenceKindIssues('lifecycle', noAvailability).join(), /kind check_and_availability missing/);
 });
