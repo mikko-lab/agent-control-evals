@@ -1,8 +1,8 @@
 diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
-index 7a08afb..eef91d1 100644
+index f53ffcf..d1b88fa 100644
 --- a/src/guarded-executor.ts
 +++ b/src/guarded-executor.ts
-@@ -941,7 +941,7 @@ export class GuardedExecutor {
+@@ -1036,7 +1036,7 @@ export class GuardedExecutor<M extends LifecycleMode = "legacy"> {
      // re-entrant calls are contained per execution and cannot undo the revocation.
      for (const execution of [...this.#executions.values()]) {
        if (!execution.terminal && !execution.cancellationRequested && covered(execution.sessionId, execution.capabilityId, execution.tenantId, execution.ancestorIds)) {

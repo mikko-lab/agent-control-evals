@@ -1,8 +1,8 @@
 diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
-index 7a08afb..f026052 100644
+index f53ffcf..dfae5da 100644
 --- a/src/guarded-executor.ts
 +++ b/src/guarded-executor.ts
-@@ -521,7 +521,7 @@ export class GuardedExecutor {
+@@ -595,7 +595,7 @@ export class GuardedExecutor<M extends LifecycleMode = "legacy"> {
        ancestor_capability_ids: authority.ancestorIds,
        tool: payload.tool.name,
      }, { request_id_ref: requestIdRef, boundary: "result_processing" });
@@ -11,7 +11,7 @@ index 7a08afb..f026052 100644
  
      // Records the runtime's delivery decision. It is decision evidence, not proof of hand-over: a revocation
      // that takes effect after this record (including from within it) is still enforced by #handOver().
-@@ -543,7 +543,7 @@ export class GuardedExecutor {
+@@ -617,7 +617,7 @@ export class GuardedExecutor<M extends LifecycleMode = "legacy"> {
        ancestor_capability_ids: outcome.authority.ancestorIds,
        tool: outcome.result.tool.name,
      }, { request_id_ref: outcome.requestIdRef, boundary: "api_return" });

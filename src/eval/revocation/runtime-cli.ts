@@ -26,7 +26,7 @@ import { controlSteps, loadProfile, loadSupplement, Profile, Supplement, Supplem
 import { buildProfileReport, ObservationSource, profileExitCode, profileSummary, ProfileReport } from '../../report/revocation/profile-report';
 import { validateProfileReport } from '../../report/revocation/validate';
 import { observationsOf, runProfile } from './runtime-run';
-import { classifyMutantRun, loadMutantManifest, MUTANT_MANIFEST, RunFacts, runBarrierTimeouts, runHarnessErrors, unexpectedTechnical } from '../../mutation/revocation/mutants';
+import { classifyMaskedRun, classifyMutantRun, EVIDENCE_PARTS, loadMutantManifest, MUTANT_MANIFEST, RunFacts, runBarrierTimeouts, runHarnessErrors, unexpectedTechnical } from '../../mutation/revocation/mutants';
 import { adapterMutantChecks } from '../../mutation/revocation/adapter-mutants';
 import { applyInjections, InjectionInput } from '../../mutation/revocation/gate-injection';
 
@@ -224,12 +224,14 @@ async function mutants(args: string[]): Promise<number> {
   const { manifest: mm, sha256: manifestSha256 } = loadMutantManifest(s.root, s.lock, VERSION);
   const only = s.options.get('--only')?.split(',');
   const selected = mm.mutants.filter(m => !only || only.includes(m.id));
-  if (only && selected.length !== only.length) throw new Error('--only names an unknown mutant');
+  const selectedMasked = mm.masked.filter(m => !only || only.includes(m.id));
+  if (only && selected.length + selectedMasked.length !== only.length) throw new Error('--only names an unknown mutant');
   // A gate regression input: edits applied to exactly one selected mutant's observations. Never evidence.
   const injectPath = s.options.get('--inject');
   const injectRaw = injectPath ? readFileSync(resolve(injectPath)) : null;
   const injection = injectRaw ? JSON.parse(injectRaw.toString('utf8')) as InjectionInput : null;
-  if (injection && (selected.length !== 1 || injection.mutant !== selected[0].id || !Array.isArray(injection.injections))) throw new Error('--inject needs --only with exactly the one mutant the injection names');
+  const injected = [...selected, ...selectedMasked];
+  if (injection && (injected.length !== 1 || injection.mutant !== injected[0].id || !Array.isArray(injection.injections))) throw new Error('--inject needs --only with exactly the one mutant the injection names');
   const { files, write } = writer(s.out);
   const baseline = prepareRevocationEnv(s.lock, 'baseline', { workDir: s.work, harnessRoot: s.root, sourceOverride: s.sourceOverride });
   const baseRun = await runProfile(baseline.build, s.cases, s.truths, s.profile, s.supplement);
@@ -265,28 +267,46 @@ async function mutants(args: string[]): Promise<number> {
     results.push({ id: m.id, description: m.description, patch: m.patch, patch_sha256: m.patch_sha256, source: m.source, target: m.target, typechecked: true, build_sha256: env.build_sha256, evidence_kind: m.evidence_kind, witness: m.witness, run_exceptions: m.run_exceptions,
       exit, verdict: e?.verdict ?? null, decision_findings: e?.decision_findings ?? [], effect_findings: e?.effect_findings ?? [], incomplete: e?.incomplete ?? [], errors: e?.errors.map(x => x.code) ?? [],
       run_harness_errors: runHarnessErrors(facts), run_barrier_timeouts: runBarrierTimeouts(facts),
+      parts: m.parts, ...(m.plan_kind ? { plan_kind: m.plan_kind, kind_note: m.kind_note } : {}),
       outcome, detected: outcome === 'detected', technical, failures, run_confirmed_violation: report.has_confirmed_violation, other_changed_cases: changed });
   }
+  // Masked mutants: the whole run must equal the control; a recorded gap, never a detection.
+  const masked: Record<string, unknown>[] = [];
+  for (const m of control.length ? [] : selectedMasked) {
+    const env = prepareRevocationEnv(s.lock, m.id, { workDir: s.work, harnessRoot: s.root, sourceOverride: s.sourceOverride, patch: { file: join(s.root, 'mutations/revocation', m.patch), target: m.target } });
+    const run = await runProfile(env.build, s.cases, s.truths, s.profile, s.supplement);
+    const observed = injection ? applyInjections(observationsOf(run), injection.injections) : observationsOf(run);
+    const evaluated = evaluateRecorded(s, observed);
+    const report = reportOf(s, env, evaluated, 'pinned_runtime_adapter');
+    bundle(write, `masked/${m.id}/`, evaluated.observations, report);
+    const { outcome, differences } = classifyMaskedRun(factsOf(evaluated, observed, report), baseFacts);
+    masked.push({ id: m.id, description: m.description, patch: m.patch, patch_sha256: m.patch_sha256, source: m.source, target: m.target, typechecked: true, build_sha256: env.build_sha256, reason: m.reason, previous_witness: m.previous_witness, exit: profileExitCode(report), outcome, technical: outcome === 'masked' ? [] : differences, differences });
+  }
   const adapter = only || control.length ? [] : await adapterMutantChecks(builds, s.cases, s.truths, s.profile, s.supplement, mm);
-  const technical = control.length > 0 || results.some(r => r.outcome === 'technical_failure');
+  const technical = control.length > 0 || results.some(r => r.outcome === 'technical_failure') || masked.some(r => r.outcome !== 'masked');
   const gate = !technical && results.every(r => r.detected) && adapter.every(a => a.detected);
   const kinds = (k: string) => results.filter(r => r.detected && r.evidence_kind === k).map(r => r.id as string);
+  const parts = Object.fromEntries(EVIDENCE_PARTS.map(p => [p, results.filter(r => r.detected && (r.parts as string[]).includes(p)).map(r => r.id as string)]));
   write('mutants.json', canonicalJson({
     version: VERSION, mutant_manifest: { path: MUTANT_MANIFEST, sha256: manifestSha256 },
     ...(injection ? { gate_regression_injection: { file: injectPath, sha256: sha256Hex(injectRaw!), injections: injection.injections, note: 'Gate regression input: the mutant run was edited before evaluation. Never evidence.' } } : {}),
     baseline: { exit: baseExit, counts: baseReport.counts, supplement_acceptance_passed: baseReport.supplement_acceptance_passed, control_failures: control },
-    sut_mutants: results, adapter_mutants: adapter,
+    sut_mutants: results, masked_mutants: masked, not_run: mm.not_run, adapter_mutants: adapter,
     summary: {
       detected: results.filter(r => r.detected).length, survived: results.filter(r => r.outcome === 'survived').length, technical_failures: results.filter(r => r.outcome === 'technical_failure').length,
       corpus_witness: results.filter(r => r.detected && (r.witness as { set: string }).set === 'corpus').map(r => r.id), supplement_witness: results.filter(r => r.detected && (r.witness as { set: string }).set === 'supplement').map(r => r.id),
       evidence: { decision_and_effect: kinds('decision_and_effect'), effect: kinds('effect'), missing_evidence: kinds('missing_evidence') },
+      // Reported apart, never merged; a mutant whose witness shows several parts is listed under each.
+      containment_evidence: parts.containment, lifecycle_evidence: parts.lifecycle, availability_evidence: parts.availability, signal_evidence: parts.signal, check_point_evidence: parts.check_point, missing_evidence: parts.missing_evidence,
+      component_evidence: [],
+      masked: masked.filter(r => r.outcome === 'masked').map(r => r.id), not_run: mm.not_run.map(x => x.id),
       adapter_detected: adapter.filter(a => a.detected).map(a => a.id),
     },
     gate_passed: gate,
-    note: 'Patches, witnesses, exact values, exit codes and evidence kinds are fixed before the run in the golden-hashed mutations/revocation/manifest.json. A patch that does not apply, changes another file or does not typecheck aborts the gate as a technical failure. Each whole mutant run is checked for technical errors before it is classified: a harness process error, or any harness error or barrier timeout in any case beyond the run exceptions its manifest entry predeclares case by case, is a technical failure (exit 2), and so is a witness value that is neither the control\'s nor the manifest\'s. None of these is ever counted as a kill. other_changed_cases describe the run and never count.',
+    note: 'Patches, witnesses, exact values, exit codes and evidence kinds are fixed before the run in the golden-hashed mutations/revocation/manifest.json. A patch that does not apply, changes another file or does not typecheck aborts the gate as a technical failure. Each whole mutant run is checked for technical errors before it is classified: a harness process error, or any harness error or barrier timeout in any case beyond the run exceptions its manifest entry predeclares case by case, is a technical failure (exit 2), and so is a witness value that is neither the control\'s nor the manifest\'s. None of these is ever counted as a kill. other_changed_cases describe the run and never count. A masked mutant (no case can show its change under the pinned runtime mode) must give a run equal to the control; it is a recorded gap, never a detection, and a run that differs is a technical failure. not_run lists plan mutants with a recorded conflict; they are never evidence. Evidence parts (containment, lifecycle, availability, signal, check point, missing evidence) are derived from each witness\'s pinned values and reported apart; the eval gate has no component evidence.',
   }) + '\n');
   writeFileSync(join(s.out, 'manifest.json'), manifest(s, baseline, files, { mutant_manifest: { path: MUTANT_MANIFEST, sha256: manifestSha256 }, mutant_patches: mm.mutants.map(m => ({ id: m.id, patch: m.patch, sha256: m.patch_sha256 })) }));
-  console.log(canonicalJson({ baseline_exit: baseExit, control_failures: control, sut_mutants: results.map(r => ({ id: r.id, outcome: r.outcome, exit: r.exit })), adapter_mutants: adapter.map(a => ({ id: a.id, detected: a.detected })), gate_passed: gate }));
+  console.log(canonicalJson({ baseline_exit: baseExit, control_failures: control, sut_mutants: results.map(r => ({ id: r.id, outcome: r.outcome, exit: r.exit })), masked_mutants: masked.map(r => ({ id: r.id, outcome: r.outcome })), adapter_mutants: adapter.map(a => ({ id: a.id, detected: a.detected })), gate_passed: gate }));
   return technical ? 2 : gate ? 0 : 1;
 }
 

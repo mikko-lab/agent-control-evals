@@ -19,7 +19,7 @@ export function observationIssues(value: unknown): { path: string; message: stri
 }
 /**
  * Schema issues of a revocation-0.4.0 pinned-runtime-adapter observation (with provenance, seq, probes and calls).
- * An observation that declares format 2 is checked against revision 2; any other against the unchanged revision 1.
+ * An observation that declares format 3 or 2 is checked against that revision; any other against the unchanged revision 1.
  */
 export function runtimeObservationIssues(value: unknown): { path: string; message: string }[] {
   const format = runtimeObservationFormat(value);

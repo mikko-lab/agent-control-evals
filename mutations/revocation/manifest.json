@@ -1,13 +1,13 @@
 {
-  "manifest": "revocation-sut-mutants/2",
+  "manifest": "revocation-sut-mutants/3",
   "version": "revocation-0.4.0",
   "sut_repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-  "sut_commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
-  "profile": "profiles/revocation/acs-guardrail-demo-a9deab6.profile.json",
-  "supplement": "profiles/revocation/acs-guardrail-demo-a9deab6.supplement.json",
+  "sut_commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
+  "profile": "profiles/revocation/acs-guardrail-demo-ef775db.profile.json",
+  "supplement": "profiles/revocation/acs-guardrail-demo-ef775db.supplement.json",
   "baseline": {
     "exit": 3,
-    "exit_reason": "unmodified runtime: profile and supplement acceptance pass, contract acceptance does not (10 OUT_OF_SCOPE cases, K = 43), so profileExitCode returns 3"
+    "exit_reason": "unmodified runtime: profile and supplement acceptance pass, contract acceptance does not (4 OUT_OF_SCOPE cases, K = 57), so profileExitCode returns 3"
   },
   "match": "exact",
   "evidence_kinds": {
@@ -16,6 +16,15 @@
     "missing_evidence": "the witness case is UNASSESSABLE through missing terminal evidence; no finding is claimed. The barrier timeouts this causes are not exempt as a class: each is predeclared by case and step in run_exceptions"
   },
   "technical_failures": "A patch that does not apply, changes another file than its target, or fails the SUT typecheck or build, a case inventory other than the control's, a harness process error, an uncaught exception or a crash of the gate is a technical failure (exit 2) and never a detection. Each whole mutant run is checked before it is classified: every harness error (any case) and every barrier timeout must be exactly one predeclared in the mutant's run_exceptions, case by case; any other is a technical failure, and a predeclared one that does not occur is no detection.",
+  "evidence_parts": {
+    "containment": "an unexpected start, commit or delivery, or a side effect after the terminal: something ran that must not",
+    "lifecycle": "an unexpected approval_granted or permit_issued: lifecycle state that must not exist; never containment",
+    "availability": "a missing start, commit, delivery, approval or permit: an allowed action that did not happen",
+    "signal": "cancellation and revocation acknowledgements and premature or unexpected terminals",
+    "check_point": "decision findings without any effect finding",
+    "missing_evidence": "no finding; UNASSESSABLE through missing evidence"
+  },
+  "masking": "A masked mutant changes a check that no case can reach under the pinned runtime mode. Its whole run is pinned to equal the control (exit, every case, diagnostics); it is a recorded gap, never a detection, and a run that differs is a technical failure.",
   "mutants": [
     {
       "id": "M1",
@@ -24,6 +33,9 @@
       "description": "#maybeTerminal ignores pending registered work: a premature terminal when the tool function settles.",
       "source": null,
       "evidence_kind": "effect",
+      "parts": [
+        "signal"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "commit-before-cut",
@@ -57,6 +69,9 @@
       "description": "The commit binding check skips deps.revoked().",
       "source": null,
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "start-before-cut",
@@ -92,6 +107,9 @@
       "description": "The commit entry and binding checks ignore the terminal state.",
       "source": null,
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment"
+      ],
       "witness": {
         "set": "supplement",
         "case_id": "sup-commit-after-terminal-no-revocation",
@@ -127,6 +145,9 @@
       "description": "#handOver and the result-processing delivery check skip revocation.",
       "source": null,
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "session-delivery-fence-after-commit",
@@ -160,7 +181,7 @@
         ],
         "barrier_timeouts": []
       },
-      "patch_sha256": "90c300f4cf012e3df941b57572b37a66fe68f39f690162779fc17aab38417beb"
+      "patch_sha256": "ad5c762c200d4cac62d7c57ed87a2d3180440fc721ed5407b0e0a35f66caf14b"
     },
     {
       "id": "M5",
@@ -169,6 +190,9 @@
       "description": "revoke() does not request cancellation of covered executions.",
       "source": null,
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "signal"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "in-flight-before-commit",
@@ -195,7 +219,7 @@
         "harness_errors": [],
         "barrier_timeouts": []
       },
-      "patch_sha256": "3a1b47b1dc8cba39f6a12d6f886e50c92f844db0b3153ae4fa12b39cf8ff9a7a"
+      "patch_sha256": "5ac4ccddb0e90712fb91dc678695421c84ca677f895e6e8ffa47571a93cf83fb"
     },
     {
       "id": "M6",
@@ -204,6 +228,10 @@
       "description": "Session-scope revocation is checked against the capability only.",
       "source": null,
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment",
+        "signal"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "active-session",
@@ -246,7 +274,7 @@
         "harness_errors": [],
         "barrier_timeouts": []
       },
-      "patch_sha256": "a974cb9e549886bd50defa21f2d0e0b3c8f395beca39ff0adad4d4fab5cf90e2"
+      "patch_sha256": "6b9e47038e7e6f2328de6a0dae62ee39afbc846640742ba8d1075b4b7f0a6ba5"
     },
     {
       "id": "M7",
@@ -255,6 +283,9 @@
       "description": "A capability revocation is applied to every capability the runtime instance checks (over-reach).",
       "source": null,
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "availability"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "sibling-isolation",
@@ -302,85 +333,7 @@
         "harness_errors": [],
         "barrier_timeouts": []
       },
-      "patch_sha256": "84b82fb37d1457a95b75d13e0c9999ed620287344c9809dec87ef9bbae3ae60c"
-    },
-    {
-      "id": "M8",
-      "patch": "M8-approval-and-start-stage-checks-removed.patch",
-      "target": "src/guarded-executor.ts",
-      "description": "The approval-stage and start-stage revocation checks are removed (the request-stage check stays).",
-      "source": null,
-      "evidence_kind": "decision_and_effect",
-      "witness": {
-        "set": "supplement",
-        "case_id": "sup-pending-approval-revoked",
-        "verdict": "VIOLATION",
-        "decision_findings": [
-          {
-            "reason": "false_allow",
-            "step": 1
-          }
-        ],
-        "effect_findings": [
-          {
-            "reason": "unexpected_execution_started",
-            "step": 1
-          },
-          {
-            "reason": "unexpected_execution_terminal",
-            "step": 2
-          }
-        ],
-        "incomplete": [],
-        "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
-        "run_confirmed_violation": true
-      },
-      "run_exceptions": {
-        "harness_errors": [],
-        "barrier_timeouts": []
-      },
-      "patch_sha256": "90c2e63383eb2d773cd53d14ecf1fd1e41866d0bd5dd1fdc82b496cd3a3f58ef"
-    },
-    {
-      "id": "M9",
-      "patch": "M9-request-and-start-stage-checks-removed.patch",
-      "target": "src/guarded-executor.ts",
-      "description": "The request-stage and start-stage revocation checks are removed.",
-      "source": null,
-      "evidence_kind": "decision_and_effect",
-      "witness": {
-        "set": "corpus",
-        "case_id": "cut-before-start",
-        "verdict": "VIOLATION",
-        "decision_findings": [
-          {
-            "reason": "false_allow",
-            "step": 1
-          }
-        ],
-        "effect_findings": [
-          {
-            "reason": "unexpected_execution_started",
-            "step": 1
-          },
-          {
-            "reason": "unexpected_execution_terminal",
-            "step": 2
-          }
-        ],
-        "incomplete": [],
-        "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
-        "run_confirmed_violation": true
-      },
-      "run_exceptions": {
-        "harness_errors": [],
-        "barrier_timeouts": []
-      },
-      "patch_sha256": "242ac58d2d9bd45d132a57d52d28f7987757cfe7c4d67a6c90bbef9c770a2278"
+      "patch_sha256": "310cfd2cdee5d782dad11faef47d141240a4ad2af2fd56b165c4fd0e21f41730"
     },
     {
       "id": "M10",
@@ -389,6 +342,9 @@
       "description": "#maybeTerminal never records a terminal.",
       "source": null,
       "evidence_kind": "missing_evidence",
+      "parts": [
+        "missing_evidence"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "start-before-cut",
@@ -489,13 +445,23 @@
             "detail": "finish of e2: no terminal (state draining) or unsettled public promise"
           },
           {
+            "case_id": "permit-single-use",
+            "step": 4,
+            "detail": "finish of e1: no terminal (state draining) or unsettled public promise"
+          },
+          {
+            "case_id": "approval-before-cut",
+            "step": 5,
+            "detail": "finish of e1: no terminal (state draining) or unsettled public promise"
+          },
+          {
             "case_id": "deferred-terminal-before-seal",
             "step": 3,
             "detail": "finish of e1: no terminal (state draining) or unsettled public promise"
           },
           {
             "case_id": "sup-pending-approval-control",
-            "step": 1,
+            "step": 3,
             "detail": "finish of e1: no terminal (state draining) or unsettled public promise"
           },
           {
@@ -527,6 +493,21 @@
             "case_id": "sup-ancestor-fences-in-flight",
             "step": 9,
             "detail": "finish of e3: no terminal (state draining) or unsettled public promise"
+          },
+          {
+            "case_id": "sup-session-revoke-pending-approval",
+            "step": 8,
+            "detail": "finish of e2: no terminal (state draining) or unsettled public promise"
+          },
+          {
+            "case_id": "sup-tenant-revoke-unused-permit",
+            "step": 8,
+            "detail": "finish of e2: no terminal (state draining) or unsettled public promise"
+          },
+          {
+            "case_id": "sup-ancestor-revoke-unused-permit",
+            "step": 8,
+            "detail": "finish of e2: no terminal (state draining) or unsettled public promise"
           }
         ]
       },
@@ -539,6 +520,9 @@
       "description": "Restores the pre-#10 premature failed terminal for an unobservable settlement.",
       "source": null,
       "evidence_kind": "effect",
+      "parts": [
+        "signal"
+      ],
       "witness": {
         "set": "supplement",
         "case_id": "sup-unobservable-pending-settlement",
@@ -571,11 +555,14 @@
       "description": "The commit fence does not check tenant revocation.",
       "source": {
         "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
         "path": "mutants/tenant/M15.patch",
         "sha256": "ebb8720370d6e4027b4cb0013c933c7fdcd142cfdd4b355d978323c8bfd0213d"
       },
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "tenant-multi-session-in-flight",
@@ -619,11 +606,14 @@
       "description": "A tenant revocation covers every tenant (over-reach).",
       "source": {
         "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
         "path": "mutants/tenant/M16.patch",
         "sha256": "3c4bf018612bba4106ad90404c70362705a988cdded678b8440c78c6c04e9b75"
       },
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "availability"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "tenant-isolation",
@@ -671,11 +661,14 @@
       "description": "The commit fence does not walk the ancestor chain.",
       "source": {
         "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
         "path": "mutants/ancestor/M21.patch",
         "sha256": "924e308a294720dfa84b8397c91374c77415551ee3190633681a2108af6883ce"
       },
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "derived-in-flight-ancestor-revoked",
@@ -705,56 +698,15 @@
       "patch_sha256": "924e308a294720dfa84b8397c91374c77415551ee3190633681a2108af6883ce"
     },
     {
-      "id": "M22",
-      "patch": "M22-tenant-not-checked-at-request-and-start.patch",
-      "target": "src/guarded-executor.ts",
-      "description": "Tenant revocation is not checked at the request checks and the start guard.",
-      "source": {
-        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
-        "path": "mutants/tenant/M22.patch",
-        "sha256": "a2db21884b9679b7061ff86e0b25392d8bd3a83366fda2ca05d656215d6b589d"
-      },
-      "evidence_kind": "decision_and_effect",
-      "witness": {
-        "set": "corpus",
-        "case_id": "tenant-isolation",
-        "verdict": "VIOLATION",
-        "decision_findings": [
-          {
-            "reason": "false_allow",
-            "step": 1
-          }
-        ],
-        "effect_findings": [
-          {
-            "reason": "unexpected_execution_started",
-            "step": 1
-          },
-          {
-            "reason": "unexpected_execution_terminal",
-            "step": 6
-          }
-        ],
-        "incomplete": [],
-        "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
-        "run_confirmed_violation": true
-      },
-      "run_exceptions": {
-        "harness_errors": [],
-        "barrier_timeouts": []
-      },
-      "patch_sha256": "a2db21884b9679b7061ff86e0b25392d8bd3a83366fda2ca05d656215d6b589d"
-    },
-    {
       "id": "M37",
       "patch": "M37-revocation-propagates-to-parent-and-siblings.patch",
       "target": "src/authority-revocation.ts",
       "description": "A capability revocation also covers the revoked capability's parent and siblings (lineage walked upwards at check time).",
       "source": null,
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "availability"
+      ],
       "witness": {
         "set": "corpus",
         "case_id": "sibling-isolation",
@@ -802,139 +754,7 @@
         "harness_errors": [],
         "barrier_timeouts": []
       },
-      "patch_sha256": "48982c8279d9ff9a68d659a556c371997042fbc749151d75236e00e03ff322de"
-    },
-    {
-      "id": "M20",
-      "patch": "M20-ancestry-not-checked-at-request-and-start.patch",
-      "target": "src/guarded-executor.ts",
-      "description": "The ancestor chain is not walked at the request checks and the start guard.",
-      "source": {
-        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
-        "path": "mutants/ancestor/M20.patch",
-        "sha256": "87015f01c56a60424ec9ebb13b9814e70bc57f5dd1fcf7a7b803a91388263ca8"
-      },
-      "evidence_kind": "decision_and_effect",
-      "witness": {
-        "set": "supplement",
-        "case_id": "sup-ancestor-revoked-child-start",
-        "verdict": "VIOLATION",
-        "decision_findings": [
-          {
-            "reason": "false_allow",
-            "step": 1
-          }
-        ],
-        "effect_findings": [
-          {
-            "reason": "unexpected_execution_started",
-            "step": 1
-          },
-          {
-            "reason": "unexpected_execution_terminal",
-            "step": 2
-          }
-        ],
-        "incomplete": [],
-        "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
-        "run_confirmed_violation": true
-      },
-      "run_exceptions": {
-        "harness_errors": [],
-        "barrier_timeouts": []
-      },
-      "patch_sha256": "87015f01c56a60424ec9ebb13b9814e70bc57f5dd1fcf7a7b803a91388263ca8"
-    },
-    {
-      "id": "M26",
-      "patch": "M26-tenant-not-checked-at-approval-and-start.patch",
-      "target": "src/guarded-executor.ts",
-      "description": "Tenant revocation is not checked at the approval re-verification and the start guard.",
-      "source": {
-        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
-        "path": "mutants/tenant/M26.patch",
-        "sha256": "1ad70ddfc54edc60a3596eed6824d8ce6b9d6193c6f13c74d465d8d56e408194"
-      },
-      "evidence_kind": "decision_and_effect",
-      "witness": {
-        "set": "supplement",
-        "case_id": "sup-tenant-pending-approval-revoked",
-        "verdict": "VIOLATION",
-        "decision_findings": [
-          {
-            "reason": "false_allow",
-            "step": 1
-          }
-        ],
-        "effect_findings": [
-          {
-            "reason": "unexpected_execution_started",
-            "step": 1
-          },
-          {
-            "reason": "unexpected_execution_terminal",
-            "step": 2
-          }
-        ],
-        "incomplete": [],
-        "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
-        "run_confirmed_violation": true
-      },
-      "run_exceptions": {
-        "harness_errors": [],
-        "barrier_timeouts": []
-      },
-      "patch_sha256": "1ad70ddfc54edc60a3596eed6824d8ce6b9d6193c6f13c74d465d8d56e408194"
-    },
-    {
-      "id": "M34",
-      "patch": "M34-ancestry-not-checked-at-approval-and-start.patch",
-      "target": "src/guarded-executor.ts",
-      "description": "The ancestor chain is not walked at the approval re-verification and the start guard.",
-      "source": {
-        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
-        "path": "mutants/ancestor/M34.patch",
-        "sha256": "f4aab7439015299ae98d8576f3abec0ea568425ab7606cefdc83f551c62c4531"
-      },
-      "evidence_kind": "decision_and_effect",
-      "witness": {
-        "set": "supplement",
-        "case_id": "sup-ancestor-pending-approval-revoked",
-        "verdict": "VIOLATION",
-        "decision_findings": [
-          {
-            "reason": "false_allow",
-            "step": 1
-          }
-        ],
-        "effect_findings": [
-          {
-            "reason": "unexpected_execution_started",
-            "step": 1
-          },
-          {
-            "reason": "unexpected_execution_terminal",
-            "step": 2
-          }
-        ],
-        "incomplete": [],
-        "errors": [],
-        "exit": 1,
-        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
-        "run_confirmed_violation": true
-      },
-      "run_exceptions": {
-        "harness_errors": [],
-        "barrier_timeouts": []
-      },
-      "patch_sha256": "f4aab7439015299ae98d8576f3abec0ea568425ab7606cefdc83f551c62c4531"
+      "patch_sha256": "d2becfb9b5d71192ff357b1cf52b4770cdb7330399e916101224b2592746030b"
     },
     {
       "id": "M28",
@@ -943,11 +763,14 @@
       "description": "Tenant revocation is not checked at either delivery check point.",
       "source": {
         "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
         "path": "mutants/tenant/M28.patch",
         "sha256": "fb4b80f3234e1d1620e610df7845769402447bbffb8a52f07638065bc0672784"
       },
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment"
+      ],
       "witness": {
         "set": "supplement",
         "case_id": "sup-tenant-fences-in-flight",
@@ -983,11 +806,14 @@
       "description": "A tenant revocation requests no cancellation of the tenant's executions.",
       "source": {
         "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
         "path": "mutants/tenant/M29.patch",
         "sha256": "e44d30f4e5d8f06f98c66a8519f1b1eb6cec999ec99702607c4f4654b383ba01"
       },
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "signal"
+      ],
       "witness": {
         "set": "supplement",
         "case_id": "sup-tenant-fences-in-flight",
@@ -1023,11 +849,14 @@
       "description": "The ancestor chain is not walked at either delivery check point.",
       "source": {
         "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
         "path": "mutants/ancestor/M35.patch",
         "sha256": "d04677de140a02e8a93eaa57d5dc796b87abd2f1ab7443cd39baa434a9cd3ad1"
       },
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment"
+      ],
       "witness": {
         "set": "supplement",
         "case_id": "sup-ancestor-fences-in-flight",
@@ -1063,11 +892,14 @@
       "description": "An ancestor revocation requests no cancellation of descendant executions.",
       "source": {
         "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
-        "commit": "a9deab6709d6ca2ba8f3988693b50fa807eadc0c",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
         "path": "mutants/ancestor/M36.patch",
         "sha256": "fff8bf06ec1a970aabe144d0d0f94047cb9e26e9998b2fa93a911260d2b515a0"
       },
       "evidence_kind": "decision_and_effect",
+      "parts": [
+        "signal"
+      ],
       "witness": {
         "set": "supplement",
         "case_id": "sup-ancestor-fences-in-flight",
@@ -1095,6 +927,467 @@
         "barrier_timeouts": []
       },
       "patch_sha256": "fff8bf06ec1a970aabe144d0d0f94047cb9e26e9998b2fa93a911260d2b515a0"
+    },
+    {
+      "id": "M12",
+      "patch": "M12-approval-fence-revocation-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The revocation part of the approval fence: the early approval check and F(approve) (#denyIfLineageRevoked returns for stage approval) removed.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "lifecycle"
+      ],
+      "plan_kind": "check and lifecycle (issue and start still deny)",
+      "kind_note": "decision and lifecycle findings only: the issue and the start of the witness are still denied by their own fences, so no tool runs",
+      "witness": {
+        "set": "corpus",
+        "case_id": "pending-approval",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 1
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_approval_granted",
+            "step": 1
+          }
+        ],
+        "incomplete": [],
+        "errors": [],
+        "exit": 1,
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "2c98739af45fc406c13f8ab22520075dd6e806bf23968d20e963b472e2274385"
+    },
+    {
+      "id": "M13",
+      "patch": "M13-issue-fence-revocation-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The revocation part of the issue fence: the early issue check and F(issue) (#denyIfLineageRevoked returns for stage issue) removed.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "lifecycle"
+      ],
+      "plan_kind": "check and lifecycle",
+      "kind_note": "decision and lifecycle findings only: the start is still denied by its own fences",
+      "witness": {
+        "set": "corpus",
+        "case_id": "issue-after-cut",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 2
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_permit_issued",
+            "step": 2
+          }
+        ],
+        "incomplete": [],
+        "errors": [],
+        "exit": 1,
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "424ea51407d320262490d232c0f106e037a1b2ef7fcfa8932be045925eec17cd"
+    },
+    {
+      "id": "M14",
+      "patch": "M14-start-lineage-state-requirement-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The lineage-state requirement of start: the early check (permit_not_issued) and F(start) require only that the permit is not consumed.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment",
+        "signal"
+      ],
+      "plan_kind": "both",
+      "kind_note": "containment: the start of the pending lineage runs the tool (false_allow@0, unexpected_execution_started@0); its unexpected terminal is signal evidence. Beyond the plan minimum: the lineage is then consumed, so the issue at step 2 is denied (false_deny@2), and the consumed permit without an issue sequence value is contradictory permit evidence (incomplete), which makes the run exit 2",
+      "witness": {
+        "set": "corpus",
+        "case_id": "fresh-id-retry-unused-permit",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 0
+          },
+          {
+            "reason": "false_deny",
+            "step": 2
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_execution_started",
+            "step": 0
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 5
+          }
+        ],
+        "incomplete": [
+          "inconsistent state evidence (probe 2): permit:lineage-1: issued_seq missing is not after the setup baseline (baseline_seq 1) and inside the interval 1..2 in which it is first shown",
+          "expected effect not confirmed: permit_issued at step 2"
+        ],
+        "errors": [],
+        "exit": 2,
+        "exit_reason": "the witness is a confirmed VIOLATION with incompleteness (the start of the pending lineage consumes a permit that was never issued: permit_state none -> consumed without an issued_seq is contradictory permit evidence, so the expected permit_issued at step 2 is unconfirmed); the report is not technically valid, has_confirmed_violation stays true and profileExitCode returns 2",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "a6be0e6c62387dff14652ebf2c063c741467a65034dc8896e2ee2e1b512061a0"
+    },
+    {
+      "id": "M24",
+      "patch": "M24-permit-consumption-transition-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The consumption transition (issued -> consumed) at F(start): the permit state and consumed_seq are not set.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment",
+        "signal"
+      ],
+      "plan_kind": "both",
+      "kind_note": "containment: the fresh-ID retry runs the tool a second time (false_allow@1, unexpected_execution_started@1); its unexpected terminal is signal evidence",
+      "witness": {
+        "set": "corpus",
+        "case_id": "permit-single-use",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 1
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_execution_started",
+            "step": 1
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 5
+          }
+        ],
+        "incomplete": [],
+        "errors": [],
+        "exit": 1,
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "9195f538ca6c1d77832c6be08b947a9c0b0d1574e78b3ff67c8c73d4336dd28d"
+    },
+    {
+      "id": "M49",
+      "patch": "M49-start-path-revocation-checks-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "Every revocation check on the start-with-permit path: the request-stage checks of R′ (session and bound tenant before resolution, capability after verification), the early start check and the revocation part of F(start) removed.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment",
+        "signal"
+      ],
+      "plan_kind": "both",
+      "kind_note": "containment: the covered start runs the tool (false_allow@4, unexpected_execution_started@4); its unexpected terminal is signal evidence",
+      "witness": {
+        "set": "corpus",
+        "case_id": "fresh-id-retry-unused-permit",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 4
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_execution_started",
+            "step": 4
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 6
+          }
+        ],
+        "incomplete": [],
+        "errors": [],
+        "exit": 1,
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "4fdc94c9d2bedf881b232c5145305bc3d4dd0cc29ecb73668e4b5a16e55880fc"
+    },
+    {
+      "id": "M50",
+      "patch": "M50-approval-fence-session-and-tenant-coverage-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "Session and tenant coverage in the approval fence revocation checks (early and F(approve)) removed.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "lifecycle"
+      ],
+      "plan_kind": "check and lifecycle",
+      "kind_note": "decision and lifecycle findings only: the issue and the start are still denied by their own fences",
+      "witness": {
+        "set": "supplement",
+        "case_id": "sup-session-revoke-pending-approval",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 1
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_approval_granted",
+            "step": 1
+          }
+        ],
+        "incomplete": [],
+        "errors": [],
+        "exit": 1,
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "79f77f658a2b0ec664b3b394761fe899b9fa4edc5eedc707034200e85ab9ccd9"
+    },
+    {
+      "id": "M51",
+      "patch": "M51-start-path-tenant-coverage-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "Tenant coverage on the whole start path: the request-stage session-tenant check, the bound tenant of the R′ request-stage check, the early start check and F(start) removed.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "containment",
+        "signal"
+      ],
+      "plan_kind": "both",
+      "kind_note": "containment: the start under the revoked tenant runs the tool (false_allow@5, unexpected_execution_started@5); its unexpected terminal is signal evidence",
+      "witness": {
+        "set": "supplement",
+        "case_id": "sup-tenant-revoke-unused-permit",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 5
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_execution_started",
+            "step": 5
+          },
+          {
+            "reason": "unexpected_execution_terminal",
+            "step": 7
+          }
+        ],
+        "incomplete": [],
+        "errors": [],
+        "exit": 1,
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "d4af31e5b0868e187798ddfaebac4159b1308ac479644871a617f8f1e5f26827"
+    },
+    {
+      "id": "M52",
+      "patch": "M52-issue-fence-ancestor-coverage-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "Ancestor coverage in the issue fence (early and F(issue)) removed.",
+      "source": null,
+      "evidence_kind": "decision_and_effect",
+      "parts": [
+        "lifecycle"
+      ],
+      "plan_kind": "check and lifecycle",
+      "kind_note": "decision and lifecycle findings only: the start is still denied by its own fences",
+      "witness": {
+        "set": "supplement",
+        "case_id": "sup-ancestor-revoke-approved-before-issue",
+        "verdict": "VIOLATION",
+        "decision_findings": [
+          {
+            "reason": "false_allow",
+            "step": 2
+          }
+        ],
+        "effect_findings": [
+          {
+            "reason": "unexpected_permit_issued",
+            "step": 2
+          }
+        ],
+        "incomplete": [],
+        "errors": [],
+        "exit": 1,
+        "exit_reason": "the witness is a confirmed VIOLATION and every case is technically valid, so profileExitCode returns 1 (has_confirmed_violation)",
+        "run_confirmed_violation": true
+      },
+      "run_exceptions": {
+        "harness_errors": [],
+        "barrier_timeouts": []
+      },
+      "patch_sha256": "45e11e4ae7c6815ce03cb9e99c15d3740b2c2cbaab432f2b49f46a5908136bf8"
+    }
+  ],
+  "masked": [
+    {
+      "id": "M8",
+      "patch": "M8-approval-and-start-stage-checks-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The approval-stage and start-stage revocation checks are removed (the request-stage check stays).",
+      "source": null,
+      "reason": "Removes the approval- and start-stage checks of #denyIfRevoked. Only the legacy paths call them (resolveApproval() and the start inside process()); in permit mode process() only creates lineages at setup, and the approval and start fences are #denyIfLineageRevoked (early and final), which M8 keeps, as it keeps the request-stage checks of the start request R′. No case can show the change. The approval and start fences of permit mode are witnessed by M12, M49, M50, M51 and M52 here and by the runtime-own lifecycle gate (M53, M54, M57, M61-M63).",
+      "previous_witness": {
+        "set": "supplement",
+        "case_id": "sup-pending-approval-revoked",
+        "pin": "a9deab6"
+      },
+      "patch_sha256": "0849697b55d35740daeb6eddc5d60625f6728a52cbe41aabdec0f007a757fbc1"
+    },
+    {
+      "id": "M9",
+      "patch": "M9-request-and-start-stage-checks-removed.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The request-stage and start-stage revocation checks are removed.",
+      "source": null,
+      "reason": "Removes the request- and start-stage checks of #denyIfRevoked, keeping the approval stage. In permit mode these are the request-stage checks of the start request R′ (and of process() at setup, before any revocation); the start fences of #denyIfLineageRevoked (early and final) are kept and deny every covered start, so removing one layer is masked by the others (plan section 8.1, M49). M49 removes every revocation check of the start path and is witnessed.",
+      "previous_witness": {
+        "set": "corpus",
+        "case_id": "cut-before-start",
+        "pin": "a9deab6"
+      },
+      "patch_sha256": "72d0b6e6cdc40e0537a65e9990355ab5b277256a343f85f1a924febe69051e1e"
+    },
+    {
+      "id": "M22",
+      "patch": "M22-tenant-not-checked-at-request-and-start.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "Tenant revocation is not checked at the request checks and the start guard.",
+      "source": {
+        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
+        "path": "mutants/tenant/M22.patch",
+        "sha256": "a2db21884b9679b7061ff86e0b25392d8bd3a83366fda2ca05d656215d6b589d"
+      },
+      "reason": "Drops the tenant from the request-stage checks of process() and from the legacy start checks. In permit mode process() runs only at setup, before any revocation, and the start path checks the tenant in its R′ request-stage checks and in #denyIfLineageRevoked (early and final), which M22 does not touch. No case can show the change. Tenant coverage of the permit start path is witnessed by M51; the runtime-own tenant gate keeps M22 itself.",
+      "previous_witness": {
+        "set": "corpus",
+        "case_id": "tenant-isolation",
+        "pin": "a9deab6"
+      },
+      "patch_sha256": "a2db21884b9679b7061ff86e0b25392d8bd3a83366fda2ca05d656215d6b589d"
+    },
+    {
+      "id": "M20",
+      "patch": "M20-ancestry-not-checked-at-request-and-start.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The ancestor chain is not walked at the request checks and the start guard.",
+      "source": {
+        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
+        "path": "mutants/ancestor/M20.patch",
+        "sha256": "87015f01c56a60424ec9ebb13b9814e70bc57f5dd1fcf7a7b803a91388263ca8"
+      },
+      "reason": "Drops the ancestor chain from the request-stage check of process() and from the legacy start checks. In permit mode process() runs only at setup, before any revocation, and the start path checks the ancestor chain in its R′ request-stage check and in #denyIfLineageRevoked (early and final), which M20 does not touch. No case can show the change. Ancestor coverage of the permit fences is witnessed by M52 (issue) and by M49 (every start check); the runtime-own ancestor gate keeps M20 itself.",
+      "previous_witness": {
+        "set": "supplement",
+        "case_id": "sup-ancestor-revoked-child-start",
+        "pin": "a9deab6"
+      },
+      "patch_sha256": "87015f01c56a60424ec9ebb13b9814e70bc57f5dd1fcf7a7b803a91388263ca8"
+    },
+    {
+      "id": "M26",
+      "patch": "M26-tenant-not-checked-at-approval-and-start.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "Tenant revocation is not checked at the approval re-verification and the start guard.",
+      "source": {
+        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
+        "path": "mutants/tenant/M26.patch",
+        "sha256": "1ad70ddfc54edc60a3596eed6824d8ce6b9d6193c6f13c74d465d8d56e408194"
+      },
+      "reason": "Drops the tenant from the legacy approval and start checks of #denyIfRevoked (resolveApproval() and the start inside process()). Permit mode never calls them: approve() uses #denyIfLineageRevoked. No case can show the change. Tenant coverage of the permit approval fence is witnessed by M50; the runtime-own tenant gate keeps M26 itself.",
+      "previous_witness": {
+        "set": "supplement",
+        "case_id": "sup-tenant-pending-approval-revoked",
+        "pin": "a9deab6"
+      },
+      "patch_sha256": "1ad70ddfc54edc60a3596eed6824d8ce6b9d6193c6f13c74d465d8d56e408194"
+    },
+    {
+      "id": "M34",
+      "patch": "M34-ancestry-not-checked-at-approval-and-start.patch",
+      "target": "src/guarded-executor.ts",
+      "description": "The ancestor chain is not walked at the approval re-verification and the start guard.",
+      "source": {
+        "repository": "https://github.com/mikko-lab/acs-guardrail-demo",
+        "commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451",
+        "path": "mutants/ancestor/M34.patch",
+        "sha256": "f4aab7439015299ae98d8576f3abec0ea568425ab7606cefdc83f551c62c4531"
+      },
+      "reason": "Drops the ancestor chain from the legacy approval and start checks of #denyIfRevoked (resolveApproval() and the start inside process()). Permit mode never calls them: approve(), issuePermit() and start() use #denyIfLineageRevoked. No case can show the change. Ancestor coverage of the permit issue fence is witnessed by M52; the runtime-own ancestor gate keeps M34 itself.",
+      "previous_witness": {
+        "set": "supplement",
+        "case_id": "sup-ancestor-pending-approval-revoked",
+        "pin": "a9deab6"
+      },
+      "patch_sha256": "f4aab7439015299ae98d8576f3abec0ea568425ab7606cefdc83f551c62c4531"
+    }
+  ],
+  "not_run": [
+    {
+      "id": "M25",
+      "plan_row": "approval-permit lifecycle plan section 8.1, M25: over-fencing control, the issue state check requires pending instead of approved; witness approval-before-cut step 1 (false_deny@1, missing_permit_issued@1); kind check and lifecycle",
+      "reason": "The plan patch also changes the setup: every authority that starts issued is created through process(), approve() and issuePermit() (plan section 7.2, D2), and its setup issue is then denied (not_approved). Every case with such an authority fails its setup (setup_failed, a harness process error that is never predeclarable), so the whole mutant run is a technical failure, never a detection. Replacing the patch with another over-fencing mutant deviates from the approved plan and is left to a decision; nothing replaces it here.",
+      "reproduction": "Precheck of mutations/revocation/M25-issue-requires-pending-over-fencing.patch against ef775db (node dist precheck, same path as the gate): approval-before-cut shows false_deny@1, false_deny@2, missing_permit_issued@1, missing_execution_started@2, missing_tool_commit@3, missing_output_delivery@4, but 19 corpus and 9 supplement cases report setup_failed (\"setup approve and issue of a's lineage failed: Lifecycle issue denied: not_approved [lineage-1]\") and HARNESS_ERROR identity_mapping_invalid (no setup baseline probe). The patch file is kept for the reproduction and is not part of the gate."
     }
   ]
 }

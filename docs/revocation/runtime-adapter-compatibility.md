@@ -745,3 +745,161 @@ The gate checks every whole run for technical errors **before** it classifies th
 | Runtime-own tests | The pinned runtime's tenant gate (19) and ancestor gate (25) and the gate regressions R1–R4, run by `runtime-gates` in a verified checkout and compared with the lock; reported separately, never as corpus or supplement evidence |
 
 M15, M16, M20–M22, M26, M28, M29 and M34–M36 are the runtime gate's own patches, copied byte for byte. **M37 differs from the runtime gate's M37:** the runtime's patch propagates a revocation to the parent and siblings when `revoke()` is called. In `sibling-isolation` the child is revoked before any capability is bound, so that patch has nothing to propagate to. The eval's M37 walks the revoked capability's lineage at check time instead (a revoked capability whose parent chain contains the checked capability or one of its ancestors covers it), which is the same defect reached through the contract.
+
+## 14. Revision for the v0.6.0 pin (approval–permit lifecycle, G3/G4)
+
+This revision applies the eval step (§10, step 4) of the approved [approval–permit lifecycle plan](approval-permit-lifecycle-plan.md) to the pin `acs-guardrail-demo` v0.6.0 at `ef775dbff6c5691b4b2d44611b22eb33c431f451`, in tenancy mode with the opt-in lifecycle (`{ lifecycle: "permit" }`). Sections 1–13 apply where this section does not replace them. The [SUT pin review](sut-pin-review-ef775db.md) records the results.
+
+### 14.1 Lock
+
+`sut.revocation.lock.json` pins commit `ef775db…`, tree `7eb9f336…`, version `0.6.0`, the annotated tag `v0.6.0` (object `c83cd669…`), package-lock SHA-256 `b8be5394…`, `max_chain_length` 8 and the SUT baseline of 33 suites / 774 tests. New:
+- **`sut_lifecycle_mode`** `permit` (absent: `legacy`, the earlier pins). Permit mode is pinned with tenancy mode only. A permit-mode lock must pin the lifecycle gate, its regressions and its determinism check; a legacy lock must not.
+- **`runtime_test_gates.lifecycle`**: the runtime's lifecycle mutant gate (`npm run mutants:lifecycle`, manifest `mutants/lifecycle/manifest.json`, SHA-256 `80952ae5…`) with its own evidence kinds: `both`, `containment_effect`, `check_point`, `component_check_point`, `lifecycle_effect`, `check_and_lifecycle`, `availability_effect`, `check_and_availability`. The lock also pins the gate's counts (26 entries, 20 patches and mechanisms, 6 variants, 41 witness tests), its variants (M58, M61 and M62 with inputs (i) and (iii)), the entries with labels beyond their claimed kind and the recorded gaps.
+- **`runtime_test_gates.lifecycle_regressions`** RL1–RL24 with each case's gate exit, and **`lifecycle_determinism`** (three identical witness runs).
+
+The tenant and ancestor gate bindings are those of the `a9deab6` pin, byte for byte (their manifests are unchanged at `ef775db`). `runtime-gates` reports containment, lifecycle, availability, check-point-only and component-only evidence in separate lists and never merges them. The `a9deab6` lock moves to `profiles/revocation/history/` with its profile, supplement and recorded format 2 observations. The adapter refuses any lock that is not tenancy plus permit mode, and any profile that does not bind observation format 3 (exit 2). `evaluate --observations` still re-evaluates both earlier pins under their historical locks.
+
+### 14.2 Lifecycle mapping
+
+| Contract | Runtime (permit mode) |
+|---|---|
+| Authority `x` (any `initial`) | One lineage, created at setup by `process(r)`: `r` is `x`'s fixed request, with the ASK tool `update_record`, under `x`'s grant chain. The Guardian answers ASK, so the lineage starts `pending`. Every grant allows exactly `update_record`. |
+| `initial: issued` | At setup, also `approve(g)` with a signed human `ApprovalGrantV3`, then `issuePermit({ lineage_id })`. |
+| `approve(x)` | `approve(g)`. `g` is a version 3 grant built from the runtime's own lineage snapshot: lineage, session, request id, tool, `request_digest` and `authority_fingerprint`; approver `human/demo-operator`. |
+| `issue(x)` | `issuePermit({ lineage_id })` |
+| `start(x, e)` | `start({ lineage_id, request })` with a fresh signed request R′: a new request id, `x`'s tool and exactly the lineage's arguments |
+| `revoke`, `commit`, `deliver`, `cancel_ack`, `finish`, `seal` | Unchanged (§§3, 13). `commit` and `cancel_ack` use the context of the execution that `start()` ran. |
+
+- **Request marker.** The runtime binds the arguments by digest (D5), so the request marker in the arguments is fixed per authority (`ace-authority:<id>`). The tool double therefore takes the execution label from the runtime's own record of the execution: `getExecution(id).request_id` is the R′ of exactly one start step, whose execution is the label. The adapter's step counter is never used.
+- **Setup failures.** A setup call that does not return a pending lineage, or a setup approve or issue that throws, is `setup_failed`. That is a harness process error, never a decision, and no mutant manifest can predeclare it.
+- **What the adapter never does** (plan §9). It keeps no lifecycle state of its own and never decides a lifecycle denial. It never grants, issues, consumes or revokes a permit on the runtime's behalf. It never re-creates a lineage after a denial. It never reports the setup state as an effect.
+
+### 14.3 Setup baseline and lifecycle effects
+
+The setup ends with one **`setup_baseline`** probe, the first probe of the log (step 0). In format 3, every probe records:
+- every lineage snapshot (`lineages()`): its states, sequence values, permit and execution ids and bindings, but no timestamp;
+- the shared authority sequence value (`authoritySequence()`, `authority_seq`).
+
+The baseline's value is `baseline_seq`.
+
+- **The baseline only confirms the initial state.** Every authority has exactly one lineage in the baseline, in its `initial` state:
+  - `pending`: approval pending and no permit;
+  - `issued`: approved and an issued, unconsumed permit, both with sequence values ≤ `baseline_seq`.
+
+  Each lineage is also bound to its authority's capability, session pair, tenant and supplied chain. Anything else is `identity_mapping_invalid`: a lineage in another state, a missing or extra lineage, a lineage that appears after the setup, a lineage whose bindings change, no baseline probe, or more than one.
+- **A lifecycle effect is a post-baseline transition** between consecutive probes:
+  - `approval_granted` is `approval_state` changing from `pending` to `approved`;
+  - `permit_issued` is `permit_state` changing from `none` to `issued`, or on to `consumed` in the same interval.
+
+  The transition's own sequence value (`approved_seq`, `issued_seq`) must lie after `baseline_seq` and inside the interval in which it is first shown: after the previous probe's `authority_seq`, at most this probe's. The effect's step is that probe's step and its `seq` the probe index. Its provenance is `sut_state`. A transition first shown at `pre_action` or `seal_settle` is drift. A state already present at the baseline is never an effect.
+- **Contradictory transitions.** A transition with a sequence value outside that interval, or none, is contradictory state evidence. No effect is derived from it, and the expected effect of its kind stays unconfirmed (incomplete), never missing. An example is a setup-time approval that surfaces after the baseline.
+- **Regressions of the log** (`sequence_inconsistent`): an approval or permit state that moves backwards, a lineage that disappears, or an `authority_seq` that decreases.
+- **Permit consumption.** `permit_state` changing to `consumed` is no contract effect. It is checked for attribution (§14.5).
+- **No other source of lifecycle effects.** A receipt, a return value or an audit record is never an effect.
+
+### 14.4 Decisions
+
+The decision is the answer of the step's own lifecycle call:
+
+| Call | ALLOW | DENY | Anything else |
+|---|---|---|---|
+| `approve` | returned (receipt) | `AuthorityRevokedError`, or `LifecycleDeniedError` with reason `not_pending` | UNKNOWN |
+| `issuePermit` | returned (receipt) | `AuthorityRevokedError`, or `LifecycleDeniedError` with reason `not_approved` | UNKNOWN |
+| `start` | the tool double was entered | `AuthorityRevokedError`, or `LifecycleDeniedError` with reason `permit_not_issued` or `permit_consumed` | UNKNOWN |
+
+Other lifecycle denials are no contract answer, so they are UNKNOWN. These are binding or snapshot mismatches, provider errors, expiry and verification failures. In format 3, the call record carries the denial `reason` and, for `start`, the R′ `request_id`. A call whose API is not its operation's own (`approve`, `issuePermit`, `start`, `revoke`, `commit`, `deliver`, `acknowledgeCancellation`) is `call_api_mismatch`.
+
+### 14.5 Attribution checks
+
+- **`lifecycle_transition_mismatch`** (HARNESS_ERROR). Every post-baseline transition shown at a step barrier must occur at a step whose own runtime call can make it:
+  - an approval at an `approve` step of the lineage's authority, with an `approve` call;
+  - an issue at an `issue` step, with an `issuePermit` call;
+  - a consumption at a `start` step, with a `start` call. The consumption's `start_request_id` must be that call's R′, and its `execution_id` the execution that step started.
+
+  This catches an adapter that approves, issues or consumes on the runtime's behalf (AM18).
+- **`runtime_binding_mismatch`**, in addition to §13.2. Every execution record's runtime `request_id` must be the R′ of exactly one start step, and that step must start the record's label.
+- **`identity_mapping_invalid`**, in addition to §13.2. The identity mapping declares `lineages` (runtime lineage → contract authority): exactly one lineage per authority (AM17), confirmed by the baseline (§14.3, AM15).
+
+### 14.6 Runtime observation format 3 and compatibility
+
+`schemas/revocation/runtime-observation-3.schema.json` (`format: "revocation-runtime-observation/3"`) extends format 2 with:
+- `identity.lineages` (required);
+- the `setup_baseline` probe point;
+- per probe `lineages` and `authority_seq` (required);
+- per execution record its `request_id` (required);
+- the call APIs `approve`, `issuePermit` and `start` in place of `process` and `resolveApproval`;
+- per call `reason` and `request_id`.
+
+Lineage snapshots carry no timestamps. Additional fields are refused.
+
+**Compatibility.**
+- **The contract stays `revocation-0.4.0`.** Format 3 is a new observation format revision, not a contract change. A profile binds exactly one format, and another format is `observation_format_mismatch`.
+- **Formats 1 and 2 are validated with their unchanged schemas and evaluated by the unchanged rules.** The format 3 checks run only on format 3 observations. Two common definitions changed:
+  - `approval_granted` and `permit_issued` now have `sut_state` provenance. They were never derived in formats 1 and 2.
+  - `setup_baseline` is a drift point. It never occurs in formats 1 and 2.
+- **Verified.** At this pin, the recorded `a9deab6` observations re-evaluate to byte-identical `evidence.jsonl`, `supplement-evidence.jsonl` and `observations.json`, and the recorded `a682e44` observations to their earlier results (both exit 3).
+
+### 14.7 Profile v4 and supplement v3
+
+**Profile `acs-guardrail-demo-ef775db/revocation-0.4.0/4`** binds observation format 3. It declares `supported.lifecycle`: `initial_pending_authority`, `approve`, `issue`, `single_use_permit`. The classifier reads these capability rules from the profile, besides the revoke scopes. A profile declares lifecycle rules exactly when it binds format 3.
+- **Coverage: 23 IN_PROFILE / 4 OUT_OF_SCOPE.** The cases that move in are `pending-approval`, `issue-after-cut`, `fresh-id-retry-unused-permit`, `derived-authority`, `permit-single-use` and `approval-before-cut`. The four that stay out need G5 or G6.
+- **K = 57 unassessed finish/seal decisions.**
+- **27 newly assessed decisions.** The plan's §6 says 28, but its per-case ranges give 27. In `approval-before-cut`, step 5 is a finish, which is K, so 6 of its 8 decisions are assessed. In all, the six cases have 41 decisions, 14 of them K.
+- **Removed caveats.** The family caveats of `issued-permit`, `cut-before-start` and `duplicate-revocation` ("no permit object") are removed: their authorities now start with a real, unused permit.
+- **Design fences.** The only fence still uncovered is "execution identity".
+
+**Supplement `…/supplement/3`** (S1–S14), reported apart from corpus coverage:
+- **S1, S2, S7 and S8** are re-mapped from the legacy `approve_starts` to approve, issue and start steps. S2's expectation is now the contract oracle's, no longer runtime-specific: approval is its own operation.
+- **S3–S6, S9 and S10** keep their content byte for byte.
+- **S11–S14** are new, as in plan §7.3.
+- Every expectation is the contract oracle's.
+
+### 14.8 Mutants
+
+**Manifest.** `mutations/revocation/manifest.json` has version `revocation-sut-mutants/3`. Each entry pins the evidence parts its witness shows. The parts are derived from the pinned values and checked by the loader:
+- **containment:** an unexpected start, commit or delivery, or a side effect after the terminal;
+- **lifecycle:** an unexpected approval or permit; never containment;
+- **availability:** a missing start, commit, delivery, approval or permit;
+- **signal:** cancellation and revocation acknowledgements, and premature or unexpected terminals;
+- **check point:** decision findings only;
+- **missing evidence.**
+
+`mutants.json` lists each part separately. The eval gate has no component evidence. Plan §8.1 rows also pin the plan's kind and a note where the parts differ.
+
+**Masked mutants.** A mutant that changes a check no case can reach under the pinned mode is pinned as `masked`. Its whole run must equal the control: the exit, every case's evidence and the diagnostics. It is a recorded gap, never a detection. A masked run that differs is a technical failure.
+
+**Mutants not run.** `not_run` lists a plan mutant with a recorded conflict and its reproduction. It is never evidence. This is M25 (§14.9).
+
+**Gate regressions.** G1–G5 are unchanged. G6–G8 are new:
+
+| Case | Input | Required gate result |
+|---|---|---|
+| G6-m8-masked | M8 | masked, exit 0 |
+| G7-m8-masked-differs | M8, plus a barrier timeout in `pending-approval` | technical failure, exit 2 |
+| G8-m12-setup-failed | M12, plus `setup_failed` in `issued-permit` | technical failure, exit 2 (a setup failure is never predeclarable) |
+
+**Adapter mutants AM14–AM19** (plan §8.3) are run against the real build:
+
+| Mutant | Defect | Detection |
+|---|---|---|
+| AM14 | start refused by the adapter | `decision_without_evidence` |
+| AM15 | pending authority issued at setup | `identity_mapping_invalid` |
+| AM16 | lifecycle effects taken from receipts, with an injected snapshot that hides the approval | `effect_without_probe_evidence`; the correct report is not PASS |
+| AM17 | two lineages for one authority | `identity_mapping_invalid` |
+| AM18 | approve and issue after a denied start | `lifecycle_transition_mismatch` |
+| AM19 | setup state reported as step-0 effects | `effect_without_probe_evidence` |
+
+AM1–AM13 are re-verified under permit mode.
+
+### 14.9 Regressions AR1–AR4 and the M25 conflict
+
+AR1–AR4 (plan §7.6) are tests in `test/revocation/runtime-permit.test.ts`. They edit the recorded `ef775db` observations, then re-derive the report from the edited probes:
+
+| Regression | Input | Result |
+|---|---|---|
+| AR1 | `permit-single-use` with the AM19 report | HARNESS_ERROR `effect_without_probe_evidence` for both effects; the correct report is PASS |
+| AR2 | `pending-approval` with an approved baseline | `identity_mapping_invalid`; no lifecycle effect from the baseline |
+| AR3 | `approval-before-cut` with `approved_seq` ≤ `baseline_seq` | inconsistent state evidence, `approval_granted@0` unconfirmed, UNASSESSABLE, never PASS |
+| AR4 | `issue-after-cut` with the permit first shown at the revoke step | `lifecycle_transition_mismatch` |
+
+**M25 is not run.** The plan's M25 is an over-fencing control: issue requires `pending` instead of `approved`. Its patch also denies the setup issue of every `initial: issued` authority (`not_approved`). Every case with such an authority then fails its setup (`setup_failed`), so the whole mutant run is a technical failure, never a detection. Choosing another over-fencing mutant would deviate from the approved plan. The conflict and its reproduction are recorded in the manifest's `not_run` and in the pin review, and nothing replaces M25 until a decision is made.

@@ -163,7 +163,7 @@ jobs:
   revocation-runtime:
     name: revocation runtime adapter (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -179,23 +179,23 @@ jobs:
       - name: 1. declared-profile run against the pinned runtime (lock verified fail closed, SUT baseline reproduced); exit 3 = profile accepted, not a contract pass
         run: |
           set +e
-          node dist/src/revocation-cli.js run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-runtime-a --verify-baseline
+          node dist/src/revocation-cli.js run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-runtime-a --verify-baseline
           code=$?
           set -e
           test "$code" -eq 3
       - name: 2. independent rerun, complete bundle byte comparison, committed fixture comparison
         run: |
           set +e
-          node dist/src/revocation-cli.js run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-runtime-b --verify-baseline
+          node dist/src/revocation-cli.js run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-runtime-b --verify-baseline
           code=$?
           set -e
           test "$code" -eq 3
           diff -r out/revocation-runtime-a out/revocation-runtime-b
-          cmp out/revocation-runtime-a/observations.json test/fixtures/revocation-runtime/a9deab6-baseline-observations.json
+          cmp out/revocation-runtime-a/observations.json test/fixtures/revocation-runtime/ef775db-baseline-observations.json
       - name: 2b. recorded observations re-evaluated without the SUT give the same evidence, acceptance fields and exit 3
         run: |
           set +e
-          node dist/src/revocation-cli.js evaluate --observations out/revocation-runtime-a/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-recorded
+          node dist/src/revocation-cli.js evaluate --observations out/revocation-runtime-a/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-recorded
           code=$?
           set -e
           test "$code" -eq 3
@@ -211,13 +211,26 @@ jobs:
           set -e
           test "$code" -eq 3
           cmp out/revocation-recorded-a682e44/observations.json test/fixtures/revocation-runtime/a682e44-baseline-observations.json
-      - name: 3. tests against the pinned runtime
-        run: node --test --test-concurrency=1 dist/test/revocation/runtime-sut.test.js
+      - name: 2d. earlier pin (a9deab6, format 2) recorded observations re-evaluated unchanged under its historical lock; exit 3
+        run: |
+          set +e
+          node dist/src/revocation-cli.js evaluate --observations test/fixtures/revocation-runtime/a9deab6-baseline-observations.json --lock profiles/revocation/history/sut.revocation.a9deab6.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-recorded-a9deab6
+          code=$?
+          set -e
+          test "$code" -eq 3
+          cmp out/revocation-recorded-a9deab6/observations.json test/fixtures/revocation-runtime/a9deab6-baseline-observations.json
+          node -e "const r=require('./out/revocation-recorded-a9deab6/report.json');if(r.counts.in_profile!==17||r.counts.PASS!==17||r.counts.not_assessed_requirements!==43){console.error(JSON.stringify(r.counts));process.exit(1)}"
+      - name: 3. tests against the pinned runtime (no skips allowed)
+        run: |
+          set -o pipefail
+          node --test --test-concurrency=1 --test-reporter=tap dist/test/revocation/runtime-sut.test.js | tee out/revocation-runtime-sut.tap
+          grep -q '^# skipped 0$' out/revocation-runtime-sut.tap
+          grep -q '^# fail 0$' out/revocation-runtime-sut.tap
         env:
           ACE_REVOCATION_WORK: ${{ github.workspace }}/.work/revocation
-      - name: 4. SUT mutants M1-M11, M15-M37 (golden-hashed manifest, typechecked patches, exact witnesses) and adapter mutants AM1-AM13; exit 0 = every mutant detected
-        run: node dist/src/revocation-cli.js mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-mutants
-      - name: 4b. mutant gate regressions G1-G5 (real pinned runtime; unchanged M1 and M10 detected, a malformed observation in another case or an extra M10 timeout or another error beside M4's predeclared one rejected as technical)
+      - name: 4. SUT mutants (25 with exact witnesses, 6 masked legacy-path mutants pinned to the control, M25 not run with its recorded conflict) and adapter mutants AM1-AM19; exit 0 = every mutant detected and every masking pin holds
+        run: node dist/src/revocation-cli.js mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-mutants
+      - name: 4b. mutant gate regressions G1-G8 (real pinned runtime; unchanged M1 and M10 detected, M8 masked; a malformed observation in another case, an extra timeout, another error beside M4's predeclared one, a masked run that differs or a setup failure rejected as technical)
         run: node dist/scripts/mutant-gate-regressions.js --out out/revocation-mutant-gate-regressions.json
       - name: 5. evaluator regression gate (0.3.0 step path unchanged)
         run: node dist/scripts/revocation-regressions.js --out out/revocation-regressions.json
@@ -228,6 +241,7 @@ jobs:
           name: revocation-runtime-node${{ matrix.node }}
           path: |
             out/revocation-runtime-a/**
+            out/revocation-runtime-sut.tap
             out/revocation-mutants/mutants.json
             out/revocation-mutants/manifest.json
             out/revocation-mutant-gate-regressions.json
@@ -237,12 +251,12 @@ jobs:
   revocation-runtime-gates:
     name: revocation runtime-own gate ${{ matrix.gate }} (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         node: [22, 24]
-        gate: [tenant, ancestor, regressions]
+        gate: [tenant, ancestor, regressions, lifecycle, lifecycle_regressions, lifecycle_determinism]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

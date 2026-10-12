@@ -1,0 +1,17 @@
+diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
+index f53ffcf..2983f5e 100644
+--- a/src/guarded-executor.ts
++++ b/src/guarded-executor.ts
+@@ -1145,10 +1145,10 @@ export class GuardedExecutor<M extends LifecycleMode = "legacy"> {
+     this.#requirePermitMode("issuePermit");
+     const record = this.#lineageFor(lineageIdOf(input, "issue"), "issue");
+     const b = record.bindings;
+-    if (record.state !== "approved") throw this.#lifecycleDenial("issue", "not_approved", record, b.request_id);
++    if (record.state !== "pending") throw this.#lifecycleDenial("issue", "not_approved", record, b.request_id);
+     this.#reverifyLineageAuthority(record, "issue");
+     this.#finalFence(record, "issue", b.request_id, record.approvalExpiresAtMs, () => this.#expireApproval(record, "issue"));
+-    if (record.state !== "approved") throw this.#lifecycleDenial("issue", "not_approved", record, b.request_id);
++    if (record.state !== "pending") throw this.#lifecycleDenial("issue", "not_approved", record, b.request_id);
+     const nowMs = this.clock.nowMs();
+     record.permitState = "issued";
+     record.permitId = `permit-${++this.#permitSeq}`;

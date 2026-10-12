@@ -1,5 +1,5 @@
 diff --git a/src/authority-revocation.ts b/src/authority-revocation.ts
-index 607a36f..d3a7d2c 100644
+index e8ea58a..05e5595 100644
 --- a/src/authority-revocation.ts
 +++ b/src/authority-revocation.ts
 @@ -112,6 +112,7 @@ export class AuthorityRevocationRegistry {

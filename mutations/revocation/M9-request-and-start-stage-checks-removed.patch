@@ -1,8 +1,8 @@
 diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
-index 7a08afb..984ed25 100644
+index f53ffcf..439f8ca 100644
 --- a/src/guarded-executor.ts
 +++ b/src/guarded-executor.ts
-@@ -1013,7 +1013,7 @@ export class GuardedExecutor {
+@@ -1557,7 +1557,7 @@ export class GuardedExecutor<M extends LifecycleMode = "legacy"> {
  
    #denyIfRevoked(stage: Exclude<RevocationStage, "delivery">, requestId: string, authority: CheckedAuthority & { tool: string }): void {
      const match = this.#revocationAt(stage, requestId, authority);

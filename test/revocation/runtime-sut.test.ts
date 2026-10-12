@@ -27,7 +27,7 @@ test('pinned runtime: a fresh baseline run reproduces the committed fixture obse
   const { profile } = loadProfile(root, lock.profile, cases, corpusSha, VERSION, lock.sut_commit);
   const { supplement } = loadSupplement(root, lock.supplement, VERSION, lock.sut_commit);
   const run = await runProfile(env!.build, cases, cases.map(expected), profile, supplement);
-  const fixture = readFileSync(join(root, 'test/fixtures/revocation-runtime/a9deab6-baseline-observations.json'), 'utf8');
+  const fixture = readFileSync(join(root, 'test/fixtures/revocation-runtime/ef775db-baseline-observations.json'), 'utf8');
   assert.equal(canonicalJson(observationsOf(run)) + '\n', fixture);
   for (const r of [...run.corpus, ...run.supplement]) {
     assert.deepEqual(requestDisciplineIssues(r.run), [], r.c.id);
@@ -108,4 +108,24 @@ test('pinned runtime, review experiment: managed state lists the key but get() i
   });
   assert.notEqual(e.verdict, 'PASS'); assert.deepEqual(e.errors, []);
   assert.ok(e.incomplete.some(x => x.includes('get(key) returned undefined')), JSON.stringify(e.incomplete));
+});
+
+test('pinned runtime, permit mode: one process() per authority at setup; steps call only approve, issuePermit and start; never resolveApproval()', { skip }, async () => {
+  const { profile } = loadProfile(root, lock.profile, cases, corpusSha, VERSION, lock.sut_commit);
+  const { supplement } = loadSupplement(root, lock.supplement, VERSION, lock.sut_commit);
+  const proto = loadRevocationSut(env!.build).GuardedExecutor.prototype as Record<string, unknown>;
+  const counts: Record<string, number> = { process: 0, resolveApproval: 0, approve: 0, issuePermit: 0, start: 0 };
+  const restores = Object.keys(counts).map(name => wrapMethod(proto, name, original => function (this: unknown, ...a: unknown[]) { counts[name]++; return original.apply(this, a); }));
+  const ids = ['pending-approval', 'derived-authority', 'permit-single-use', 'approval-before-cut', 'sup-ancestor-revoke-unused-permit'];
+  try {
+    const r = await runProfile(env!.build, cases, cases.map(expected), profile, supplement, { only: x => ids.includes(x) });
+    assert.deepEqual([...r.corpus, ...r.supplement].map(x => x.evidence.verdict), ids.map(() => 'PASS'));
+    const all = [...r.corpus.map(x => x.c), ...r.supplement.map(x => x.c)];
+    const ops = (op: string) => all.reduce((n, c) => n + c.steps.filter(s => s.op === op).length, 0);
+    const issued = all.reduce((n, c) => n + c.authorities.filter(a => a.initial === 'issued').length, 0);
+    assert.deepEqual(counts, {
+      process: all.reduce((n, c) => n + c.authorities.length, 0), resolveApproval: 0,
+      approve: issued + ops('approve'), issuePermit: issued + ops('issue'), start: ops('start'),
+    });
+  } finally { for (const restore of restores) restore(); }
 });
