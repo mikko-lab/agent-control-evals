@@ -384,6 +384,14 @@ jobs:
         run: node dist/src/external-actions-cli.js p1b-gate --runs out/p1b/gate --out out/p1b/gate.json
       - name: 10. privileged regressions PR1-PR7 (missing isolation, writable or missing channel, failed closure, effect beside cleanup, retry state) and control-run checks
         run: sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-regressions --out out/p1b/regressions --control out/p1b/a
+      - name: diagnostics (summary and every non-PASS case's errors, findings and gaps)
+        if: always()
+        run: |
+          for d in out/p1b/a out/p1b/b; do
+            [ -f "$d/summary.md" ] && cat "$d/summary.md"
+            [ -f "$d/evidence.jsonl" ] && node -e "for (const l of require('fs').readFileSync('$d/evidence.jsonl','utf8').split('\n').filter(Boolean)) { const e = JSON.parse(l); if (e.verdict !== 'PASS') console.log(e.case_id, e.verdict, JSON.stringify({ errors: e.errors, incomplete: e.incomplete, notes: e.closure.notes }).slice(0, 4000)); }"
+          done
+          [ -f out/p1b/a/run.log ] && tail -c 20000 out/p1b/a/run.log || true
       - name: upload P1b evidence
         if: always()
         uses: actions/upload-artifact@v4
