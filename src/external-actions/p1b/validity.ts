@@ -36,7 +36,11 @@ export function runValidity(plan: CasePlan, config: RunConfig, observation: unkn
   }
   if (iso.canary_hits.length) e('canary_hit', '/run_record/isolation/canary_hits', `${iso.canary_hits.length} canary hit(s)`);
   if (iso.config_after_sha256 === null) e('isolation_after_missing', '/run_record/isolation', 'no configuration record after the case');
-  else if (iso.config_after_sha256 !== iso.config_before_sha256) e('isolation_changed', '/run_record/isolation', 'the isolation configuration changed during the case');
+  else if (iso.config_after_sha256 !== iso.config_before_sha256) {
+    const a = iso.config_before.split('\n'), b = (iso.config_after ?? '').split('\n');
+    const changed = [...a.filter(l => !b.includes(l)).map(l => `- ${l.trim()}`), ...b.filter(l => !a.includes(l)).map(l => `+ ${l.trim()}`)].slice(0, 12);
+    e('isolation_changed', '/run_record/isolation', `the isolation configuration changed during the case: ${changed.join(' | ')}`);
+  }
   if (!iso.drop_counters_after) e('isolation_after_missing', '/run_record/isolation', 'no drop counters after the case');
   else {
     const keys = new Set([...Object.keys(iso.drop_counters_before), ...Object.keys(iso.drop_counters_after)]);

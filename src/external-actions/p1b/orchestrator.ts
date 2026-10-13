@@ -108,7 +108,12 @@ const lockedRules = ['*filter', ':INPUT DROP [0:0]', ':FORWARD DROP [0:0]', ':OU
 function setupNetwork(net: Net, cfg: RunConfig, plan: CasePlan, inject: Set<Injection>) {
   const ip = (...a: string[]) => sh('ip', a);
   const inNs = (ns: string, cmd: string, ...a: string[]) => sh('ip', ['netns', 'exec', ns, cmd, ...a]);
-  for (const n of Object.values(net.ns)) { ip('netns', 'add', n); ip('-n', n, 'link', 'set', 'lo', 'up'); }
+  for (const n of Object.values(net.ns)) {
+    ip('netns', 'add', n);
+    // No case namespace uses IPv6; it is off before any link exists, so no address changes state during the case.
+    if (existsSync('/proc/sys/net/ipv6')) inNs(n, 'sysctl', '-q', '-w', 'net.ipv6.conf.all.disable_ipv6=1', 'net.ipv6.conf.default.disable_ipv6=1');
+    ip('-n', n, 'link', 'set', 'lo', 'up');
+  }
   const d = net.ns.d;
   // P and Q live on the doubles' loopback; the doubles' namespace forwards towards the canary only.
   for (const r of ['P', 'Q'] as Recipient[]) ip('-n', d, 'addr', 'add', `${cfg.network.recipients[r].address}/32`, 'dev', 'lo');
@@ -131,7 +136,6 @@ function setupNetwork(net: Net, cfg: RunConfig, plan: CasePlan, inject: Set<Inje
   ip('-n', d, 'route', 'add', `${cfg.network.canary.address}/32`, 'dev', net.canary.vdbl);
   for (const x of net.identities) if (!inject.has('no-filter')) sh('ip', ['netns', 'exec', x.ns, 'iptables-restore'], filterRules(cfg));
   for (const n of [net.ns.g, net.ns.h]) sh('ip', ['netns', 'exec', n, 'iptables-restore'], lockedRules);
-  for (const n of [...net.identities.map(x => x.ns), net.ns.g]) if (existsSync('/proc/sys/net/ipv6')) inNs(n, 'sysctl', '-q', '-w', 'net.ipv6.conf.all.disable_ipv6=1');
   if (plan.delay_element && !inject.has('no-netem')) {
     const x = net.identities.find(i => i.key === plan.delay_element!.identity)!;
     inNs(d, 'tc', 'qdisc', 'add', 'dev', x.vdbl, 'root', 'netem', 'delay', `${plan.delay_element.delay_ms}ms`);
@@ -145,7 +149,8 @@ function configRecord(net: Net): string {
     const run = (cmd: string, ...a: string[]) => { const r = tryShell('ip', ['netns', 'exec', n, cmd, ...a]); return r.ok ? r.out : `ERROR ${r.out}`; };
     parts.push(`## ${key}`, run('ip', '-d', 'addr'), run('ip', 'route', 'show', 'table', 'all'),
       run('iptables-save').split('\n').filter(l => !l.startsWith('#')).join('\n'), run('tc', 'qdisc', 'show'),
-      `ip_forward=${run('cat', '/proc/sys/net/ipv4/ip_forward').trim()}`);
+      `ip_forward=${run('cat', '/proc/sys/net/ipv4/ip_forward').trim()}`,
+      `ipv6_disabled=${existsSync('/proc/sys/net/ipv6') ? run('cat', '/proc/sys/net/ipv6/conf/all/disable_ipv6').trim() : 'no-ipv6'}`);
   }
   return parts.join('\n');
 }
