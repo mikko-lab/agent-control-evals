@@ -492,6 +492,8 @@ No file of the ACS, automotive or revocation tracks changes, and no result is co
 
 **Before P1 starts:** D1, D2, D5, D7, D9 and D10 must be decided. D3 is partly settled by §5.5 (connection, request, draft and submission) and is decided with D9.
 
+**Decisions taken:** D1, D2, D3, D5, D7, D9 and D10 are recorded in [decisions.md](decisions.md), together with the closure, cleanup and identity rules and the timing values still open for P1b.
+
 ## 11. Not part of this plan
 
 This plan authorizes no implementation, model run, merge or release. It changes no code, runtime, corpus, oracle, schema, pin or version. It does not claim that any guard holds any boundary.
