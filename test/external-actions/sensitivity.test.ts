@@ -31,7 +31,7 @@ test('verdict regressions RV1-RV6 reproduce their pins (precedence HARNESS_ERROR
   assert.ok(runRegression(profile, REGRESSIONS[2]).pin.effect_findings.includes('unexpected_submission_received@P'));
 });
 
-test('adapter mutants: pinned results, verdict and diagnosis detection kept apart; AX4 and AX6 are recorded conflicts with the plan', () => {
+test('adapter mutants: pinned results with their detection kind; AX6 keeps the forbidden case as a regression', () => {
   const pins = JSON.parse(readFileSync(join(root, PATHS.mutants), 'utf8')).mutants;
   const kinds: string[] = [];
   for (const m of ADAPTER_MUTANTS) for (const input of MUTANT_INPUTS[m.id]) {
@@ -43,8 +43,8 @@ test('adapter mutants: pinned results, verdict and diagnosis detection kept apar
     kinds.push(`${m.id}:${pin.status}:${r.detection}`);
   }
   assert.deepEqual(kinds, [
-    'AX1:pinned:verdict', 'AX2:pinned:verdict', 'AX3:pinned:verdict', 'AX4:conflict_not_pinned:verdict', 'AX5:pinned:verdict',
-    'AX6:conflict_not_pinned:findings_or_exit', 'AX6:conflict_not_pinned:verdict', 'AX7:pinned:verdict', 'AX7:pinned:verdict',
+    'AX1:pinned:verdict', 'AX2:pinned:verdict', 'AX3:pinned:verdict', 'AX4:pinned:verdict', 'AX5:pinned:verdict',
+    'AX6:pinned:verdict', 'AX6:regression:findings_or_exit', 'AX7:pinned:verdict', 'AX7:pinned:verdict',
   ]);
   // AX4 misattributes the first attempt's late effects to the retry. With per-attempt evaluation that is no longer a
   // diagnosis-only change: a1's expected effects are missing and the retry's are unexpected.
@@ -52,6 +52,14 @@ test('adapter mutants: pinned results, verdict and diagnosis detection kept apar
   assert.deepEqual([ax4.correct.verdict, ax4.mutant.verdict], ['PASS', 'VIOLATION']);
   assert.deepEqual([ax4.correct.attribution, ax4.mutant.attribution], [['P:record:p-rec-1=attributed:a1'], ['P:record:p-rec-1=attributed:a2']]);
   assert.ok(ax4.mutant.effect_findings.includes('missing_submission_received@P') && ax4.mutant.effect_findings.includes('unexpected_submission_received@P:late'));
+  // AX6: the control is the verdict witness; in the forbidden case the mutant keeps the earlier confirmed findings.
+  const witness = runMutant(profile, 'AX6', 'deferred-persist-allowed');
+  assert.deepEqual([witness.correct.verdict, witness.mutant.verdict], ['PASS', 'UNASSESSABLE']);
+  const forbidden = runMutant(profile, 'AX6', 'deferred-persist-forbidden~xm12');
+  assert.deepEqual([forbidden.correct.verdict, forbidden.mutant.verdict], ['VIOLATION', 'VIOLATION']);
+  assert.deepEqual(forbidden.mutant.effect_findings, ['unexpected_connection_accepted@P', 'unexpected_request_received@P']);
+  assert.ok(forbidden.correct.effect_findings.includes('unexpected_submission_received@P:late'));
+  assert.deepEqual([forbidden.correct.exit, forbidden.mutant.exit], [1, 2]);
 });
 
 test('self-test gate passes and every golden matches', () => {

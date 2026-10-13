@@ -158,18 +158,23 @@ Each mutant replaces exactly one entry of the evaluator's rule table. The pins r
 | AX1 | `expectedSubmissionConfirmed` | `submit-allowed-P~recipient-rejects` | VIOLATION `missing_submission_received`, exit 1 | PASS | verdict |
 | AX2 | `expectedSubmissionConfirmed` | `submit-allowed-P~recipient-rejects` | VIOLATION `missing_submission_received`, exit 1 | PASS | verdict |
 | AX3 | `admitEntry` | `delayed-send~xm13a` | VIOLATION, late unexpected connection and request at Q, exit 1 | UNASSESSABLE (counters without entries), exit 2 | verdict |
-| AX4 | `attribute` | `retry-delayed` | PASS, record attributed to `a1` | VIOLATION: `a1`'s effects missing, the retry's unexpected | **conflict, not pinned** (verdict) |
+| AX4 | `attribute` | `retry-delayed` | PASS, record attributed to `a1` | VIOLATION: `a1`'s effects missing, the retry's unexpected | verdict |
 | AX5 | `finalObservation` | `delayed-send~xm13b` | UNASSESSABLE (closure) | PASS | verdict |
-| AX6 | `finalObservation` | see below | | | **conflict, not pinned** |
+| AX6 | `finalObservation` | `deferred-persist-allowed` | PASS | UNASSESSABLE (`submit_received` without completion or record) | verdict |
+| AX6 (regression) | `finalObservation` | `deferred-persist-forbidden~xm12` | VIOLATION, exit 1 | VIOLATION, exit 2: the earlier connection and request findings stay, the stored submission finding is lost | not counted; pinned to keep its findings |
 | AX7 | `requestEvidence` | `keepalive-multi-P` / `connection-no-request-P` | PASS / PASS | VIOLATION `missing_request_received` / `unexpected_request_received` | verdict |
 
-**AX4 conflict with the plan.** The plan expects AX4 to be detected by diagnosis only. Since effects are evaluated per attempt, an effect attributed to the wrong attempt no longer satisfies the right attempt's expectation. The mutant's misattribution therefore changes the verdict (PASS versus VIOLATION). The result is recorded with the status `conflict_not_pinned`, as is AX6's.
+Pin status:
+- `pinned` marks the witness whose detection counts.
+- `regression` marks a further input that must reproduce and keep the earlier confirmed findings; it is not counted as detection.
 
-**AX6 conflict with the plan.** The plan pins AX6 on `deferred-persist-forbidden` with XM12 as UNASSESSABLE. That result does not follow from the kept rules:
-- The request XM12 forwards is journaled before executor quiescence. It is therefore a confirmed `unexpected_request_received` (and `unexpected_connection_accepted`) at P whether or not recipient quiescence is awaited.
-- The mutant stays VIOLATION. Only the stored submission finding and the exit (1 versus 2) change.
+The self-test also requires every mutant to have a pinned witness.
 
-The control `deferred-persist-allowed`, for which plan §7.1 also lists AX6, gives a verdict detection: PASS versus UNASSESSABLE. Both results are recorded in `mutations/external-actions/adapter-mutants.json` with the status `conflict_not_pinned`. The self-test checks that they reproduce, but does not count them as detection. AX6 is pinned once that choice is decided.
+**Plan history (superseded expectations, not measured results).** The plan as merged in #20 expected:
+- **AX4:** detection by diagnosis only. Since effects are evaluated per attempt, the mutant's misattribution leaves `a1`'s expected effects missing and makes the effects attributed to `a2` unexpected. It is therefore pinned as a verdict change.
+- **AX6:** the witness `deferred-persist-forbidden` with XM12, with the mutant result UNASSESSABLE. That does not follow from the kept rules: the request XM12 forwards is itself a confirmed unexpected connection and request at P. The control `deferred-persist-allowed` (also listed for AX6 in plan §7.1) is the pinned witness. The forbidden case stays as a regression.
+
+Both were decided after the review. Plan §7.3 now carries the current pins and records this history.
 
 ## Implementation choices to review
 

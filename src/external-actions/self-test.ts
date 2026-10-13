@@ -57,7 +57,7 @@ export const REGRESSIONS: { id: string; input: string; with: string[]; meaning: 
 ];
 export const MUTANT_INPUTS: Record<MutantId, string[]> = {
   AX1: ['submit-allowed-P~recipient-rejects'], AX2: ['submit-allowed-P~recipient-rejects'], AX3: ['delayed-send~xm13a'],
-  AX4: ['retry-delayed'], AX5: ['delayed-send~xm13b'], AX6: ['deferred-persist-forbidden~xm12', 'deferred-persist-allowed'],
+  AX4: ['retry-delayed'], AX5: ['delayed-send~xm13b'], AX6: ['deferred-persist-allowed', 'deferred-persist-forbidden~xm12'],
   AX7: ['keepalive-multi-P', 'connection-no-request-P'],
 };
 
@@ -132,7 +132,7 @@ export function selfTest(root: string): SelfTestResult {
     return { id: rv.id, input: rv.input, meaning: rv.meaning, ok: pinned !== null && canonicalJson(pinned) === canonicalJson(observed), pinned, observed };
   });
 
-  const axPins = JSON.parse(read(PATHS.mutants)) as { mutants: { id: MutantId; input: string; status: 'pinned' | 'conflict_not_pinned'; detection: string; correct: Pin; mutant: Pin }[] };
+  const axPins = JSON.parse(read(PATHS.mutants)) as { mutants: { id: MutantId; input: string; status: 'pinned' | 'regression'; detection: string; correct: Pin; mutant: Pin }[] };
   const mutants: SelfTestResult['mutants'] = [];
   for (const m of ADAPTER_MUTANTS) for (const input of MUTANT_INPUTS[m.id]) {
     const r = runMutant(profile, m.id, input);
@@ -141,10 +141,14 @@ export function selfTest(root: string): SelfTestResult {
     const recorded = pinned !== null && canonicalJson({ correct: pinned.correct, mutant: pinned.mutant, detection: pinned.detection }) === canonicalJson(observed);
     const status = pinned?.status ?? 'missing';
     // A pinned mutant counts only when it reproduces its pin, replaces exactly one rule, is detected by verdict or
-    // diagnosis, and neither evaluation is a technical failure. A conflict entry is checked for reproducibility only.
-    const ok = recorded && r.replaced.length === 1 && !r.technical && (status === 'conflict_not_pinned' || (status === 'pinned' && (r.detection === 'verdict' || r.detection === 'diagnosis')));
+    // diagnosis, and neither evaluation is a technical failure. A regression entry is not counted as detection: it must
+    // reproduce, and the mutant must keep earlier confirmed findings (a non-empty subset of the correct ones).
+    const kept = r.mutant.effect_findings.length > 0 && r.mutant.effect_findings.every(f => r.correct.effect_findings.includes(f));
+    const ok = recorded && r.replaced.length === 1 && !r.technical && ((status === 'regression' && kept) || (status === 'pinned' && (r.detection === 'verdict' || r.detection === 'diagnosis')));
     mutants.push({ id: m.id, input, status, ok, detection: r.detection, pinned, observed });
   }
+  // Every mutant has at least one pinned witness whose detection is counted.
+  for (const m of ADAPTER_MUTANTS) check(`${m.id} has a pinned witness`, mutants.some(x => x.id === m.id && x.status === 'pinned' && x.ok), PATHS.mutants);
   const gate_passed = goldens.every(g => g.ok) && regressions.every(r => r.ok) && mutants.every(m => m.ok);
   return { goldens, baseline, regressions, mutants, gate_passed };
 }

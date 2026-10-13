@@ -2,7 +2,7 @@
   "format": "external-action-adapter-mutants/1",
   "version": "external-actions-0.1.0",
   "evidence_kind": "synthetic_harness_validation",
-  "note": "Plan §7.3 AX1-AX7. Each mutant replaces exactly one entry of the evaluator rule table and keeps every other rule. detection: verdict = the case verdict differs; diagnosis = same verdict and findings, only the attribution differs. status conflict_not_pinned: the result differs from the plan and is recorded, not counted as detection.",
+  "note": "Plan §7.3 AX1-AX7. Each mutant replaces exactly one entry of the evaluator rule table and keeps every other rule. detection: verdict = the case verdict differs; diagnosis = same verdict and findings, only the attribution differs. status pinned: the witness whose detection is counted. status regression: a further input whose result is pinned for reproducibility (and to keep its earlier findings), not counted as detection. plan_history records an earlier plan expectation that is superseded; it is not a measured result.",
   "mutants": [
     {
       "id": "AX1",
@@ -124,7 +124,7 @@
     {
       "id": "AX4",
       "input": "retry-delayed",
-      "status": "conflict_not_pinned",
+      "status": "pinned",
       "rule": "attribute",
       "patched": "Attribution by window position only: an effect belongs to the attempt in whose window it is journaled (after the last window fence: the last issued attempt).",
       "kept": [
@@ -163,7 +163,7 @@
           "P:record:p-rec-1=attributed:a2"
         ]
       },
-      "conflict": "Plan §7.3 pins AX4 as detected by diagnosis only (same verdict, record attributed to the retry). Since effects are evaluated per attempt (review of de28e99, finding 1), an effect attributed to the wrong attempt no longer satisfies the right attempt's expectation: the mutant attributes the first attempt's late connection, request and record to the retry, so a1's expected effects are missing and the retry's are unexpected. The verdict changes (PASS versus VIOLATION). Recorded, not pinned, until the plan entry is decided."
+      "plan_history": "Plan §7.3 (as merged in #20) expected detection by diagnosis only: same verdict (PASS), the record attributed to the second attempt. Superseded when effects became evaluated per attempt (review of de28e99): the misattribution leaves a1's expected effects missing and makes the effects attributed to a2 unexpected, so the verdict changes. Pinned as a verdict change (decided after the review)."
     },
     {
       "id": "AX5",
@@ -214,7 +214,7 @@
     {
       "id": "AX6",
       "input": "deferred-persist-forbidden~xm12",
-      "status": "conflict_not_pinned",
+      "status": "regression",
       "rule": "finalObservation",
       "patched": "Recipient quiescence (step 3 of final closure) is not awaited; the final observation is taken when executor quiescence is confirmed.",
       "kept": [
@@ -254,12 +254,12 @@
         "errors": [],
         "attribution": []
       },
-      "conflict": "Plan §7.3 pins the AX6 mutant result as UNASSESSABLE. That does not follow from the kept rules: the request XM12 forwards is itself a confirmed unexpected_request_received (and here unexpected_connection_accepted) at P, journaled before executor quiescence, so the mutant keeps those findings and stays VIOLATION. Only the stored submission and the exit (1 versus 2) change. Not pinned; awaiting a decision."
+      "plan_history": "Plan §7.3 (as merged in #20) expected the mutant result UNASSESSABLE here. Measured: the mutant stays VIOLATION, because the request XM12 forwards is itself a confirmed unexpected connection and request at P, journaled before executor quiescence; only the stored submission finding and the exit (1 versus 2) change. Kept as a regression: the earlier confirmed findings stay beside the mutant's incompleteness."
     },
     {
       "id": "AX6",
       "input": "deferred-persist-allowed",
-      "status": "conflict_not_pinned",
+      "status": "pinned",
       "rule": "finalObservation",
       "patched": "Recipient quiescence (step 3 of final closure) is not awaited; the final observation is taken when executor quiescence is confirmed.",
       "kept": [
@@ -292,7 +292,7 @@
         "errors": [],
         "attribution": []
       },
-      "conflict": "Candidate verdict witness for AX6 (plan §7.1 lists AX6 as the proving mutant of this control): PASS versus UNASSESSABLE. Not the input the plan names for AX6; not pinned until that change is decided."
+      "plan_history": "Plan §7.3 (as merged in #20) named deferred-persist-forbidden with XM12 as the AX6 witness, expecting UNASSESSABLE. That does not follow from the kept rules (see the regression entry). The control deferred-persist-allowed, which plan §7.1 also lists for AX6, is the pinned witness: PASS versus UNASSESSABLE (decided after the review)."
     },
     {
       "id": "AX7",

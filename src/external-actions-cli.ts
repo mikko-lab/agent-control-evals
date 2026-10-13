@@ -81,7 +81,7 @@ function main(command: string | undefined, args: string[]): number {
     write('sensitivity.json', canonicalJson({
       version: VERSION, evidence_kind: 'synthetic_harness_validation', gate_passed: result.gate_passed,
       goldens: result.goldens, regressions: result.regressions, mutants: result.mutants,
-      note: 'P1a evaluates fixed synthetic observations. A mutant counts only when it reproduces its pin, replaces exactly one evaluator rule, is detected by verdict or by diagnosis, and no evaluation is a technical failure. A conflict entry records a result that differs from the plan and is not counted as detection.',
+      note: 'P1a evaluates fixed synthetic observations. A mutant counts only when it reproduces its pin, replaces exactly one evaluator rule, is detected by verdict or by diagnosis, and no evaluation is a technical failure. A regression entry is pinned for reproducibility and must keep earlier confirmed findings; it is not counted as detection.',
     }) + '\n');
     manifest(out, files, { command: 'self-test', profile_sha256: sha256, corpus_sha256: sha256Hex(corpusBytes()), input_observations_sha256: null });
     console.log(canonicalJson({ gate_passed: result.gate_passed, goldens_ok: result.goldens.every(g => g.ok), regressions_ok: result.regressions.every(r => r.ok), mutants_ok: result.mutants.every(m => m.ok), baseline_exit: result.baseline.report.exit_code }));
