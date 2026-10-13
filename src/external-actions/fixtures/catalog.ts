@@ -3,8 +3,8 @@
  * evidence defect. Fixtures emulate the effects of the planned guard faults (XM) without running them: no guard runs in
  * P1a. The committed fixture files under test/fixtures/external-actions/ are golden-checked against this catalog.
  */
-import { CaseDef, Observation } from '../spec/model';
-import { AttemptScript, build, Script } from './builder';
+import { CaseDef, contentDigest, Entry, FormDef, logicalId, Observation, States } from '../spec/model';
+import { AttemptScript, build, rehash, Script } from './builder';
 
 export interface Fixture { id: string; case_id: string; description: string; script: Omit<Script, 'case'>; edit?: (o: Observation) => void }
 
@@ -62,7 +62,63 @@ export const VARIANTS: Fixture[] = [
   { id: 'deferred-persist-allowed~recipient-timeout', case_id: 'deferred-persist-allowed', description: "P's background job does not finish within T_r", script: { attempts: { a1: allow() }, recipient_quiescence: 'timeout' } },
 ];
 
-export const ALL_FIXTURES: Fixture[] = [...BASELINE, ...VARIANTS];
+/** Every snapshot a fixture records after the baseline, in order. */
+const laterStates = (o: Observation): States[] => [
+  ...o.snapshots.provisional.map(p => p.states),
+  ...(o.final_closure.steps.executor_quiescence.recipient_view ? [o.final_closure.steps.executor_quiescence.recipient_view.states] : []),
+  ...(o.final_closure.steps.final_snapshots.states ? [o.final_closure.steps.final_snapshots.states] : []),
+  ...(o.post_cleanup_collection?.snapshots.states ? [o.post_cleanup_collection.snapshots.states] : []),
+];
+const FORM_P: FormDef = { form_id: 'form-p', recipient: 'P', autosave: true, excluded_fields: ['client_ts', 'csrf', 'session'] };
+/** Content digests of the fixed P1 field sets (the fill fields and the submission fields). */
+const FILL_DIGEST = contentDigest(FORM_P, { email: 'ada@example.test', name: 'Ada Example' });
+const SUBMIT_DIGEST = contentDigest(FORM_P, { email: 'ada@example.test', message: 'practice submission', name: 'Ada Example' });
+
+/** Review regressions (per-attempt effects, draft history, submission record binding and persistence). */
+export const REVIEW_REGRESSIONS: Fixture[] = [
+  {
+    id: 'fill-no-submit~wrong-attempt', case_id: 'fill-no-submit',
+    description: "the allowed fill a1 never reaches P; the denied submit a2 does (P rejects it): P's totals equal the expected ones, but the effects belong to the wrong attempt",
+    script: { attempts: { a1: allow({ forward: false }), a2: deny({ forward: true, outcome: 'reject' }) } },
+  },
+  {
+    id: 'fill-no-submit~ambiguous-request', case_id: 'fill-no-submit',
+    description: "a1's request carries no content digest, so it matches both attempts at P (ambiguous origin)",
+    script: { attempts: { a1: allow(), a2: deny() } },
+    edit: o => {
+      const j = o.journals.P!;
+      const req = j.find(e => e.kind === 'request_received') as Extract<Entry, { kind: 'request_received' }>;
+      req.content_digest = null;
+      o.journals.P = rehash(j);
+    },
+  },
+  {
+    id: 'fill-autosave~forbidden-draft-first', case_id: 'fill-autosave',
+    description: "P's draft first holds the submission content (forbidden; no draft_stored entry), later the authorized fill content",
+    script: { attempts: { a1: allow(), a2: deny() } },
+    edit: o => { for (const p of o.snapshots.provisional) p.states.P.drafts = [{ form_id: 'form-p', digest: SUBMIT_DIGEST }]; },
+  },
+  {
+    id: 'submit-allowed-P~record-identity-mismatch', case_id: 'submit-allowed-P',
+    description: "the stored record's content digest does not derive its logical_id (and differs from the received submission) in every snapshot",
+    script: { attempts: { a1: allow() } },
+    edit: o => { for (const s of laterStates(o)) for (const r of s.P.submissions) r.content_digest = FILL_DIGEST; },
+  },
+  {
+    id: 'submit-allowed-P~record-mutated', case_id: 'submit-allowed-P',
+    description: 'the stored record keeps its id and logical_id, but its content digest changes in the final snapshot',
+    script: { attempts: { a1: allow() } },
+    edit: o => { for (const r of o.final_closure.steps.final_snapshots.states!.P.submissions) r.content_digest = FILL_DIGEST; },
+  },
+  {
+    id: 'submit-allowed-P~record-relabelled', case_id: 'submit-allowed-P',
+    description: 'the stored record keeps its id but shows another, unauthorized logical submission in the final snapshot',
+    script: { attempts: { a1: allow() } },
+    edit: o => { for (const r of o.final_closure.steps.final_snapshots.states!.P.submissions) { r.content_digest = FILL_DIGEST; r.logical_id = logicalId('form-p', FILL_DIGEST); } },
+  },
+];
+
+export const ALL_FIXTURES: Fixture[] = [...BASELINE, ...VARIANTS, ...REVIEW_REGRESSIONS];
 
 export function buildFixture(f: Fixture, cases: CaseDef[]): Observation {
   const c = cases.find(x => x.id === f.case_id);
