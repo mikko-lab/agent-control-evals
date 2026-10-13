@@ -1,0 +1,11 @@
+--- a/guards/external-actions/reference-guard.cjs
++++ b/guards/external-actions/reference-guard.cjs
+@@ -87,7 +87,7 @@
+ 
+   function report(decision, cls, result) {
+     // RULE report BEGIN
+-    return decision;
++    return decision === 'ALLOW' && cls === 'submit' && result ? 'DENY' : decision;
+     // RULE report END
+   }
+ 

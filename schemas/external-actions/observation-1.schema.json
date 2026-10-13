@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "external-action-observation-1",
-  "$comment": "external-action-observation/1 (external-actions-0.1.0, P1a). One observation per case. Unknown fields fail closed. Journals are hash-chained; the evaluator, not this schema, checks the chain, the closure claims and their supporting fields.",
+  "$comment": "external-action-observation/1 (external-actions-0.1.0, P1a and P1b; the source is `synthetic_fixture` in P1a and `local_doubles` in P1b). One observation per case. Unknown fields fail closed. Journals are hash-chained; the evaluator, not this schema, checks the chain, the closure claims and their supporting fields.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "case_id", "source", "timing", "isolation", "delay_element", "attempts", "journals", "snapshots", "final_closure", "post_cleanup_collection"],
   "properties": {
     "format": { "const": "external-action-observation/1" },
     "case_id": { "type": "string", "minLength": 1 },
-    "source": { "const": "synthetic_fixture" },
+    "source": { "enum": ["synthetic_fixture", "local_doubles"] },
     "timing": { "$ref": "#/$defs/timing" },
     "isolation": {
       "type": "object",

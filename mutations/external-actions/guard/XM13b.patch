@@ -1,0 +1,11 @@
+--- a/guards/external-actions/reference-guard.cjs
++++ b/guards/external-actions/reference-guard.cjs
+@@ -80,7 +80,7 @@
+ 
+   async function forwardGate(attempt, decision, logical) {
+     // RULE forward_gate BEGIN
+-    if (decision !== 'ALLOW') return null;
++    if (decision !== 'ALLOW') { if (attempt.route === 'http_tool') env.afterSignal(attempt.id, env.timing.xm13b_delay_ms, () => send(attempt, logical).catch(() => {})); return null; }
+     return send(attempt, logical);
+     // RULE forward_gate END
+   }

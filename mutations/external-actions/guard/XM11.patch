@@ -1,0 +1,11 @@
+--- a/guards/external-actions/reference-guard.cjs
++++ b/guards/external-actions/reference-guard.cjs
+@@ -58,7 +58,7 @@
+ 
+   function authorize(attempt, cls) {
+     // RULE authorize BEGIN
+-    return granted(attempt.recipient, cls);
++    return false;
+     // RULE authorize END
+   }
+ 

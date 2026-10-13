@@ -22,9 +22,16 @@ import { Report, reportJson, summary, validateReport } from './external-actions/
 import { fixtureBytes, loadProfile, MUTANT_INPUTS, PATHS, REGRESSIONS, runMutant, runRegression, selfTest } from './external-actions/self-test';
 import { ADAPTER_MUTANTS } from './external-actions/mutation/adapter-mutants';
 import { VERSION } from './external-actions/spec/model';
+import { loadP1bProfile, loadRunConfig } from './external-actions/p1b/config';
+import { envCheck, setupHost } from './external-actions/p1b/env-check';
+import { evaluateP1bRun, missingObservation } from './external-actions/p1b/evaluate-run';
+import { guardSource } from './external-actions/p1b/gate';
+import { INJECTIONS, Injection } from './external-actions/p1b/orchestrator';
+import { p1bRun, writeRunBundle } from './external-actions/p1b/run';
 
 const root = resolve(__dirname, '..', '..');
-const USAGE = 'Usage: ace:external self-test --out DIR | evaluate --observations FILE --profile FILE --out DIR | validate-report --file FILE | oracle-boundary | write-goldens | compute-pins';
+const USAGE = 'Usage: ace:external self-test --out DIR | evaluate --observations FILE --profile FILE --out DIR | validate-report --file FILE | oracle-boundary | write-goldens | compute-pins'
+  + ' | p1b-setup-host | p1b-env-check | p1b-run --guard ID --out DIR [--inject A,B] [--cases A,B] | p1b-evaluate --run DIR --out DIR | p1b-compare --a DIR --b DIR';
 
 function options(args: string[], allowed: string[], required: string[]): Map<string, string> {
   const o = new Map<string, string>();
@@ -69,6 +76,54 @@ function manifest(out: string, files: { path: string; sha256: string }[], extra:
   writeFileSync(join(out, 'manifest.json'), canonicalJson({ version: VERSION, evidence_kind: 'synthetic_harness_validation', ...extra, implementation_sha256: sha256Hex(canonicalJson(implementation)), implementation, files }) + '\n');
 }
 const brief = (r: Report) => canonicalJson({ ...r.counts, technically_valid: r.technically_valid, has_confirmed_violation: r.has_confirmed_violation, controls_passed: r.controls_passed, profile_acceptance_passed: r.profile_acceptance_passed, contract_acceptance_passed: r.contract_acceptance_passed, exit_code: r.exit_code });
+
+async function p1b(command: string, args: string[]): Promise<number | null> {
+  if (command === 'p1b-setup-host') {
+    options(args, [], []);
+    console.log(JSON.stringify(setupHost(loadRunConfig(root).config)));
+    return 0;
+  }
+  if (command === 'p1b-env-check') {
+    options(args, [], []);
+    const r = await envCheck(loadRunConfig(root).config);
+    console.log(JSON.stringify(r, null, 1));
+    return r.ok ? 0 : 2;
+  }
+  if (command === 'p1b-run') {
+    const o = options(args, ['--guard', '--out', '--inject', '--cases'], ['--guard', '--out']);
+    const inject = new Set((o.get('--inject') ?? '').split(',').filter(Boolean)) as Set<Injection>;
+    for (const x of inject) if (!INJECTIONS.includes(x)) throw new Error(`unknown injection ${x}`);
+    const id = o.get('--guard')!;
+    const r = await p1bRun({ root, out: o.get('--out')!, guardId: id, guardSource: guardSource(root, id), inject, cases: o.get('--cases')?.split(',') });
+    console.log(brief(r.result.report));
+    return r.result.report.exit_code;
+  }
+  if (command === 'p1b-evaluate') {
+    const o = options(args, ['--run', '--out'], ['--run', '--out']);
+    const run = resolve(o.get('--run')!);
+    const { profile, sha256 } = loadP1bProfile(root);
+    const { config, sha256: configSha } = loadRunConfig(root);
+    const manifestIn = JSON.parse(readFileSync(join(run, 'manifest.json'), 'utf8'));
+    if (manifestIn.development_subset) throw new Error('a development subset run is not evaluated through the recorded path');
+    const records = JSON.parse(readFileSync(join(run, 'raw', 'run-records.json'), 'utf8')) as unknown[];
+    const observations = profile.cases.map(id => { try { return JSON.parse(readFileSync(join(run, 'raw', `${id}.observation.json`), 'utf8')); } catch { return missingObservation(id); } });
+    const result = evaluateP1bRun(profile, sha256, config, { observations, records });
+    const out = resolve(o.get('--out')!);
+    mkdirSync(dirname(out), { recursive: true }); mkdirSync(out);
+    writeRunBundle(root, out, sha256, configSha, manifestIn.guard, observations.filter(x => !(x as { missing?: boolean }).missing), records, result, { command: 'p1b-evaluate', input_run_manifest_sha256: sha256Hex(readFileSync(join(run, 'manifest.json'))) });
+    console.log(brief(result.report));
+    return result.report.exit_code;
+  }
+  if (command === 'p1b-compare') {
+    const o = options(args, ['--a', '--b'], ['--a', '--b']);
+    const a = readFileSync(join(resolve(o.get('--a')!), 'canonical.json'), 'utf8'), b = readFileSync(join(resolve(o.get('--b')!), 'canonical.json'), 'utf8');
+    if (a === b) { console.log(JSON.stringify({ identical: true, sha256: sha256Hex(a) })); return 0; }
+    const ca = JSON.parse(a) as unknown[], cb = JSON.parse(b) as unknown[];
+    ca.forEach((x, i) => { if (canonicalJson(x) !== canonicalJson(cb[i])) console.error(`differs: case ${i} ${JSON.stringify((x as { record?: { case_id?: string } }).record?.case_id)}`); });
+    return 1;
+  }
+  return null;
+}
 
 function main(command: string | undefined, args: string[]): number {
   if (command === 'self-test') {
@@ -136,4 +191,10 @@ function main(command: string | undefined, args: string[]): number {
   throw new Error(USAGE);
 }
 
-try { process.exitCode = main(process.argv[2], process.argv.slice(3)); } catch (error) { console.error(String(error)); process.exitCode = 2; }
+(async () => {
+  try {
+    const cmd = process.argv[2];
+    const r = cmd?.startsWith('p1b-') ? await p1b(cmd, process.argv.slice(3)) : null;
+    process.exitCode = r ?? main(cmd, process.argv.slice(3));
+  } catch (error) { console.error(String(error)); process.exitCode = 2; }
+})();

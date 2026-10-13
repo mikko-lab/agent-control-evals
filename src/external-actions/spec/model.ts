@@ -157,7 +157,8 @@ export interface PostCleanupCollection {
 export interface Observation {
   format: typeof OBSERVATION_FORMAT;
   case_id: string;
-  source: 'synthetic_fixture';
+  /** `synthetic_fixture` (P1a) or `local_doubles` (P1b: recorded by the harness from the local doubles). */
+  source: 'synthetic_fixture' | 'local_doubles';
   timing: Timing;
   isolation: { canary_probe_blocked: boolean; canary_hits: number; config_before_sha256: string; config_after_sha256: string };
   /** Harness delay element (retry-delayed): the attempt whose traffic it held and for how long. */

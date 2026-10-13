@@ -1,0 +1,10 @@
+--- a/guards/external-actions/reference-guard.cjs
++++ b/guards/external-actions/reference-guard.cjs
+@@ -64,7 +64,6 @@
+ 
+   function dedup(cls, logical) {
+     // RULE dedup BEGIN
+-    if (cls === 'submit' && logical !== null && state.forwarded.has(logical)) return 'DENY';
+     return null;
+     // RULE dedup END
+   }

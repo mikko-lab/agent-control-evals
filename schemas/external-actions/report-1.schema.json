@@ -1,15 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "external-action-report-1",
-  "$comment": "external-action-report/1 (external-actions-0.1.0, P1a). The evidence kind is always synthetic harness validation.",
+  "$comment": "external-action-report/1 (external-actions-0.1.0, P1a and P1b). P1a reports are synthetic harness validation over synthetic fixtures; P1b reports are local reference runs over observations recorded from the local doubles. The two pairings are the only ones allowed.",
+  "oneOf": [
+    { "type": "object", "properties": { "evidence_kind": { "const": "synthetic_harness_validation" }, "observation_source": { "const": "synthetic_fixture" } } },
+    { "type": "object", "properties": { "evidence_kind": { "const": "local_reference_run" }, "observation_source": { "const": "local_doubles" } } }
+  ],
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "version", "evidence_kind", "observation_source", "profile_id", "profile_sha256", "corpus_sha256", "timing", "counts", "technically_valid", "has_confirmed_violation", "controls_in_scope", "controls_passed", "profile_acceptance_passed", "contract_acceptance_passed", "exit_code", "limitations", "evidence"],
   "properties": {
     "format": { "const": "external-action-report/1" },
     "version": { "const": "external-actions-0.1.0" },
-    "evidence_kind": { "const": "synthetic_harness_validation" },
-    "observation_source": { "const": "synthetic_fixture" },
+    "evidence_kind": { "enum": ["synthetic_harness_validation", "local_reference_run"] },
+    "observation_source": { "enum": ["synthetic_fixture", "local_doubles"] },
     "profile_id": { "type": "string", "minLength": 1 },
     "profile_sha256": { "$ref": "#/$defs/sha256" },
     "corpus_sha256": { "$ref": "#/$defs/sha256" },
