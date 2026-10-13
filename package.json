@@ -15,7 +15,8 @@
     "ace": "node dist/src/cli.js",
     "ace:auto": "node dist/src/automotive-cli.js",
     "ace:revocation": "node dist/src/revocation-cli.js",
-    "check:revocation-regressions": "npm run build && node dist/scripts/revocation-regressions.js"
+    "check:revocation-regressions": "npm run build && node dist/scripts/revocation-regressions.js",
+    "ace:external": "node dist/src/external-actions-cli.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

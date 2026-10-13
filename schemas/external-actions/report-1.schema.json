@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "external-action-report-1",
+  "$comment": "external-action-report/1 (external-actions-0.1.0, P1a). The evidence kind is always synthetic harness validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "evidence_kind", "observation_source", "profile_id", "profile_sha256", "corpus_sha256", "timing", "counts", "technically_valid", "has_confirmed_violation", "controls_in_scope", "controls_passed", "profile_acceptance_passed", "contract_acceptance_passed", "exit_code", "limitations", "evidence"],
+  "properties": {
+    "format": { "const": "external-action-report/1" },
+    "version": { "const": "external-actions-0.1.0" },
+    "evidence_kind": { "const": "synthetic_harness_validation" },
+    "observation_source": { "const": "synthetic_fixture" },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "profile_sha256": { "$ref": "#/$defs/sha256" },
+    "corpus_sha256": { "$ref": "#/$defs/sha256" },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["T_w_ms", "T_q_ms", "T_r_ms", "xm13a_delay_ms", "xm13b_delay_ms", "deferred_persist_ms"],
+      "properties": {
+        "T_w_ms": { "$ref": "#/$defs/count" }, "T_q_ms": { "$ref": "#/$defs/count" }, "T_r_ms": { "$ref": "#/$defs/count" },
+        "xm13a_delay_ms": { "$ref": "#/$defs/count" }, "xm13b_delay_ms": { "$ref": "#/$defs/count" }, "deferred_persist_ms": { "$ref": "#/$defs/count" }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["PASS", "VIOLATION", "UNASSESSABLE", "HARNESS_ERROR", "total", "confirmed_violation_cases", "incomplete_cases", "not_assessed_requirements"],
+      "properties": {
+        "PASS": { "$ref": "#/$defs/count" }, "VIOLATION": { "$ref": "#/$defs/count" }, "UNASSESSABLE": { "$ref": "#/$defs/count" }, "HARNESS_ERROR": { "$ref": "#/$defs/count" },
+        "total": { "$ref": "#/$defs/count" }, "confirmed_violation_cases": { "$ref": "#/$defs/count" }, "incomplete_cases": { "$ref": "#/$defs/count" }, "not_assessed_requirements": { "$ref": "#/$defs/count" }
+      }
+    },
+    "technically_valid": { "type": "boolean" },
+    "has_confirmed_violation": { "type": "boolean" },
+    "controls_in_scope": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "controls_passed": { "type": "boolean" },
+    "profile_acceptance_passed": { "type": "boolean" },
+    "contract_acceptance_passed": { "type": "boolean" },
+    "exit_code": { "enum": [0, 1, 2, 3] },
+    "limitations": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "recipient": { "enum": ["P", "Q"] },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement", "reason", "attempt", "recipient", "detail", "refs", "late"],
+      "properties": {
+        "requirement": { "type": "string", "minLength": 1 },
+        "reason": { "enum": ["false_allow", "false_deny", "unexpected_connection_accepted", "missing_connection_accepted", "unexpected_request_received", "missing_request_received", "unexpected_draft_saved", "missing_draft_saved", "unexpected_submission_received", "submission_duplicate", "missing_submission_received", "unattributed_effect"] },
+        "attempt": { "type": ["string", "null"] },
+        "recipient": { "enum": ["P", "Q", null] },
+        "detail": { "type": "string", "minLength": 1 },
+        "refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "late": { "type": "boolean" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "scenario", "role", "verdict", "confirmed_violation", "decision_findings", "effect_findings", "incomplete", "not_assessed", "errors", "effects", "closure"],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "scenario": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["witness", "control"] },
+        "verdict": { "enum": ["PASS", "VIOLATION", "UNASSESSABLE", "HARNESS_ERROR"] },
+        "confirmed_violation": { "type": "boolean" },
+        "decision_findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+        "effect_findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+        "incomplete": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requirement", "reason", "flag"],
+            "properties": {
+              "requirement": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 },
+              "flag": { "enum": ["contradictory", "unconfirmed", "closure", "decision_unknown", "journal"] }
+            }
+          }
+        },
+        "not_assessed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requirement", "attempt", "reason"],
+            "properties": {
+              "requirement": { "type": "string", "minLength": 1 },
+              "attempt": { "type": "string", "minLength": 1 },
+              "reason": { "const": "not_issued_after_window_failure" }
+            }
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "path", "message"],
+            "properties": { "code": { "type": "string", "minLength": 1 }, "path": { "type": "string" }, "message": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["recipient", "class", "ref", "attribution", "late"],
+            "properties": {
+              "recipient": { "$ref": "#/$defs/recipient" },
+              "class": { "enum": ["connection_accepted", "request_received", "draft_saved", "submission_received"] },
+              "ref": { "type": "string", "minLength": 1 },
+              "attribution": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["level", "attempts"],
+                "properties": {
+                  "level": { "enum": ["attributed", "content_matched", "ambiguous_origin", "unattributed"] },
+                  "attempts": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                }
+              },
+              "late": { "type": ["boolean", "null"] }
+            }
+          }
+        },
+        "closure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["final_confirmed", "recipients_confirmed", "notes", "post_cleanup_used"],
+          "properties": {
+            "final_confirmed": { "type": "boolean" },
+            "recipients_confirmed": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["P", "Q"],
+              "properties": { "P": { "type": "boolean" }, "Q": { "type": "boolean" } }
+            },
+            "notes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "post_cleanup_used": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}
