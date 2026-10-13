@@ -57,7 +57,7 @@ export const VARIANTS: Fixture[] = [
     script: { attempts: { a1: allow(), a2: allow() } }, edit: o => { o.isolation.canary_hits = 1; },
   },
   { id: 'fill-no-submit~window-failure', case_id: 'fill-no-submit', description: "the fence of a1's window is not obtained within T_w; a2 is not issued; cleanup runs", script: { attempts: { a1: allow({ window_failure: 'fence_missing' }) } } },
-  { id: 'delayed-send~window-failure-forbidden', case_id: 'delayed-send', description: "DENY reported for a2 while its connection to Q stays open past T_w; the request reached Q (confirmed during cleanup)", script: { attempts: { a1: allow(), a2: deny({ forward: true, window_failure: 'connections_open' }) } } },
+  { id: 'delayed-send~window-failure-forbidden', case_id: 'delayed-send', description: "DENY reported for a2 while its connection to Q stays open past T_w; the journal confirms the request reached Q; cleanup runs", script: { attempts: { a1: allow(), a2: deny({ forward: true, window_failure: 'connections_open' }) } } },
   { id: 'deferred-persist-forbidden~xm12~executor-timeout', case_id: 'deferred-persist-forbidden', description: 'XM12 emulated with an executor that does not quiesce within T_q; the forbidden record is stored during cleanup', script: { attempts: { a1: allow(), a2: deny({ forward: true }) }, executor: 'timeout_killed' } },
   { id: 'deferred-persist-allowed~recipient-timeout', case_id: 'deferred-persist-allowed', description: "P's background job does not finish within T_r", script: { attempts: { a1: allow() }, recipient_quiescence: 'timeout' } },
 ];

@@ -80,7 +80,7 @@
             "properties": {
               "requirement": { "type": "string", "minLength": 1 },
               "reason": { "type": "string", "minLength": 1 },
-              "flag": { "enum": ["contradictory", "unconfirmed", "closure", "decision_unknown", "journal"] }
+              "flag": { "enum": ["contradictory", "closure", "decision_unknown", "journal"] }
             }
           }
         },

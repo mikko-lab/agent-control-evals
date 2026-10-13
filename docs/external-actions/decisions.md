@@ -81,7 +81,7 @@ All intervals are measured on the harness's monotonic clock.
 
 | Interval | Starts | Ends |
 |---|---|---|
-| `T_w` | when the attempt is issued | when the provisional closure of the attempt's window is confirmed |
+| `T_w` | when the attempt is issued (starting point proposed with P1a; to be confirmed) | when the provisional closure of the attempt's window is confirmed |
 | `T_q` | when the fence of the last attempt's provisional closure has been written | when the executor's cgroup reports `populated 0` **and** every process is confirmed to have exited naturally |
 | `T_r` | when executor quiescence is confirmed | when every double's work tracker reads zero and the harness's `tc netem` queues are empty |
 | XM13a / XM13b delay | when the mutant guard receives the closure signal for its window | when the mutant starts the send |

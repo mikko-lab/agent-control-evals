@@ -212,7 +212,7 @@ export interface EffectItem {
   late: boolean | null;
 }
 export interface Finding { requirement: string; reason: DecisionFinding | EffectFinding; attempt: string | null; recipient: Recipient | null; detail: string; refs: string[]; late: boolean }
-export interface Incomplete { requirement: string; reason: string; flag: 'contradictory' | 'unconfirmed' | 'closure' | 'decision_unknown' | 'journal' }
+export interface Incomplete { requirement: string; reason: string; flag: 'contradictory' | 'closure' | 'decision_unknown' | 'journal' }
 export interface NotAssessed { requirement: string; attempt: string; reason: 'not_issued_after_window_failure' }
 export interface HarnessErrorItem { code: string; path: string; message: string }
 export interface Evidence {
