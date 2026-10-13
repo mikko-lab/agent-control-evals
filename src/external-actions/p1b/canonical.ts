@@ -14,7 +14,7 @@ import { Entry, entryHash, Evidence, GENESIS, Observation } from '../spec/model'
 import type { RunRecord } from './record';
 
 export function normalizeConfig(text: string): string {
-  return text.replace(/ea[0-9a-f]{6}/g, 'ea<rid>').replace(/([0-9a-f]{2}:){5}[0-9a-f]{2}/g, '<mac>');
+  return text.replace(/\/run\/ea(-exec|-code)?\/[0-9a-f]{6}/g, '/run/ea$1/<rid>').replace(/ea[0-9a-f]{6}/g, 'ea<rid>').replace(/([0-9a-f]{2}:){5}[0-9a-f]{2}/g, '<mac>');
 }
 const chainOk = (j: Entry[]) => { let prev = GENESIS; return j.every((e, i) => { const ok = e.seq === i && e.prev === prev && entryHash(e) === e.hash; prev = e.hash; return ok; }); };
 

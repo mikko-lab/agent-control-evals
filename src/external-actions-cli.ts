@@ -10,7 +10,7 @@
  *
  * Every result is synthetic harness validation, not a measured security result for any guard.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { canonicalJson, canonicalJsonLines } from './util/canonical-json';
 import { sha256Hex } from './util/hash';
@@ -25,13 +25,16 @@ import { VERSION } from './external-actions/spec/model';
 import { loadP1bProfile, loadRunConfig } from './external-actions/p1b/config';
 import { envCheck, setupHost } from './external-actions/p1b/env-check';
 import { evaluateP1bRun, missingObservation } from './external-actions/p1b/evaluate-run';
-import { guardSource } from './external-actions/p1b/gate';
+import { GateManifest, guardSource, loadRun, runGate, RunSummary } from './external-actions/p1b/gate';
+import { P1B_PATHS } from './external-actions/p1b/config';
 import { INJECTIONS, Injection } from './external-actions/p1b/orchestrator';
-import { p1bRun, writeRunBundle } from './external-actions/p1b/run';
+import { handBack, p1bRun, writeRunBundle } from './external-actions/p1b/run';
+import { runPrivilegedRegressions } from './external-actions/p1b/regressions';
 
 const root = resolve(__dirname, '..', '..');
 const USAGE = 'Usage: ace:external self-test --out DIR | evaluate --observations FILE --profile FILE --out DIR | validate-report --file FILE | oracle-boundary | write-goldens | compute-pins'
-  + ' | p1b-setup-host | p1b-env-check | p1b-run --guard ID --out DIR [--inject A,B] [--cases A,B] | p1b-evaluate --run DIR --out DIR | p1b-compare --a DIR --b DIR';
+  + ' | p1b-setup-host | p1b-env-check | p1b-run --guard ID --out DIR [--inject A,B] [--cases A,B] | p1b-evaluate --run DIR --out DIR | p1b-compare --a DIR --b DIR'
+  + ' | p1b-gate --runs DIR --out FILE [--precheck true] | p1b-regressions --out DIR [--control DIR]';
 
 function options(args: string[], allowed: string[], required: string[]): Map<string, string> {
   const o = new Map<string, string>();
@@ -121,6 +124,34 @@ async function p1b(command: string, args: string[]): Promise<number | null> {
     const ca = JSON.parse(a) as unknown[], cb = JSON.parse(b) as unknown[];
     ca.forEach((x, i) => { if (canonicalJson(x) !== canonicalJson(cb[i])) console.error(`differs: case ${i} ${JSON.stringify((x as { record?: { case_id?: string } }).record?.case_id)}`); });
     return 1;
+  }
+  if (command === 'p1b-regressions') {
+    const o = options(args, ['--out', '--control'], ['--out']);
+    const out = resolve(o.get('--out')!);
+    mkdirSync(out, { recursive: true });
+    const r = await runPrivilegedRegressions(root, out, o.has('--control') ? resolve(o.get('--control')!) : null);
+    writeFileSync(join(out, 'regressions.json'), JSON.stringify(r, null, 1) + '\n');
+    handBack(out);
+    console.log(JSON.stringify({ ok: r.ok, results: r.results.map(x => `${x.id}:${x.ok}`), control: r.control }));
+    return r.ok ? 0 : 2;
+  }
+  if (command === 'p1b-gate') {
+    const o = options(args, ['--runs', '--out', '--precheck'], ['--runs', '--out']);
+    const precheck = o.has('--precheck') ? o.get('--precheck') === 'true' : false;
+    const manifestBytes = readFileSync(join(root, P1B_PATHS.mutants));
+    if (!precheck && readFileSync(join(root, P1B_PATHS.mutantsSha), 'utf8').trim() !== sha256Hex(manifestBytes)) throw new Error('guard mutant manifest sha256 pin does not match');
+    const manifest = JSON.parse(manifestBytes.toString('utf8')) as GateManifest;
+    const dir = resolve(o.get('--runs')!);
+    const runs: Record<string, RunSummary | null> = { reference: loadRun(join(dir, 'reference')) };
+    for (const m of manifest.mutants) runs[m.id] = loadRun(join(dir, m.id));
+    for (const extra of readdirSync(dir)) if (!(extra in runs)) runs[extra] = loadRun(join(dir, extra));
+    const r = runGate(root, manifest, runs, precheck);
+    const out = resolve(o.get('--out')!);
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, canonicalJson({ manifest_sha256: sha256Hex(manifestBytes), precheck, ...r }) + '\n');
+    for (const x of r.issues) console.error(x);
+    console.log(JSON.stringify({ passed: r.passed, precheck, issues: r.issues.length, mutants: r.mutants.map(m => ({ id: m.id, ok: m.ok, masked: m.masked, changed: m.changed_cases.length, deviations: m.deviations_observed.length })) }));
+    return r.passed ? 0 : precheck ? 3 : 2;
   }
   return null;
 }

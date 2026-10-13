@@ -20,7 +20,7 @@ export const P1B_IMPLEMENTATION = [
   'dist/src/external-actions-cli.js', 'dist/src/external-actions/spec/model.js', 'dist/src/external-actions/corpus/cases.js',
   'dist/src/external-actions/oracle/expected.js', 'dist/src/external-actions/eval/evaluate.js', 'dist/src/external-actions/eval/run.js',
   'dist/src/external-actions/report/report.js', 'dist/src/util/canonical-json.js', 'dist/src/util/hash.js',
-  ...['canonical', 'case-runner', 'canary', 'config', 'doubles', 'env-check', 'evaluate-run', 'executor', 'forwarder', 'gate', 'netem-reader', 'orchestrator', 'patch', 'probe', 'record', 'run', 'validity'].map(f => `dist/src/external-actions/p1b/${f}.js`),
+  ...['canonical', 'case-runner', 'canary', 'config', 'doubles', 'env-check', 'evaluate-run', 'executor', 'forwarder', 'gate', 'netem-reader', 'orchestrator', 'patch', 'probe', 'record', 'regressions', 'run', 'validity'].map(f => `dist/src/external-actions/p1b/${f}.js`),
   'dist/schemas/external-actions/observation-1.schema.json', 'dist/schemas/external-actions/report-1.schema.json',
   'package-lock.json',
 ];

@@ -30,8 +30,8 @@ export function ruleBlocks(source: string): Map<string, [number, number]> {
   const out = new Map<string, [number, number]>();
   const open = new Map<string, number>();
   source.split('\n').forEach((l, i) => {
-    const b = /\/\/ RULE (\S+) BEGIN/.exec(l); if (b) open.set(b[1], i + 1);
-    const e = /\/\/ RULE (\S+) END/.exec(l); if (e && open.has(e[1])) out.set(e[1], [open.get(e[1])!, i + 1]);
+    const b = /\/\/ RULE ([a-z_]+) BEGIN$/.exec(l); if (b) open.set(b[1], i + 1);
+    const e = /\/\/ RULE ([a-z_]+) END$/.exec(l); if (e && open.has(e[1])) out.set(e[1], [open.get(e[1])!, i + 1]);
   });
   return out;
 }
