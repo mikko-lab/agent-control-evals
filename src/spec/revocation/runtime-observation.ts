@@ -1,5 +1,5 @@
 import { canonicalJson } from '../../util/canonical-json';
-import { Authority, CallRecord, DecisionValue, DRIFT_POINTS, Effect, EffectKind, IdentityMapping, Probe, ProbePoint, ProbeState, Provenance, RuntimeTarget, Step, Target } from './model';
+import { Authority, CallRecord, DecisionValue, DRIFT_POINTS, Effect, EffectKind, IdentityMapping, LineageObservation, Probe, ProbePoint, ProbeState, Provenance, RuntimeTarget, Step, Target } from './model';
 
 /**
  * Observation semantics of a pinned runtime adapter (revocation-0.4.0). Effects and decisions are derived from the raw
@@ -7,10 +7,14 @@ import { Authority, CallRecord, DecisionValue, DRIFT_POINTS, Effect, EffectKind,
  * adapter reports what this module derives, and the evaluator re-derives it to check the report (section 4.6).
  */
 
-/** Effect sources, per kind (section 3.6). */
+/**
+ * Effect sources, per kind (section 3.6). approval_granted and permit_issued exist only in format 3, where they are
+ * lineage-state transitions of the runtime's own snapshots (approval-permit lifecycle plan section 7.1), never a
+ * receipt, a return value or an audit record.
+ */
 export const EFFECT_PROVENANCE: Record<EffectKind, Provenance[]> = {
-  approval_granted: ['sut_api'],
-  permit_issued: ['sut_api'],
+  approval_granted: ['sut_state'],
+  permit_issued: ['sut_state'],
   revocation_ack: ['sut_api'],
   execution_started: ['harness_observation', 'sut_state'],
   tool_commit: ['sut_state'],
@@ -51,7 +55,11 @@ export const commitValueJson = (label: string, n: number) => canonicalJson({ lab
  * A contradictory fact is not an effect: it is incomplete evidence, whatever the SUT's API answered.
  */
 /** A fact whose evidence is contradictory: why, and the effect kind and execution label it concerns (null if none). */
-export interface Contradiction { reason: string; kind: EffectKind; execution: string | null }
+/**
+ * authority: the contract authority the fact belongs to, when it is known (format 3 lifecycle facts); absent or null
+ * means the fact names no authority and concerns that kind and execution for every authority.
+ */
+export interface Contradiction { reason: string; kind: EffectKind; execution: string | null; authority?: string | null }
 
 export function facts(state: ProbeState, identity: IdentityMapping): { present: Map<string, Omit<Effect, 'step'>>; inconsistent: Map<string, Contradiction> } {
   const out = new Map<string, Omit<Effect, 'step'>>();
@@ -100,7 +108,23 @@ export function derive(probes: Probe[], identity: IdentityMapping): Derivation {
   const flag = (key: string, probe: number, x: Contradiction) => { if (!flagged.has(key)) { flagged.add(key); result.inconsistent.push({ key, probe, ...x }); } };
   let previous = new Set<string>();
   let previousVersion = 0;
+  // Format 3: lifecycle effects are transitions after the setup baseline (lifecycleTransitions), never first presence.
+  const lifecycle = lifecycleTransitions(probes);
+  result.regressions.push(...lifecycle.regressions);
+  // A lifecycle contradiction concerns its own lineage's authority only (and, for a consumption, the execution it names
+  // when an observed execution has that id); it never concerns another authority's expectations.
+  for (const x of lifecycle.inconsistent) {
+    const label = x.execution_id === null ? null : probes[x.probe].state.executions.find(e => e.execution_id === x.execution_id)?.label ?? null;
+    flag(x.key, x.probe, { reason: x.reason, kind: x.kind, execution: label, authority: identity.lineages?.[x.lineage_id] ?? `unmapped:${x.lineage_id}` });
+  }
+  const transitionsAt = new Map<number, LifecycleTransition[]>();
+  for (const t of lifecycle.transitions) if (t.kind !== 'permit_consumed') transitionsAt.set(t.probe, [...(transitionsAt.get(t.probe) ?? []), t]);
   probes.forEach((p, k) => {
+    for (const t of transitionsAt.get(k) ?? []) {
+      if (flagged.has(t.key)) continue;
+      if (DRIFT_POINTS.includes(p.point)) result.drift.push({ key: t.key, probe: k, point: p.point });
+      else result.effects.push({ key: t.key, effect: { step: p.step, kind: t.kind as EffectKind, authority: identity.lineages?.[t.lineage_id] ?? `unmapped:${t.lineage_id}`, execution: null, target: null, seq: k }, point: p.point });
+    }
     const { present, inconsistent } = facts(p.state, identity);
     for (const [key, x] of inconsistent) flag(key, k, x);
     // A commit first present at this probe needs the managed-state version to have grown by at least one per new commit.
@@ -121,6 +145,203 @@ export function derive(probes: Probe[], identity: IdentityMapping): Derivation {
   return result;
 }
 
+/** A lifecycle transition of one lineage, first shown at probe `probe` (format 3). */
+export interface LifecycleTransition { key: string; kind: 'approval_granted' | 'permit_issued' | 'permit_consumed'; lineage_id: string; probe: number; seq: number | null }
+
+const APPROVAL_RANK: Record<string, number> = { pending: 0, approved: 1, rejected: 1, expired: 1 };
+const PERMIT_RANK: Record<string, number> = { none: 0, issued: 1, consumed: 2, expired: 2 };
+
+/**
+ * Format 3 (approval-permit lifecycle plan section 7.1): the lifecycle transitions of the probe log after the setup
+ * baseline. The reference is the setup_baseline probe (the first probe; without it, the first probe with lineage
+ * snapshots, and lineageIssues reports the missing baseline). A transition is a change between consecutive probes:
+ *  - approval_granted: approval_state pending -> approved;
+ *  - permit_issued: permit_state none -> issued (or on to consumed within the same interval);
+ *  - permit_consumed: permit_state issued -> consumed, or none -> consumed (no contract effect; attributed by lineageIssues).
+ * A transition's own sequence value must lie after the baseline and inside the interval in which it is first shown
+ * (after the previous probe's authority_seq, at most this probe's). Otherwise its evidence is contradictory: no effect
+ * is derived from it (for example a setup-time approval surfacing after the baseline). A state that is already present
+ * at the baseline is never a transition. A lineage that disappears, an authority sequence that decreases and a state
+ * that moves backwards are regressions of the log.
+ */
+export interface LifecycleContradiction { key: string; probe: number; kind: EffectKind; reason: string; lineage_id: string; execution_id: string | null }
+export function lifecycleTransitions(probes: Probe[]): { transitions: LifecycleTransition[]; inconsistent: LifecycleContradiction[]; regressions: string[] } {
+  const out = { transitions: [] as LifecycleTransition[], inconsistent: [] as LifecycleContradiction[], regressions: [] as string[] };
+  let prev: Map<string, LineageObservation> | null = null;
+  let prevSeq = 0;
+  let baselineSeq: number | null = null;
+  probes.forEach((p, k) => {
+    if (p.state.lineages === undefined) return;
+    const cur = new Map(p.state.lineages.map(l => [l.lineage_id, l]));
+    const seqNow = p.state.authority_seq ?? 0;
+    if (prev === null) {
+      if (p.point === 'setup_baseline') baselineSeq = seqNow;
+      prev = cur; prevSeq = seqNow;
+      return;
+    }
+    if (seqNow < prevSeq) out.regressions.push(`authority_seq decreases at probe ${k} (${prevSeq} -> ${seqNow})`);
+    for (const id of prev.keys()) if (!cur.has(id)) out.regressions.push(`lineage ${id} disappears at probe ${k}`);
+    const within = (seq: number | null) => seq !== null && seq > (baselineSeq ?? -1) && seq > prevSeq && seq <= seqNow;
+    const why = (name: string, seq: number | null) => `${name} ${seq === null ? 'missing' : seq} is not after the setup baseline (baseline_seq ${baselineSeq ?? 'none'}) and inside the interval ${prevSeq}..${seqNow} in which it is first shown`;
+    for (const [id, l] of cur) {
+      const b = prev.get(id);
+      if (!b) continue;
+      if ((APPROVAL_RANK[l.approval_state] ?? 0) < (APPROVAL_RANK[b.approval_state] ?? 0) || (APPROVAL_RANK[b.approval_state] === 1 && l.approval_state !== b.approval_state)) out.regressions.push(`lineage ${id} approval_state ${b.approval_state} -> ${l.approval_state} at probe ${k}`);
+      if ((PERMIT_RANK[l.permit_state] ?? 0) < (PERMIT_RANK[b.permit_state] ?? 0) || (PERMIT_RANK[b.permit_state] === 2 && l.permit_state !== b.permit_state)) out.regressions.push(`lineage ${id} permit_state ${b.permit_state} -> ${l.permit_state} at probe ${k}`);
+      if (b.approval_state === 'pending' && l.approval_state === 'approved') {
+        const key = `approve:${id}`;
+        if (within(l.approved_seq)) out.transitions.push({ key, kind: 'approval_granted', lineage_id: id, probe: k, seq: l.approved_seq });
+        else out.inconsistent.push({ key, probe: k, kind: 'approval_granted', reason: why('approved_seq', l.approved_seq), lineage_id: id, execution_id: null });
+      }
+      if (b.permit_state === 'none' && (l.permit_state === 'issued' || l.permit_state === 'consumed')) {
+        const key = `permit:${id}`;
+        if (within(l.issued_seq)) out.transitions.push({ key, kind: 'permit_issued', lineage_id: id, probe: k, seq: l.issued_seq });
+        else out.inconsistent.push({ key, probe: k, kind: 'permit_issued', reason: why('issued_seq', l.issued_seq), lineage_id: id, execution_id: null });
+      }
+      if (b.permit_state !== 'consumed' && l.permit_state === 'consumed') {
+        const key = `consume:${id}`;
+        if (within(l.consumed_seq)) out.transitions.push({ key, kind: 'permit_consumed', lineage_id: id, probe: k, seq: l.consumed_seq });
+        else out.inconsistent.push({ key, probe: k, kind: 'execution_started', reason: why('consumed_seq', l.consumed_seq), lineage_id: id, execution_id: l.execution_id });
+      }
+    }
+    prev = cur; prevSeq = seqNow;
+  });
+  return out;
+}
+
+/** The runtime call API of a step's operation in format 3 (permit mode). */
+export const PERMIT_API: Partial<Record<Step['op'], CallRecord['api']>> = { revoke: 'revoke', approve: 'approve', issue: 'issuePermit', start: 'start', commit: 'commit', deliver: 'deliver', cancel_ack: 'acknowledgeCancellation' };
+const TRANSITION_OP: Record<LifecycleTransition['kind'], Step['op']> = { approval_granted: 'approve', permit_issued: 'issue', permit_consumed: 'start' };
+
+/**
+ * Format 3 identity and lifecycle checks (approval-permit lifecycle plan sections 7.1, 7.2, 8.3):
+ *  - identity: exactly one runtime lineage per authority, mapped to a known authority (AM17); the first probe, and only
+ *    it, is the setup baseline; the baseline shows exactly the mapped lineages, each in its authority's `initial`
+ *    state (pending: approval pending and no permit; issued: approved and an issued, unconsumed permit, both before
+ *    the baseline) and bound to its authority's capability, session pair, tenant and supplied chain (AM15); no lineage
+ *    appears after the baseline and no lineage's bindings change;
+ *  - transitions: every post-baseline transition shown at a step barrier occurred at a step whose own runtime call
+ *    can make it: an approval at an approve step of the lineage's authority with an approve call, an issue at an issue
+ *    step with an issuePermit call, a consumption at a start step with a start call, whose start request is the
+ *    consumption's start_request_id and whose execution, when the runtime started one, is the consumption's
+ *    execution_id (AM18).
+ */
+/**
+ * Incomplete consumption evidence of a start (format 3): an observed start without its own permit consumption, or a
+ * consumption whose execution or start request changes or disappears after the snapshot that first shows it. key names
+ * the fact (start:<label>, or consume:<lineage> when no start step names the execution).
+ */
+export interface MissingConsumption { probe: number; key: string; execution: string | null; authority: string | null; reason: string }
+
+export function lineageIssues(authorities: Authority[], steps: Step[], probes: Probe[], calls: CallRecord[], identity: IdentityMapping): { identity: string[]; transitions: string[]; missing: MissingConsumption[] } {
+  const idIssues: string[] = [];
+  const trIssues: string[] = [];
+  const missing: MissingConsumption[] = [];
+  const lineages = identity.lineages ?? {};
+  const byAuthority = new Map<string, string[]>();
+  for (const [lid, a] of Object.entries(lineages)) {
+    if (!authorities.some(x => x.id === a)) idIssues.push(`runtime lineage ${lid} maps to unknown authority ${a}`);
+    byAuthority.set(a, [...(byAuthority.get(a) ?? []), lid]);
+  }
+  for (const a of authorities) if ((byAuthority.get(a.id) ?? []).length !== 1) idIssues.push(`authority ${a.id} maps to ${(byAuthority.get(a.id) ?? []).length} runtime lineages`);
+  const baselines = probes.map((p, k) => ({ p, k })).filter(x => x.p.point === 'setup_baseline');
+  if (baselines.length !== 1 || baselines[0].k !== 0) idIssues.push(`the probe log has ${baselines.length} setup_baseline probe(s)${baselines.length ? ` at ${baselines.map(x => x.k).join(', ')}` : ''}; exactly one, the first, is required`);
+  const capOf = new Map(Object.entries(identity.capabilities).map(([cap, a]) => [a, cap]));
+  const base = probes[0]?.point === 'setup_baseline' ? probes[0].state : undefined;
+  if (base) {
+    const seen = new Set((base.lineages ?? []).map(l => l.lineage_id));
+    for (const lid of Object.keys(lineages)) if (!seen.has(lid)) idIssues.push(`the setup baseline does not show lineage ${lid}`);
+    for (const l of base.lineages ?? []) {
+      const a = authorities.find(x => x.id === lineages[l.lineage_id]);
+      if (!a) { idIssues.push(`the setup baseline shows lineage ${l.lineage_id}, which the identity mapping does not declare`); continue; }
+      const seqOk = (x: number | null) => x !== null && x <= (base.authority_seq ?? -1);
+      const ok = a.initial === 'pending'
+        ? l.state === 'pending' && l.approval_state === 'pending' && l.permit_state === 'none' && l.approved_seq === null && l.issued_seq === null
+        : l.state === 'issued' && l.approval_state === 'approved' && l.permit_state === 'issued' && l.consumed_seq === null && seqOk(l.approved_seq) && seqOk(l.issued_seq);
+      if (!ok) idIssues.push(`the setup baseline shows lineage ${l.lineage_id} of ${a.id} as ${l.state} (approval ${l.approval_state}, permit ${l.permit_state}), not its initial state ${a.initial}`);
+      const pair = identity.sessions[l.session_id];
+      if (identity.capabilities[l.capability_id] !== a.id || capOf.get(a.id) !== l.capability_id) idIssues.push(`lineage ${l.lineage_id} is bound to capability ${l.capability_id}, not that of ${a.id}`);
+      if (!pair || pair.tenant !== a.tenant || pair.session !== a.session) idIssues.push(`lineage ${l.lineage_id} is bound to session ${l.session_id}, not the pair ${a.tenant}/${a.session} of ${a.id}`);
+      if ((l.tenant_id === null ? null : identity.tenants?.[l.tenant_id] ?? `unmapped:${l.tenant_id}`) !== a.tenant) idIssues.push(`lineage ${l.lineage_id} is bound to tenant ${JSON.stringify(l.tenant_id)}, not that of ${a.id}`);
+      if (canonicalJson(l.ancestor_capability_ids) !== canonicalJson(identity.chains?.[l.capability_id] ?? [])) idIssues.push(`lineage ${l.lineage_id} is bound to the chain ${JSON.stringify(l.ancestor_capability_ids)}, the supplied chain is ${JSON.stringify(identity.chains?.[l.capability_id] ?? [])}`);
+    }
+  }
+  const bindingOf = (l: LineageObservation) => canonicalJson([l.capability_id, l.ancestor_capability_ids, l.session_id, l.tenant_id, l.agent_id, l.tool, l.arguments_digest, l.request_id, l.request_digest, l.created_seq]);
+  const first = new Map<string, string>();
+  probes.forEach((p, k) => {
+    for (const l of p.state.lineages ?? []) {
+      if (!(l.lineage_id in lineages)) idIssues.push(`lineage ${l.lineage_id} appears at probe ${k}, after the setup, without an authority`);
+      const b = bindingOf(l);
+      if (!first.has(l.lineage_id)) first.set(l.lineage_id, b);
+      else if (first.get(l.lineage_id) !== b) idIssues.push(`the bindings of lineage ${l.lineage_id} change at probe ${k}`);
+    }
+  });
+  const last = probes[probes.length - 1]?.state;
+  const transitions = lifecycleTransitions(probes).transitions;
+  const knownExecutions = new Set(probes.flatMap(p => [...p.state.executions.map(x => x.execution_id), ...p.state.entries.map(x => x.execution_id)]));
+  for (const t of transitions) {
+    const p = probes[t.probe];
+    if (DRIFT_POINTS.includes(p.point)) continue;
+    const s = steps[p.step];
+    const authority = lineages[t.lineage_id];
+    const call = calls.find(x => x.step === p.step);
+    const want = TRANSITION_OP[t.kind];
+    if (!s || s.op !== want || !('authority' in s) || s.authority !== authority) { trIssues.push(`${t.kind} of lineage ${t.lineage_id} (${authority ?? 'unmapped'}) first shown at step ${p.step} (${s?.op ?? 'none'}), not at a ${want} step of ${authority ?? 'its authority'}`); continue; }
+    if (!call || call.api !== PERMIT_API[want]) { trIssues.push(`${t.kind} of lineage ${t.lineage_id} at step ${p.step}: the step's own call is ${call?.api ?? 'missing'}, not ${PERMIT_API[want]}`); continue; }
+    if (t.kind === 'permit_consumed') {
+      const l = p.state.lineages!.find(x => x.lineage_id === t.lineage_id)!;
+      const label = (s as { execution: string }).execution;
+      if (l.start_request_id !== (call.request_id ?? null)) trIssues.push(`permit of lineage ${t.lineage_id} consumed by start request ${l.start_request_id}, step ${p.step} submitted ${call.request_id ?? 'none'}`);
+      const started = last?.executions.find(x => x.execution_id === l.execution_id);
+      if (l.execution_id !== null && !knownExecutions.has(l.execution_id)) trIssues.push(`permit of lineage ${t.lineage_id} consumed for execution ${l.execution_id}, which no observed execution has (step ${p.step} starts ${label})`);
+      else if (l.execution_id !== null && started && started.label !== label) trIssues.push(`permit of lineage ${t.lineage_id} consumed for execution ${started.label}, step ${p.step} starts ${label}`);
+    }
+  }
+  // The other direction: every observed start needs the permit consumption of its own authority's lineage, first shown
+  // at the start's own step, naming exactly that execution and that step's start request in the snapshot that first
+  // shows it. A later snapshot never supplies a binding that this snapshot lacks. Missing or other consumption evidence
+  // leaves the start's state evidence incomplete (never PASS); its findings stay.
+  for (const entry of last?.entries ?? []) {
+    const record = last!.executions.find(x => x.execution_id === entry.execution_id);
+    const startSteps = steps.map((s, i) => ({ s, i })).filter(({ s }) => s.op === 'start' && s.execution === entry.label);
+    const own = startSteps.map(({ i }) => ({ i, call: calls.find(c => c.step === i && c.api === 'start') })).find(({ call }) => call && (!record || call.request_id === record.request_id));
+    const authority = record ? identity.capabilities[record.capability_id] ?? null : entry.request_authority;
+    const lineageId = Object.entries(lineages).find(([, a]) => a === authority)?.[0];
+    const at = probes.findIndex(p => p.state.entries.some(x => x.label === entry.label));
+    const l = lineageId ? last!.lineages?.find(x => x.lineage_id === lineageId) : undefined;
+    const consumption = lineageId ? transitions.find(t => t.kind === 'permit_consumed' && t.lineage_id === lineageId) : undefined;
+    // The consumption as first shown: its execution and start request are bound in that snapshot, or not at all.
+    const c = consumption ? probes[consumption.probe].state.lineages?.find(x => x.lineage_id === lineageId) : undefined;
+    const why = !own ? `no start call of step starting ${entry.label} names its request` : !l ? `its authority ${authority ?? 'unmapped'} has no observed lineage`
+      : l.permit_state !== 'consumed' || !consumption || !c ? `lineage ${l.lineage_id} shows no permit consumption`
+      : probes[consumption.probe].step !== own.i ? `the consumption of lineage ${l.lineage_id} is first shown at step ${probes[consumption.probe].step}, the start is step ${own.i}`
+      : c.execution_id !== entry.execution_id ? `the consumption of lineage ${l.lineage_id}, first shown at probe ${consumption.probe}, names execution ${c.execution_id ?? 'none'}, the start ran ${entry.execution_id}`
+      : c.start_request_id !== (own.call!.request_id ?? null) ? `the consumption of lineage ${l.lineage_id}, first shown at probe ${consumption.probe}, names start request ${c.start_request_id ?? 'none'}, step ${own.i} submitted ${own.call!.request_id ?? 'none'}`
+      : null;
+    if (why) missing.push({ probe: Math.max(at, 0), key: `start:${entry.label}`, execution: entry.label, authority, reason: `execution started with no permit consumption of its own: ${why}` });
+  }
+  // Persistence: a binding confirmed in the snapshot that first shows the consumption stays fixed. A later snapshot that
+  // changes or drops the execution or the start request is contradictory consumption evidence (incomplete, never PASS);
+  // the observed start and the findings stay. A binding missing where first shown is already incomplete (above), and a
+  // later snapshot that supplies it changes nothing.
+  for (const t of transitions) {
+    if (t.kind !== 'permit_consumed') continue;
+    const first = probes[t.probe].state.lineages!.find(x => x.lineage_id === t.lineage_id)!;
+    const s = steps[probes[t.probe].step];
+    const label = (s?.op === 'start' ? (s as { execution: string }).execution : undefined) ?? probes.flatMap(p => p.state.entries).find(x => x.execution_id === first.execution_id)?.label ?? null;
+    for (const field of ['execution_id', 'start_request_id'] as const) {
+      if (first[field] === null) continue;
+      for (let k = t.probe + 1; k < probes.length; k++) {
+        const l = probes[k].state.lineages?.find(x => x.lineage_id === t.lineage_id);
+        if (!l || l[field] === first[field]) continue;
+        missing.push({ probe: k, key: label === null ? `consume:${t.lineage_id}` : `start:${label}`, execution: label, authority: lineages[t.lineage_id] ?? null, reason: `the permit consumption of lineage ${t.lineage_id}, first shown at probe ${t.probe} with ${field} ${first[field]}, shows ${field} ${l[field] ?? 'none'} at probe ${k}` });
+        break;
+      }
+    }
+  }
+  return { identity: [...new Set(idIssues)], transitions: [...new Set(trIssues)], missing };
+}
+
 /** Structural defects of a probe log: indices are positions, steps never decrease. */
 export function probeLogIssues(probes: Probe[]): string[] {
   const issues: string[] = [];
@@ -135,9 +356,25 @@ export function probeLogIssues(probes: Probe[]): string[] {
  * The SUT's decision for one step, from its call record alone (section 3.2). finish and seal are harness control
  * steps and never have a SUT decision. Anything that is not a recognised SUT answer is UNKNOWN.
  */
+/**
+ * Format 3: the lifecycle denial reasons that are a contract decision of their operation (the state requirement the
+ * contract names: approve needs pending, issue needs approved, start needs an issued, unused permit). Any other
+ * LifecycleDeniedError (a binding or snapshot mismatch, a provider error, expiry) is no contract answer: UNKNOWN.
+ */
+export const CONTRACT_LIFECYCLE_DENIALS: Record<'approve' | 'issue' | 'start', readonly string[]> = { approve: ['not_pending'], issue: ['not_approved'], start: ['permit_not_issued', 'permit_consumed'] };
+
 export function decisionFromCall(step: Step, call: CallRecord | undefined): DecisionValue | undefined {
   if (step.op === 'finish' || step.op === 'seal') return undefined;
   if (!call) return undefined;
+  // Format 3 lifecycle calls (approve, issuePermit, start): a receipt or a started tool is ALLOW; an
+  // AuthorityRevokedError or a contract lifecycle denial is DENY; anything else, or another API, is UNKNOWN.
+  const lifecycleDeny = (op: 'approve' | 'issue' | 'start') => (call.outcome === 'threw' || call.outcome === 'rejected') && (call.class === 'AuthorityRevokedError' || (call.class === 'LifecycleDeniedError' && CONTRACT_LIFECYCLE_DENIALS[op].includes(call.reason ?? '')));
+  if (call.api === 'approve' || call.api === 'issuePermit' || call.api === 'start' || step.op === 'issue') {
+    const op = step.op === 'approve' ? 'approve' : step.op === 'issue' ? 'issue' : step.op === 'start' ? 'start' : null;
+    if (op === null || PERMIT_API[op] !== call.api) return 'UNKNOWN';
+    if (op === 'start') return call.outcome === 'tool_invoked' ? 'ALLOW' : lifecycleDeny(op) ? 'DENY' : 'UNKNOWN';
+    return call.outcome === 'returned' ? 'ALLOW' : lifecycleDeny(op) ? 'DENY' : 'UNKNOWN';
+  }
   switch (step.op) {
     case 'revoke': return call.outcome === 'returned' ? 'ALLOW' : call.outcome === 'threw' ? 'DENY' : 'UNKNOWN';
     case 'start':
@@ -228,9 +465,14 @@ export function receiptIssues(steps: Step[], probes: Probe[], identity: Identity
  * capability it runs under: the tenant of that authority and the chain supplied for that capability. A disagreement
  * means the identity mapping does not describe what the runtime enforced.
  */
-export function bindingIssues(authorities: Authority[], probes: Probe[], identity: IdentityMapping): string[] {
+export function bindingIssues(authorities: Authority[], probes: Probe[], identity: IdentityMapping, format3?: { steps: Step[]; calls: CallRecord[] }): string[] {
   const issues = new Set<string>();
   for (const p of probes) for (const x of p.state.executions) {
+    // Format 3: an execution's label is that of the start step whose fresh start request the runtime ran.
+    if (format3) {
+      const own = format3.calls.filter(c => c.api === 'start' && c.request_id === x.request_id).map(c => format3.steps[c.step]);
+      if (own.length !== 1 || own[0]?.op !== 'start' || own[0].execution !== x.label) issues.add(`execution ${x.label} runs the start request ${String(x.request_id)}, which is not the start request of a step starting ${x.label}`);
+    }
     const a = authorities.find(y => y.id === identity.capabilities[x.capability_id]);
     if (!a) continue;
     const tenant = x.tenant_id == null ? null : identity.tenants?.[x.tenant_id] ?? `unmapped:${x.tenant_id}`;

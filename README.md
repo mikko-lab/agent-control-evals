@@ -6,7 +6,7 @@ Deterministic, reproducible evaluation harnesses for AI agent systems. The repos
 |---|---|---|---|
 | **[ACS runtime-control evaluation](#acs-runtime-control-evaluation)** (v0.1) | One pinned open-source SUT, its runtime and component control boundaries | Source-patch mutation of the pinned SUT | Declared statistical model with conditional confidence bounds |
 | **[Automotive Agent Assurance](#automotive-agent-assurance)** (auto-0.2.0) | Vendor-neutral automotive agent behaviour through an adapter protocol: structured observations first, deterministic oracle, no LLM judge, 4 executable domains, evidence bundle | Synthetic behaviour faults (`auto-faults-0.2.0`) | None: counts and designed coverage only |
-| **[Runtime Revocation & Containment Evaluation](#runtime-revocation--containment-evaluation)** (revocation-0.4.0) | Authority revocation at pending approval, issued permit, active session and in-flight execution; policy decisions separate from observed effects at their occurrence step. Declared-profile evaluation of the pinned runtime `acs-guardrail-demo@a9deab6` (v0.5.0, tenancy mode; 17 of 27 cases in profile, plus 10 runtime-specific supplement cases) | Fifteen synthetic behaviour faults with fixed decision/effect witnesses, evaluator regression mutants, 23 runtime mutants with a golden-hashed manifest, 13 adapter mutants, and the pinned runtime's own mutant gates reported separately | None: counts and designed coverage only |
+| **[Runtime Revocation & Containment Evaluation](#runtime-revocation--containment-evaluation)** (revocation-0.4.0) | Authority revocation at pending approval, issued permit, active session and in-flight execution; policy decisions separate from observed effects at their occurrence step. Declared-profile evaluation of the pinned runtime `acs-guardrail-demo@ef775db` (v0.6.0, tenancy mode with the approval–permit lifecycle; 23 of 27 cases in profile, plus 14 runtime-specific supplement cases) | Fifteen synthetic behaviour faults with fixed decision/effect witnesses, evaluator regression mutants, 26 runtime mutants with a golden-hashed manifest (6 more pinned as masked, 1 recorded as not run), 19 adapter mutants, and the pinned runtime's own mutant gates reported separately | None: counts and designed coverage only |
 
 None of the tracks shows that any system is secure, safe, certified, compliant or production-ready.
 
@@ -290,24 +290,49 @@ The self-test writes SHA-bound baseline and fault bundles, separate decision/eff
 
 ### Pinned runtime adapter (declared profile)
 
-revocation-0.4.0 adds an in-process adapter for one pinned runtime, `mikko-lab/acs-guardrail-demo` v0.5.0 at `a9deab6709d6ca2ba8f3988693b50fa807eadc0c`, locked by its own [`sut.revocation.lock.json`](sut.revocation.lock.json): commit, tree, package-lock hash, the annotated tag `v0.5.0` (an additional identifier that must agree with the commit), the runtime mode (`tenancy`), the maximum chain length (8 grants, leaf included), the SUT baseline (30 suites / 628 tests) and the runtime's own mutant gates. `sut.lock.json` and the ACS v0.1 baseline are unchanged. The [compatibility specification](docs/revocation/runtime-adapter-compatibility.md) defines the identity mapping (one runtime session per `(tenant, session)` pair, one runtime tenant per contract tenant, the full issuer-signed chain of every derived authority), the declared capability profile ([`profiles/revocation/`](profiles/revocation/), golden-checked against a classifier that reads only the corpus, the oracle and the profile's declared revoke scopes), probe-bound effect ordering (`seq`), explicit barriers and the runtime-specific supplement. The [coverage expansion plan](docs/revocation/coverage-expansion-plan.md) is the approved plan for package 1 (tenant scope and ancestor revocation); the [SUT pin review](docs/revocation/sut-pin-review-a9deab6.md) records the baseline, evidence kinds, deviations and open risks of this pin. The [approval–permit lifecycle plan](docs/revocation/approval-permit-lifecycle-plan.md) proposes the runtime lifecycle for G3/G4 (pending approval, issued permit, single-use permit) before any runtime implementation (design only; 23/27 coverage and 57 unassessed finish/seal decisions if implemented).
+revocation-0.4.0 adds an in-process adapter for one pinned runtime, `mikko-lab/acs-guardrail-demo` v0.6.0 at `ef775dbff6c5691b4b2d44611b22eb33c431f451`, locked by its own [`sut.revocation.lock.json`](sut.revocation.lock.json):
+- commit, tree and package-lock hash;
+- the annotated tag `v0.6.0`, an additional identifier that must agree with the commit;
+- the runtime mode `tenancy` with the opt-in approval–permit lifecycle (`sut_lifecycle_mode: permit`);
+- the maximum chain length: 8 grants, leaf included;
+- the SUT baseline: 33 suites / 774 tests;
+- the runtime's own mutant gates: tenant, ancestor and lifecycle, with the regressions R1–R4 and RL1–RL24 and the witness determinism check. `sut.lock.json` and the ACS v0.1 baseline are unchanged. The [compatibility specification](docs/revocation/runtime-adapter-compatibility.md) defines:
+- the identity mapping: one runtime session per `(tenant, session)` pair, one runtime tenant per contract tenant, the full issuer-signed chain of every derived authority, and one runtime lineage per authority (§14);
+- the lifecycle mapping: setup through `process()`, `approve()` and `issuePermit()`, ending with a setup baseline probe; steps through `approve()`, `issuePermit()` and `start()` with a fresh signed request;
+- runtime observation format 3: lifecycle effects only from post-baseline transitions of the runtime's lineage state;
+- the declared capability profile ([`profiles/revocation/`](profiles/revocation/)), golden-checked against a classifier that reads only the corpus, the oracle and the profile's declared revoke scopes and lifecycle capability classes;
+- probe-bound effect ordering (`seq`), explicit barriers and the runtime-specific supplement.
+
+The [approval–permit lifecycle plan](docs/revocation/approval-permit-lifecycle-plan.md) is the approved plan for G3/G4, and the [coverage expansion plan](docs/revocation/coverage-expansion-plan.md) the one for package 1 (tenant scope and ancestor revocation). The [SUT pin review](docs/revocation/sut-pin-review-ef775db.md) records this pin's baseline, evidence kinds, re-verified mutants, deviations and open risks; the [earlier pin review](docs/revocation/sut-pin-review-a9deab6.md) records the `a9deab6` pin.
 
 ```sh
 # Exit 3 = declared profile accepted; never a contract pass. Exit 0 is reserved for full-contract acceptance.
-npm run ace:revocation -- run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-runtime --verify-baseline
+npm run ace:revocation -- run-adapter --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-runtime --verify-baseline
 # Re-evaluate the recorded observations of a run without starting the SUT (same validations and exit rules)
-npm run ace:revocation -- evaluate --observations out/revocation-runtime/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-recorded
-# SUT mutants M1-M11 and M15-M37 (manifest mutations/revocation/manifest.json: patches, exact witnesses, exits and
-# evidence kinds fixed before the run) and adapter mutants AM1-AM13; exit 0 = all detected, 1 = one survived, 2 = technical
-npm run ace:revocation -- mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-a9deab6.profile.json --out out/revocation-mutants
-# The pinned runtime's own mutant gates (tenant 19, ancestor 25) and gate regressions R1-R4, compared with the lock.
+npm run ace:revocation -- evaluate --observations out/revocation-runtime/observations.json --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-recorded
+# SUT mutants (manifest mutations/revocation/manifest.json: patches, exact witnesses, exits, evidence kinds and parts fixed
+# before the run; masked mutants pinned to the control) and adapter mutants AM1-AM19; exit 0 = all detected and every
+# masking pin holds, 1 = one survived, 2 = technical
+npm run ace:revocation -- mutants --lock sut.revocation.lock.json --profile profiles/revocation/acs-guardrail-demo-ef775db.profile.json --out out/revocation-mutants
+# The pinned runtime's own mutant gates (tenant 19, ancestor 25, lifecycle 26), the gate regressions R1-R4 and RL1-RL24
+# and the lifecycle witness determinism, compared with the lock.
 # Runtime-own evidence only: never counted as corpus or supplement evidence.
 npm run ace:revocation -- runtime-gates --lock sut.revocation.lock.json --out out/revocation-runtime-gates
 ```
 
-At the pin: 17 of 27 corpus cases are IN_PROFILE and PASS; 10 are OUT_OF_SCOPE (no verdict); 43 finish/seal decisions are not assessed; the supplement S1-S10 matches its declarations (S1-S3 and S5-S10 PASS, S4 exactly UNASSESSABLE with missing terminal evidence); `contract_acceptance_passed: false`; exit 3. The report lists all 27 cases and keeps corpus coverage, the profile pass rate and the supplement apart.
+At the pin:
+- 23 of 27 corpus cases are IN_PROFILE and PASS. The 4 OUT_OF_SCOPE cases have no verdict; they need G5 or G6.
+- 57 finish/seal decisions are not assessed.
+- The supplement S1–S14 matches its declarations: S1–S3 and S5–S14 PASS, and S4 is exactly UNASSESSABLE with missing terminal evidence.
+- `contract_acceptance_passed: false`; exit 3.
 
-**Earlier pin.** The `a682e44` lock is kept byte for byte as [`profiles/revocation/history/sut.revocation.a682e44.lock.json`](profiles/revocation/history/sut.revocation.a682e44.lock.json) with its profile, supplement and recorded observations (runtime observation format 1). `evaluate --observations` re-evaluates them unchanged under that lock (14/14 PASS, exit 3); the adapter itself drives only a tenancy-mode pin.
+The report lists all 27 cases and keeps corpus coverage, the profile pass rate and the supplement apart.
+
+**Earlier pins.** Both earlier locks are kept byte for byte in [`profiles/revocation/history/`](profiles/revocation/history/), each with its profile, supplement and recorded observations. `evaluate --observations` re-evaluates them unchanged under their locks:
+- `a9deab6`, runtime observation format 2: 17/17 PASS, 43 unassessed, exit 3;
+- `a682e44`, format 1: 14/14 PASS, exit 3.
+
+The adapter itself drives only a tenancy- and permit-mode pin.
 
 **The synthetic self-test evaluates a synthetic reference runtime; the declared-profile run evaluates one pinned runtime commit in process and is never a contract pass.** Imported observations are labelled `external_adapter_declared_unverified`: occurrence steps, terminal reports, actual barrier closure, hidden effects and adapter fidelity are not independently verified. The manifest binds compiled harness modules, compiled schemas and lockfile bytes; it does not verify installed dependencies, the Node.js runtime or an external SUT identity. No kill-switch UI or production revocation-latency claim is included. No results from this track are combined with ACS or automotive results.
 

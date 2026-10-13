@@ -1,13 +1,14 @@
 /**
- * revocation-0.4.0 declared-profile tests of the current pin (acs-guardrail-demo@a9deab6, v0.5.0, tenancy mode,
- * runtime observation format 2) that need no SUT: they evaluate the committed observations of that runtime's
- * baseline run (test/fixtures/revocation-runtime/a9deab6-baseline-observations.json, byte-compared against a fresh run
- * in runtime-sut.test.ts) and controlled edits of them that simulate adapter or SUT behaviour the baseline does not
- * show. The format 1 path of the earlier pin stays covered by runtime-profile.test.ts.
+ * revocation-0.4.0 declared-profile tests of the earlier pin acs-guardrail-demo@a9deab6 (v0.5.0, tenancy mode, runtime
+ * observation format 2), kept in profiles/revocation/history/ for the recorded-observation path: they evaluate the
+ * committed observations of that runtime's baseline run (test/fixtures/revocation-runtime/a9deab6-baseline-observations.json,
+ * byte-compared against a fresh run while it was the current pin) and controlled edits of them that simulate adapter or
+ * SUT behaviour the baseline does not show. The format 1 path of the first pin stays covered by runtime-profile.test.ts,
+ * the current pin (ef775db, permit mode, format 3) by runtime-permit.test.ts.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -20,12 +21,11 @@ import { controlSteps, loadProfile, loadSupplement } from '../../src/profile/rev
 import { buildProfileReport, profileExitCode } from '../../src/report/revocation/profile-report';
 import { runtimeObservationIssues, validateProfileReport } from '../../src/report/revocation/validate';
 import { identityFor, sessionIdFor } from '../../src/adapter/revocation-runtime/runner';
-import { classifyMutantRun, loadMutantManifest, MUTANT_MANIFEST, MutantManifestError, RevocationMutant, RunFacts, unexpectedTechnical, witnessFailures } from '../../src/mutation/revocation/mutants';
 import { loadRevocationLock, RevocationLockError } from '../../src/sut/revocation-lock';
 import { canonicalJsonLines } from '../../src/util/canonical-json';
 import { sha256Hex } from '../../src/util/hash';
 
-const LOCK = 'sut.revocation.lock.json';
+const LOCK = 'profiles/revocation/history/sut.revocation.a9deab6.lock.json';
 const { lock, sha256: lockSha256 } = loadRevocationLock(join(root, LOCK), VERSION);
 const corpusSha = sha256Hex(canonicalJsonLines(cases));
 const { profile, sha256: profileSha } = loadProfile(root, lock.profile, cases, corpusSha, VERSION, lock.sut_commit);
@@ -39,6 +39,8 @@ const obsOf = (id: string) => clone([...fixture.corpus, ...fixture.supplement].f
 const ev = (id: string, o: unknown, format: 1 | 2 = 2) => evaluate(caseOf(id), truthOf(id), o, { ordering: 'probe_seq', controlSteps: controlSteps(caseOf(id)), observationFormat: format });
 const codes = (e: Evidence) => [...new Set(e.errors.map(x => x.code))].sort();
 const findings = (e: Evidence) => [...e.decision_findings, ...e.effect_findings].map(f => `${f.reason}@${f.step}`).sort();
+/** The adapter's declared mapping as format 2 has it (format 3 adds the lineages). */
+const identity2 = (...args: Parameters<typeof identityFor>) => { const { lineages: _lineages, ...rest } = identityFor(...args); return rest; };
 const cliRun = (...args: string[]) => spawnSync(process.execPath, [join(root, 'dist/src/revocation-cli.js'), ...args], { cwd: root, encoding: 'utf8' });
 
 function reportWith(over: Map<string, Evidence> = new Map()) {
@@ -64,6 +66,7 @@ test('pin: v0.5.0 at a9deab6 in tenancy mode, tag and content hashes bound, ACS 
   assert.equal(lock.sut_package_lock_sha256, '6d40e36d07aeaaa8546be5c1c223ede585828db72d26d067c399988c27649e4c');
   assert.equal(lock.sut_runtime_mode, 'tenancy'); assert.equal(lock.max_chain_length, 8);
   assert.deepEqual([lock.baseline_at_pin.test_suites, lock.baseline_at_pin.tests], [30, 628]);
+  assert.equal(lock.sut_lifecycle_mode, undefined);
   assert.equal(JSON.parse(readFileSync(join(root, 'sut.lock.json'), 'utf8')).sut_commit, '403d31593a0d57187df3f5e1ef3df6127baaefb9');
   // The earlier pin is kept byte for byte for the recorded format 1 path.
   assert.equal(loadRevocationLock(join(root, 'profiles/revocation/history/sut.revocation.a682e44.lock.json'), VERSION).lock.sut_commit, 'a682e4479dbccd1cd5f665f5d4879bd3dddb8b47');
@@ -100,7 +103,7 @@ test('profile: 17 IN_PROFILE / 10 OUT_OF_SCOPE from the declared revoke scopes; 
   assert.equal(profile.observation_format, 2);
   assert.deepEqual([...profile.supported.revoke.scopes].sort(), ['authority_with_descendants', 'session', 'tenant']);
   const rules = rulesOf(profile.supported.revoke.scopes);
-  assert.deepEqual(rules, { tenant_scope: true, descendant_coverage: true });
+  assert.deepEqual(rules, { tenant_scope: true, descendant_coverage: true, lifecycle: new Set() });
   assert.equal(profile.cases.filter(c => c.applicability === 'IN_PROFILE').length, 17);
   assert.equal(profile.cases.filter(c => c.applicability === 'OUT_OF_SCOPE').length, 10);
   for (const c of cases) {
@@ -181,17 +184,17 @@ test('AM11 shape: a tenant revocation expressed as session revocations is revoca
 
 test('AM12/AM13 shape: a tenant-blind session mapping or dropped parent links are identity_mapping_invalid', () => {
   const t = obsOf('tenant-isolation');
-  t.identity = identityFor(caseOf('tenant-isolation'), 'AM12_tenant_blind_session_mapping');
+  t.identity = identity2(caseOf('tenant-isolation'), 'AM12_tenant_blind_session_mapping');
   const e12 = ev('tenant-isolation', t);
   assert.equal(e12.verdict, 'HARNESS_ERROR'); assert.ok(codes(e12).includes('identity_mapping_invalid'), String(codes(e12)));
   for (const id of ['derived-in-flight-ancestor-revoked', 'sibling-isolation', 'sup-ancestor-revoked-child-start']) {
     const o = obsOf(id);
-    o.identity = identityFor(caseOf(id), 'AM13_drop_parent_links');
+    o.identity = identity2(caseOf(id), 'AM13_drop_parent_links');
     const e = ev(id, o);
     assert.equal(e.verdict, 'HARNESS_ERROR', id); assert.ok(codes(e).includes('identity_mapping_invalid'), `${id}: ${codes(e)}`);
   }
   // The baseline mapping is exactly the adapter's declared mapping.
-  for (const o of [...fixture.corpus, ...fixture.supplement]) assert.deepEqual(o.identity, identityFor(caseOf(o.case_id)), o.case_id);
+  for (const o of [...fixture.corpus, ...fixture.supplement]) assert.deepEqual(o.identity, identity2(caseOf(o.case_id)), o.case_id);
 });
 
 test('runtime binding: an execution bound to another tenant or chain than its capability\'s mapping is runtime_binding_mismatch', () => {
@@ -228,57 +231,6 @@ test('observation formats: a profile binds its format; the format 2 schema requi
   assert.equal(ev('start-before-cut', o).verdict, 'PASS');
 });
 
-test('mutant manifest: golden-hashed, bound to the pin, exact witnesses and evidence kinds; tampering fails closed', () => {
-  const { manifest } = loadMutantManifest(root, lock, VERSION);
-  assert.deepEqual(manifest.mutants.map(m => m.id), ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11', 'M15', 'M16', 'M21', 'M22', 'M37', 'M20', 'M26', 'M34', 'M28', 'M29', 'M35', 'M36']);
-  assert.deepEqual(manifest.mutants.filter(m => m.witness.set === 'corpus' && Number(m.id.slice(1)) >= 15).map(m => m.id), ['M15', 'M16', 'M21', 'M22', 'M37']);
-  assert.deepEqual(manifest.mutants.filter(m => m.witness.set === 'supplement' && Number(m.id.slice(1)) >= 15).map(m => m.id), ['M20', 'M26', 'M34', 'M28', 'M29', 'M35', 'M36']);
-  for (const m of manifest.mutants) {
-    if (m.source) assert.equal(m.source.commit, lock.sut_commit, m.id);
-    const ids = m.witness.set === 'corpus' ? profile.cases.filter(c => c.applicability === 'IN_PROFILE').map(c => c.id) : supplement.cases.map(c => c.id);
-    assert.ok(ids.includes(m.witness.case_id), `${m.id} witness ${m.witness.case_id}`);
-  }
-  // Exact matching: an extra or missing finding, other incompleteness or another exit is no detection.
-  const m15 = manifest.mutants.find(m => m.id === 'M15')!;
-  const hit: Evidence = { case_id: m15.witness.case_id, family: 'active_session', state_at_cut: [], verdict: 'VIOLATION', confirmed_violation: true, decision_findings: m15.witness.decision_findings, effect_findings: m15.witness.effect_findings, incomplete: m15.witness.incomplete, errors: [] };
-  assert.deepEqual(witnessFailures(m15.witness, hit, m15.witness.exit), []);
-  assert.notDeepEqual(witnessFailures(m15.witness, { ...hit, effect_findings: [...hit.effect_findings, { reason: 'unexpected_output_delivery', step: 6 }] }, m15.witness.exit), []);
-  assert.notDeepEqual(witnessFailures(m15.witness, { ...hit, decision_findings: hit.decision_findings.slice(1) }, m15.witness.exit), []);
-  assert.notDeepEqual(witnessFailures(m15.witness, { ...hit, incomplete: ['x'] }, m15.witness.exit), []);
-  assert.notDeepEqual(witnessFailures(m15.witness, hit, 2), []);
-  const dir = mkdtempSync(join(tmpdir(), 'rev-mutants-'));
-  try {
-    mkdirSync(join(dir, 'mutations/revocation'), { recursive: true });
-    const copyAll = () => { for (const m of manifest.mutants) copyFileSync(join(root, 'mutations/revocation', m.patch), join(dir, 'mutations/revocation', m.patch)); };
-    const write = (m: unknown) => { const text = JSON.stringify(m, null, 2) + '\n'; writeFileSync(join(dir, MUTANT_MANIFEST), text); writeFileSync(join(dir, MUTANT_MANIFEST.replace(/\.json$/, '.sha256')), sha256Hex(text) + '\n'); };
-    copyAll();
-    write(manifest);
-    assert.doesNotThrow(() => loadMutantManifest(dir, lock, VERSION));
-    writeFileSync(join(dir, MUTANT_MANIFEST.replace(/\.json$/, '.sha256')), '0'.repeat(64) + '\n');
-    assert.throws(() => loadMutantManifest(dir, lock, VERSION), /golden/);
-    const tamper: [string, (m: typeof manifest) => void, RegExp][] = [
-      ['another SUT', m => { m.sut_commit = '0'.repeat(40); }, /not the locked SUT/],
-      ['another profile', m => { m.profile = 'profiles/revocation/acs-guardrail-demo-a682e44.profile.json'; }, /another profile/],
-      ['patch hash', m => { m.mutants[0].patch_sha256 = '0'.repeat(64); }, /SHA-256/],
-      ['copied patch source', m => { m.mutants.find(x => x.id === 'M15')!.source!.sha256 = '0'.repeat(64); }, /differs from its source/],
-      ['kind mismatch', m => { m.mutants.find(x => x.id === 'M1')!.evidence_kind = 'decision_and_effect'; }, /does not match its expected values/],
-      ['duplicate id', m => { m.mutants.push(clone(m.mutants[0])); }, /duplicate mutant id/],
-      ['no exit reason', m => { m.mutants[0].witness.exit_reason = ''; }, /exit_reason/],
-      ['baseline exit', m => { m.baseline.exit = 0; }, /baseline exit/],
-      ['no run exceptions', m => { delete (m.mutants[0] as Partial<RevocationMutant>).run_exceptions; }, /run_exceptions/],
-      ['witness errors not predeclared', m => { m.mutants.find(x => x.id === 'M4')!.run_exceptions.harness_errors = []; m.mutants.find(x => x.id === 'M4')!.witness.errors = ['causally_impossible']; }, /witness errors differ/],
-      ['malformed timeout', m => { m.mutants.find(x => x.id === 'M10')!.run_exceptions.barrier_timeouts[0].detail = ''; }, /malformed predeclared barrier timeout/],
-    ];
-    for (const [name, edit, message] of tamper) {
-      const m = clone(manifest); edit(m); write(m);
-      assert.throws(() => loadMutantManifest(dir, lock, VERSION), (e: Error) => e instanceof MutantManifestError && message.test(e.message), name);
-    }
-    write(manifest);
-    writeFileSync(join(dir, 'mutations/revocation', manifest.mutants[0].patch), 'changed');
-    assert.throws(() => loadMutantManifest(dir, lock, VERSION), /SHA-256/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
 test('evaluate --observations --profile --lock: the recorded a9deab6 baseline gives the same evidence, acceptance fields and exit 3', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rev-recorded-tenancy-'));
   try {
@@ -291,74 +243,9 @@ test('evaluate --observations --profile --lock: the recorded a9deab6 baseline gi
     assert.equal(canonicalJsonLines(report.supplement.cases), canonicalJsonLines(expectedReport.supplement.cases));
     for (const k of ['counts', 'technically_valid', 'has_confirmed_violation', 'contract_acceptance_passed', 'profile_acceptance_passed', 'supplement_acceptance_passed'] as const) assert.deepEqual(report[k], expectedReport[k], k);
     assert.equal(readFileSync(join(dir, 'o/observations.json'), 'utf8'), readFileSync(FIXTURE, 'utf8'));
-    // The earlier pin's format 1 observations are not accepted by the current profile.
+    // The first pin's format 1 observations are not accepted by this profile.
     const old = cliRun('evaluate', '--observations', join(root, 'test/fixtures/revocation-runtime/a682e44-baseline-observations.json'), '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'old'));
     assert.equal(old.status, 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('CLI: mutants and runtime-gates fail closed before any runtime on bad options', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'rev-cli-tenancy-'));
-  try {
-    assert.equal(cliRun('mutants', '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'z'), '--only', 'M99').status, 2);
-    assert.throws(() => statSync(join(dir, 'z')));
-    assert.equal(cliRun('runtime-gates', '--out', join(dir, 'g')).status, 2);
-    const legacy = cliRun('runtime-gates', '--lock', 'profiles/revocation/history/sut.revocation.a682e44.lock.json', '--out', join(dir, 'h'));
-    assert.equal(legacy.status, 2); assert.match(legacy.stderr, /pins no runtime_test_gates/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test('mutant gate classification: the whole run is checked first; harness errors and timeouts only as predeclared case by case', () => {
-  const { manifest } = loadMutantManifest(root, lock, VERSION);
-  const by = (id: string) => manifest.mutants.find(m => m.id === id)!;
-  const all = [...fixture.corpus, ...fixture.supplement];
-  const control: RunFacts = { cases: new Map(all.map(o => [o.case_id, ev(o.case_id, o)])), diagnostics: all.flatMap(o => o.diagnostics.map(d => ({ case_id: o.case_id, ...d }))), exit: 3, confirmed_violation: false };
-  assert.deepEqual(unexpectedTechnical(control, null), []);
-  const harness = (cases: Map<string, Evidence>, id: string, code: string) => { const e = cases.get(id)!; cases.set(id, { ...e, verdict: 'HARNESS_ERROR', errors: [...e.errors, { code, path: '/gate-regression', message: 'injected' }] }); };
-  // A run showing exactly the manifest entry's witness and run exceptions.
-  const runFor = (m: RevocationMutant): RunFacts => {
-    const cases = new Map(control.cases);
-    const errorsOf = (id: string) => m.run_exceptions.harness_errors.filter(h => h.case_id === id).map(h => ({ code: h.code, path: h.path, message: h.message }));
-    for (const h of m.run_exceptions.harness_errors) cases.set(h.case_id, { ...cases.get(h.case_id)!, verdict: 'HARNESS_ERROR', errors: errorsOf(h.case_id) });
-    const w = m.witness;
-    cases.set(w.case_id, { ...cases.get(w.case_id)!, verdict: w.verdict, confirmed_violation: w.verdict === 'VIOLATION', decision_findings: w.decision_findings, effect_findings: w.effect_findings, incomplete: w.incomplete, errors: errorsOf(w.case_id) });
-    const timeouts = m.run_exceptions.barrier_timeouts.map(t => ({ case_id: t.case_id, step: t.step, code: 'barrier_timeout', detail: t.detail }));
-    return { cases, diagnostics: [...control.diagnostics, ...timeouts], exit: w.exit, confirmed_violation: w.run_confirmed_violation };
-  };
-  const outcome = (m: RevocationMutant, r: RunFacts) => classifyMutantRun(m, r, control);
-  // M1: unchanged -> detected; a malformed observation in another case -> technical failure, the witness notwithstanding.
-  assert.equal(outcome(by('M1'), runFor(by('M1'))).outcome, 'detected');
-  const m1 = runFor(by('M1')); harness(m1.cases, 'issued-permit', 'malformed_observation');
-  const r1 = outcome(by('M1'), m1);
-  assert.equal(r1.outcome, 'technical_failure'); assert.ok(r1.technical.some(x => x.startsWith('unexpected harness error issued-permit malformed_observation')), JSON.stringify(r1.technical));
-  // M4: its one predeclared causally_impossible error allows no other error, and is required.
-  assert.deepEqual(by('M4').run_exceptions.harness_errors.map(h => [h.case_id, h.code]), [['in-flight-before-commit', 'causally_impossible']]);
-  assert.equal(outcome(by('M4'), runFor(by('M4'))).outcome, 'detected');
-  const m4 = runFor(by('M4')); harness(m4.cases, 'start-before-cut', 'malformed_observation');
-  assert.equal(outcome(by('M4'), m4).outcome, 'technical_failure');
-  const m4twice = runFor(by('M4')); harness(m4twice.cases, 'in-flight-before-commit', 'causally_impossible');
-  assert.equal(outcome(by('M4'), m4twice).outcome, 'technical_failure', 'a second error of the predeclared kind is not predeclared');
-  const m4none = runFor(by('M4')); m4none.cases.set('in-flight-before-commit', control.cases.get('in-flight-before-commit')!);
-  assert.notEqual(outcome(by('M4'), m4none).outcome, 'detected');
-  // M10: only its named barrier timeouts; one more anywhere is technical, one missing is no detection.
-  assert.equal(by('M10').run_exceptions.barrier_timeouts.length, 24);
-  assert.equal(outcome(by('M10'), runFor(by('M10'))).outcome, 'detected');
-  const m10 = runFor(by('M10')); m10.diagnostics.push({ case_id: 'issued-permit', step: 1, code: 'barrier_timeout', detail: 'injected' });
-  const r10 = outcome(by('M10'), m10);
-  assert.equal(r10.outcome, 'technical_failure'); assert.ok(r10.technical.some(x => x.startsWith('unexpected barrier timeout issued-permit@1')), JSON.stringify(r10.technical));
-  const m10missing = runFor(by('M10')); m10missing.diagnostics = m10missing.diagnostics.filter((d, i, xs) => i !== xs.findIndex(y => y.code === 'barrier_timeout'));
-  assert.notEqual(outcome(by('M10'), m10missing).outcome, 'detected');
-  // Other mutants predeclare no timeout at all, and a harness process error is never predeclarable.
-  const m2 = runFor(by('M2')); m2.diagnostics.push({ case_id: 'start-before-cut', step: 3, code: 'barrier_timeout', detail: 'injected' });
-  assert.equal(outcome(by('M2'), m2).outcome, 'technical_failure');
-  const m10abort = runFor(by('M10')); m10abort.diagnostics.push({ case_id: 'issued-permit', step: 0, code: 'adapter_abort', detail: 'injected' });
-  assert.equal(outcome(by('M10'), m10abort).outcome, 'technical_failure');
-  // A run equal to the control survives; the same run with a harness error anywhere is technical.
-  assert.equal(outcome(by('M1'), control).outcome, 'survived');
-  const broken: RunFacts = { ...control, cases: new Map(control.cases) }; harness(broken.cases, 'tenant-isolation', 'malformed_observation');
-  assert.equal(outcome(by('M1'), broken).outcome, 'technical_failure');
-  assert.ok(unexpectedTechnical(broken, null).length > 0, 'the control itself must be free of harness errors');
-  // A different case inventory is technical.
-  const fewer: RunFacts = { ...runFor(by('M1')) }; fewer.cases = new Map(fewer.cases); fewer.cases.delete('issued-permit');
-  assert.equal(outcome(by('M1'), fewer).outcome, 'technical_failure');
-});

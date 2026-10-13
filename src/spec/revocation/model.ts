@@ -51,10 +51,13 @@ export interface Evidence {
  */
 export const PROVENANCE = ['sut_api', 'sut_state', 'harness_observation'] as const;
 export type Provenance = typeof PROVENANCE[number];
-export const PROBE_POINTS = ['pre_action', 'tool_entry', 'event', 'barrier_complete', 'seal_settle'] as const;
+export const PROBE_POINTS = ['setup_baseline', 'pre_action', 'tool_entry', 'event', 'barrier_complete', 'seal_settle'] as const;
 export type ProbePoint = typeof PROBE_POINTS[number];
-/** Probe points at which a first-observed effect lies outside every step barrier (drift). */
-export const DRIFT_POINTS: readonly ProbePoint[] = ['pre_action', 'seal_settle'];
+/**
+ * Probe points at which a first-observed effect lies outside every step barrier (drift). setup_baseline (format 3)
+ * precedes step 0: a fact first present there arose in the setup, never in a step.
+ */
+export const DRIFT_POINTS: readonly ProbePoint[] = ['setup_baseline', 'pre_action', 'seal_settle'];
 /** Runtime identities, mapped back to contract identities by the declared identity mapping. */
 export type RuntimeTarget = { scope: 'capability'; capability_id: string } | { scope: 'session'; session_id: string } | { scope: 'tenant'; tenant_id: string };
 /**
@@ -64,6 +67,15 @@ export type RuntimeTarget = { scope: 'capability'; capability_id: string } | { s
  * field) is the a682e44 shape and is evaluated unchanged.
  */
 export const RUNTIME_OBSERVATION_FORMAT_2 = 'revocation-runtime-observation/2';
+/**
+ * Runtime observation format revision 3 (pinned runtime in tenancy mode with the opt-in approval-permit lifecycle,
+ * permit mode; approval-permit lifecycle plan sections 7.1-7.2): the identity mapping declares the runtime lineage of
+ * every authority, the first probe is the setup baseline, every probe carries the lineage snapshots and the shared
+ * authority sequence value, every execution record its runtime request_id, and the step calls are the lifecycle APIs
+ * (approve, issuePermit, start). Formats 1 and 2 are evaluated unchanged.
+ */
+export const RUNTIME_OBSERVATION_FORMAT_3 = 'revocation-runtime-observation/3';
+export type RuntimeObservationFormat = typeof RUNTIME_OBSERVATION_FORMAT_2 | typeof RUNTIME_OBSERVATION_FORMAT_3;
 export interface IdentityMapping {
   /** runtime capability_id -> contract authority */
   capabilities: Record<string, string>;
@@ -73,6 +85,35 @@ export interface IdentityMapping {
   tenants?: Record<string, string>;
   /** Format 2: runtime capability_id -> ancestor capability_ids of the chain the adapter supplied (parent first). */
   chains?: Record<string, string[]>;
+  /** Format 3: runtime lineage_id -> contract authority (exactly one lineage per authority, created at setup). */
+  lineages?: Record<string, string>;
+}
+/**
+ * Format 3: one lineage snapshot (getLineage) as observed, without timestamps. The *_seq values are positions in the
+ * runtime's authority sequence shared by revocations and lifecycle transitions; null when the snapshot has none.
+ */
+export interface LineageObservation {
+  lineage_id: string;
+  state: 'pending' | 'approved' | 'issued' | 'consumed' | 'rejected' | 'approval_expired' | 'permit_expired';
+  approval_state: 'pending' | 'approved' | 'rejected' | 'expired';
+  approver_type: string;
+  created_seq: number;
+  approved_seq: number | null;
+  permit_state: 'none' | 'issued' | 'consumed' | 'expired';
+  permit_id: string | null;
+  issued_seq: number | null;
+  consumed_seq: number | null;
+  execution_id: string | null;
+  start_request_id: string | null;
+  capability_id: string;
+  ancestor_capability_ids: string[];
+  session_id: string;
+  tenant_id: string | null;
+  agent_id: string;
+  tool: string;
+  arguments_digest: string;
+  request_id: string;
+  request_digest: string;
 }
 /** Raw observable state at one probe. Effects are derived from it by src/spec/revocation/runtime-observation.ts. */
 export interface ProbeState {
@@ -89,6 +130,8 @@ export interface ProbeState {
     tenant_id?: string | null;
     /** Format 2: the runtime's start-time ancestor chain binding (empty when the snapshot has none). */
     ancestor_capability_ids?: string[];
+    /** Format 3: the runtime's request_id of the execution (the start request R′). */
+    request_id?: string;
   }[];
   /** The executor's terminal log (terminals()), in its own order. */
   terminals: { execution_id: string; outcome: string }[];
@@ -101,9 +144,13 @@ export interface ProbeState {
   managed_version: number;
   /** Public promises fulfilled with a successful result carrying the execution's output nonce. */
   deliveries: { label: string }[];
+  /** Format 3: every lineage snapshot (lineages()), in creation order. */
+  lineages?: LineageObservation[];
+  /** Format 3: the runtime's authority sequence value (authoritySequence()) at this probe. */
+  authority_seq?: number;
 }
 export interface Probe { index: number; step: number; point: ProbePoint; state: ProbeState }
-export type CallApi = 'revoke' | 'process' | 'resolveApproval' | 'commit' | 'deliver' | 'acknowledgeCancellation';
+export type CallApi = 'revoke' | 'process' | 'resolveApproval' | 'approve' | 'issuePermit' | 'start' | 'commit' | 'deliver' | 'acknowledgeCancellation';
 /**
  * Raw outcome of the SUT call of one step. `class` names the SUT error class an exception was an instance of
  * (AuthorityRevokedError, CommitRejectedError, RevocationTargetError) or `other:<name>`.
@@ -115,13 +162,20 @@ export interface CallRecord {
   class?: string;
   /** cancel_ack: the boolean returned; deliver: delivered | withheld_revoked | other. */
   value?: boolean | string;
+  /** Format 3: the reason of a LifecycleDeniedError (with its field, for example lineage_binding_mismatch:tool). */
+  reason?: string;
+  /** Format 3, start: the request_id of the fresh signed start request R′ the adapter submitted. */
+  request_id?: string;
 }
 export interface Diagnostic { step: number | null; code: string; detail: string }
 export interface RuntimeDecision extends Decision { provenance: Provenance[] }
 export interface RuntimeEffect extends Effect { seq: number; provenance: Provenance[] }
 export interface RuntimeObservation {
-  /** Absent: format 1 (a682e44). RUNTIME_OBSERVATION_FORMAT_2: tenancy-mode runtime with tenants and chains. */
-  format?: typeof RUNTIME_OBSERVATION_FORMAT_2;
+  /**
+   * Absent: format 1 (a682e44). RUNTIME_OBSERVATION_FORMAT_2: tenancy-mode runtime with tenants and chains (a9deab6).
+   * RUNTIME_OBSERVATION_FORMAT_3: tenancy and permit mode with lineages and the setup baseline.
+   */
+  format?: RuntimeObservationFormat;
   case_id: string;
   complete: boolean;
   decisions: RuntimeDecision[];

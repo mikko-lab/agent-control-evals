@@ -1,0 +1,391 @@
+{
+  "profile": "acs-guardrail-demo-ef775db/revocation-0.4.0/4",
+  "contract": "revocation-0.4.0",
+  "corpus_sha256": "16692ac9c055a504b01700e66b8a441781eb9dc7d6787dc214db0a5a5fba0708",
+  "sut_lock": {
+    "file": "sut.revocation.lock.json",
+    "sut_commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451"
+  },
+  "control_ops": [
+    "finish",
+    "seal"
+  ],
+  "observation_format": 3,
+  "runtime_mode": "tenancy",
+  "lifecycle_mode": "permit",
+  "identity": {
+    "runtime_session": "one per (tenant, session) pair",
+    "runtime_tenant": "one per contract tenant, carried only in the issuer-signed grant (tenant_id)",
+    "capability": "one per authority, issuer-signed CapabilityGrantV2",
+    "parent": "every contract parent link is a signed parent reference (capability_id and content fingerprint); the provider answers with the complete chain",
+    "request": "fresh signed start request R′ per start attempt, with the lineage's fixed tool and arguments",
+    "clear_session": "never",
+    "lineage": "one per authority, created at setup through runtime calls only: process() of the authority's fixed ASK request (update_record); for initial issued also approve() with a signed human ApprovalGrantV3 and issuePermit(); confirmed in its initial state by the setup_baseline probe"
+  },
+  "supported": {
+    "revoke": {
+      "scopes": [
+        "authority_with_descendants",
+        "session",
+        "tenant"
+      ]
+    },
+    "lifecycle": [
+      "initial_pending_authority",
+      "approve",
+      "issue",
+      "single_use_permit"
+    ],
+    "approve": {
+      "call": "approve() with a signed human ApprovalGrantV3 built from the lineage snapshot"
+    },
+    "issue": {
+      "call": "issuePermit({ lineage_id })"
+    },
+    "start": {
+      "each_attempt": "start({ lineage_id, request }) with a fresh signed request R′ under the authority's original capability"
+    },
+    "commit": {
+      "on": "execution started by the runtime",
+      "after_terminal": "retained context"
+    },
+    "deliver": {
+      "before_finish": true
+    },
+    "cancel_ack": {
+      "after_covering_revocation_before_finish": true
+    }
+  },
+  "unsupported_classes": [
+    "client_chosen_execution_id",
+    "operation_on_execution_unknown_to_runtime",
+    "deliver_after_finish",
+    "cancel_ack_after_runtime_terminal",
+    "cancel_ack_without_cancellation_request",
+    "commit_once_only_sole_denial",
+    "deliver_requires_commit_sole_denial"
+  ],
+  "uncovered_design_fences": [
+    "execution identity (execution_id_in_use, unbound_execution)"
+  ],
+  "barrier_watchdog_ms": 2000,
+  "cases": [
+    {
+      "id": "pending-approval",
+      "family": "pending_approval",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "An authority revoked while its approval is pending: the approve, the issue and the start are denied, and nothing is approved, issued or started."
+    },
+    {
+      "id": "issue-after-cut",
+      "family": "pending_approval",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "An approval granted before a capability revocation stays; the issue after the revocation and the start are denied, and nothing is issued or started."
+    },
+    {
+      "id": "issued-permit",
+      "family": "issued_permit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4,
+        5
+      ],
+      "tested_property": "A capability revoked while its lineage holds an issued, unused permit: the start and a fresh-ID retry start are both denied, and nothing starts."
+    },
+    {
+      "id": "fresh-id-retry-unused-permit",
+      "family": "issued_permit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        7
+      ],
+      "tested_property": "A start before the permit is issued is denied (permit_not_issued); after the approval and the issue, a capability revocation covers the unused permit and a fresh-ID retry start is denied."
+    },
+    {
+      "id": "cut-before-start",
+      "family": "issued_permit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        2,
+        3
+      ],
+      "tested_property": "A capability revoked before its first start is denied at the start, although its lineage holds an issued, unused permit."
+    },
+    {
+      "id": "duplicate-revocation",
+      "family": "issued_permit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4
+      ],
+      "tested_property": "A repeated capability revocation is acknowledged (already_revoked) and still denies the start of a lineage with an issued, unused permit."
+    },
+    {
+      "id": "active-session",
+      "family": "active_session",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4,
+        5
+      ],
+      "tested_property": "A session revocation denies the starts of two capabilities that share the revoked runtime session."
+    },
+    {
+      "id": "session-in-flight-commit-fence",
+      "family": "active_session",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        6,
+        7,
+        8
+      ],
+      "tested_property": "A session revocation fences the commit of a running execution; a running execution in another session of the same tenant still commits and delivers."
+    },
+    {
+      "id": "session-delivery-fence-after-commit",
+      "family": "active_session",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "A commit before a session revocation stays; the delivery after it is withheld."
+    },
+    {
+      "id": "tenant-multi-session-in-flight",
+      "family": "active_session",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "tested_property": "A tenant revocation fences the commits of running executions in two sessions of the tenant, and another tenant's execution in a session of the same name still commits and delivers."
+    },
+    {
+      "id": "start-before-cut",
+      "family": "in_flight_before_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4
+      ],
+      "tested_property": "A capability revocation fences the commit of an execution that started before it."
+    },
+    {
+      "id": "in-flight-before-commit",
+      "family": "in_flight_before_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6
+      ],
+      "tested_property": "A capability revocation of a running execution: the cancellation is acknowledged, the commit is fenced and the delivery is withheld; the acknowledgement is not a terminal."
+    },
+    {
+      "id": "late-commit-after-terminal",
+      "family": "in_flight_before_commit",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        2,
+        5
+      ],
+      "out_of_scope": [
+        {
+          "step": 4,
+          "requirement": "decision",
+          "capability_class": "deliver_after_finish",
+          "reason": "the tool function has already settled at finish; the runtime has no later delivery operation"
+        }
+      ]
+    },
+    {
+      "id": "retry-after-revocation",
+      "family": "in_flight_before_commit",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        2,
+        5,
+        6
+      ],
+      "out_of_scope": [
+        {
+          "step": 4,
+          "requirement": "decision",
+          "capability_class": "operation_on_execution_unknown_to_runtime",
+          "reason": "commit of a/retry, an execution the runtime never started; there is no execution context to call"
+        }
+      ]
+    },
+    {
+      "id": "in-flight-after-commit",
+      "family": "in_flight_after_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        6,
+        7
+      ],
+      "tested_property": "A commit before a capability revocation stays; the later delivery is withheld and a second commit is fenced."
+    },
+    {
+      "id": "commit-before-cut",
+      "family": "in_flight_after_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "A commit and a delivery before a capability revocation stay; the terminal follows at finish."
+    },
+    {
+      "id": "commit-shift-across-cut",
+      "family": "in_flight_after_commit",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "A commit observed at its own step before a capability revocation; cancellation acknowledged after the revocation."
+    },
+    {
+      "id": "cancel-is-not-rollback",
+      "family": "in_flight_after_commit",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        4,
+        6
+      ],
+      "out_of_scope": [
+        {
+          "step": 5,
+          "requirement": "decision",
+          "capability_class": "deliver_after_finish",
+          "reason": "the tool function has already settled at finish; the runtime has no later delivery operation"
+        }
+      ]
+    },
+    {
+      "id": "derived-authority",
+      "family": "descendant_scope",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5
+      ],
+      "tested_property": "An ancestor revocation denies the start of an issued descendant and the approval and the issue of a pending descendant of that descendant."
+    },
+    {
+      "id": "derived-in-flight-ancestor-revoked",
+      "family": "descendant_scope",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        4
+      ],
+      "tested_property": "A capability revocation of an ancestor fences the commit of a running execution of its issuer-attested descendant."
+    },
+    {
+      "id": "sibling-isolation",
+      "family": "scope_isolation",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        8,
+        9
+      ],
+      "tested_property": "A capability revocation of a child (issuer-attested parent link to a) leaves its parent and its sibling (same parent, same runtime session) starting, committing and delivering: revocation never propagates upward or sideways."
+    },
+    {
+      "id": "session-isolation",
+      "family": "scope_isolation",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        7
+      ],
+      "tested_property": "A session revocation leaves another session of the same tenant usable."
+    },
+    {
+      "id": "tenant-isolation",
+      "family": "scope_isolation",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        6,
+        7
+      ],
+      "tested_property": "A tenant revocation denies the start of the revoked tenant's authority and leaves another tenant's authority, in a session of the same name, starting, committing and delivering."
+    },
+    {
+      "id": "execution-id-reuse",
+      "family": "identity",
+      "applicability": "OUT_OF_SCOPE",
+      "not_assessed_requirements": [
+        3,
+        5,
+        6
+      ],
+      "out_of_scope": [
+        {
+          "step": 1,
+          "requirement": "decision",
+          "capability_class": "client_chosen_execution_id",
+          "reason": "the denial rests on execution_id_in_use alone, which the runtime does not enforce"
+        },
+        {
+          "step": 2,
+          "requirement": "decision",
+          "capability_class": "operation_on_execution_unknown_to_runtime",
+          "reason": "commit of b/e1, an execution the runtime never started; there is no execution context to call"
+        }
+      ]
+    },
+    {
+      "id": "permit-single-use",
+      "family": "control",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        4,
+        5,
+        6
+      ],
+      "tested_property": "The single-use permit: the first start runs, commits and delivers; a fresh-ID retry start against the consumed permit is denied (permit_consumed) and starts nothing."
+    },
+    {
+      "id": "approval-before-cut",
+      "family": "control",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        5,
+        7
+      ],
+      "tested_property": "A complete lifecycle before a capability revocation (approve, issue, start, commit, deliver, finish) stays; the revocation after the terminal changes nothing."
+    },
+    {
+      "id": "deferred-terminal-before-seal",
+      "family": "observation_timing",
+      "applicability": "IN_PROFILE",
+      "not_assessed_requirements": [
+        3,
+        5
+      ],
+      "tested_property": "After a capability revocation and an acknowledged cancellation, the terminal follows at finish and a later commit through the retained context is fenced."
+    }
+  ]
+}

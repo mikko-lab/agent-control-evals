@@ -1,0 +1,13 @@
+diff --git a/src/guarded-executor.ts b/src/guarded-executor.ts
+index f53ffcf..0b503ff 100644
+--- a/src/guarded-executor.ts
++++ b/src/guarded-executor.ts
+@@ -1467,7 +1467,7 @@ export class GuardedExecutor<M extends LifecycleMode = "legacy"> {
+       session_id: authority.sessionId,
+       capability_id: authority.capabilityId,
+       tenant_id: authority.tenantId,
+-      ancestor_capability_ids: authority.ancestorIds,
++      ancestor_capability_ids: stage === "issue" ? [] : authority.ancestorIds,
+       tool,
+     }, { check, ...(lineageId ? { lineage_id: lineageId } : {}) });
+     if (match) throw new AuthorityRevokedError(stage, match, check);

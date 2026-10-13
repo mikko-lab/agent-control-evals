@@ -243,9 +243,9 @@ test('CLI run-adapter fails closed before any runtime: wrong profile binding, mi
     assert.equal(wrong.status, 2); assert.match(wrong.stderr, /not the profile bound by the lock/);
     assert.equal(run('run-adapter', '--lock', LOCK, '--out', join(dir, 'y')).status, 2);
     assert.equal(run('mutants', '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'z'), '--only', 'M99').status, 2);
-    // The adapter drives the runtime in tenancy mode only: the legacy pin can be re-evaluated, never run.
+    // The adapter drives the runtime in tenancy and permit mode only: the legacy pin can be re-evaluated, never run.
     const legacy = run('run-adapter', '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, 'w'));
-    assert.equal(legacy.status, 2); assert.match(legacy.stderr, /tenancy-mode lock and a format 2 profile/);
+    assert.equal(legacy.status, 2); assert.match(legacy.stderr, /tenancy-mode, permit-mode lock and a format 3 profile/);
     assert.throws(() => statSync(join(dir, 'w')));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -15,16 +15,22 @@ export interface Classification { id: string; applicability: Applicability; out_
 
 /**
  * The profile's capability rules that the classifier depends on, read from the committed profile only
- * (`supported.revoke.scopes`): whether the runtime revokes by tenant, and whether an authority-scope revocation
- * covers the target's descendants (issuer-attested ancestor chains).
+ * (`supported.revoke.scopes` and `supported.lifecycle`): whether the runtime revokes by tenant, whether an
+ * authority-scope revocation covers the target's descendants (issuer-attested ancestor chains), and which lifecycle
+ * capability classes the runtime realizes (approval-permit lifecycle plan section 6): authorities that start pending,
+ * approve and issue as their own operations, and the single-use permit.
  */
-export interface CapabilityRules { tenant_scope: boolean; descendant_coverage: boolean }
-/** The a682e44 profile's rules: capability (without descendants) and session scope only. */
-export const LEGACY_RULES: CapabilityRules = { tenant_scope: false, descendant_coverage: false };
-export function rulesOf(revokeScopes: readonly string[]): CapabilityRules {
+export interface CapabilityRules { tenant_scope: boolean; descendant_coverage: boolean; lifecycle: ReadonlySet<LifecycleClass> }
+export const LIFECYCLE_CLASSES = ['initial_pending_authority', 'approve', 'issue', 'single_use_permit'] as const;
+export type LifecycleClass = (typeof LIFECYCLE_CLASSES)[number];
+/** The a682e44 profile's rules: capability (without descendants) and session scope only, no lifecycle. */
+export const LEGACY_RULES: CapabilityRules = { tenant_scope: false, descendant_coverage: false, lifecycle: new Set() };
+export function rulesOf(revokeScopes: readonly string[], lifecycle: readonly string[] = []): CapabilityRules {
   const known = new Set(['authority_without_descendants', 'authority_with_descendants', 'session', 'tenant']);
   for (const x of revokeScopes) if (!known.has(x)) throw new Error(`unknown revoke scope rule ${x}`);
-  return { tenant_scope: revokeScopes.includes('tenant'), descendant_coverage: revokeScopes.includes('authority_with_descendants') };
+  for (const x of lifecycle) if (!(LIFECYCLE_CLASSES as readonly string[]).includes(x)) throw new Error(`unknown lifecycle capability class ${x}`);
+  if (new Set(lifecycle).size !== lifecycle.length) throw new Error('duplicate lifecycle capability class');
+  return { tenant_scope: revokeScopes.includes('tenant'), descendant_coverage: revokeScopes.includes('authority_with_descendants'), lifecycle: new Set(lifecycle as LifecycleClass[]) };
 }
 
 /** Sole denial reasons the runtime cannot express, with their capability class. */
@@ -43,14 +49,16 @@ export function classify(c: Case, truth: Expected, rules: CapabilityRules = LEGA
   const reasons = (step: number) => truth.rationale.find(r => r.step === step)?.reasons ?? [];
   const notAssessed: number[] = [];
 
+  const supports = (k: string) => rules.lifecycle.has(k as LifecycleClass);
   for (const a of c.authorities) {
-    if (a.initial !== 'pending') continue;
+    if (a.initial !== 'pending' || supports('initial_pending_authority')) continue;
     const first = c.steps.findIndex(s => 'authority' in s && s.authority === a.id);
     o(Math.max(first, 0), 'authority', 'initial_pending_authority', `authority ${a.id} starts pending; the runtime has no pending grant before a request, and approval and start are one runtime operation`);
   }
   c.steps.forEach((s, step) => {
     if (s.op === 'finish' || s.op === 'seal') { notAssessed.push(step); return; }
     if (s.op === 'approve' || s.op === 'issue') {
+      if (supports(s.op)) return;
       return s.op === 'approve'
         ? o(step, 'decision', 'approve', 'approval is not a separate runtime operation (resolveApproval also starts the execution)')
         : o(step, 'decision', 'issue', 'permits are minted inside the runtime start path and are neither invocable nor observable');
@@ -66,7 +74,7 @@ export function classify(c: Case, truth: Expected, rules: CapabilityRules = LEGA
     }
     if (s.op === 'start') {
       const rs = reasons(step);
-      if (decision(step) === 'DENY' && !rs.includes('revoked')) for (const r of rs) if (SOLE_REASON_CLASS[r]) o(step, 'decision', SOLE_REASON_CLASS[r], `the denial rests on ${r} alone, which the runtime does not enforce`);
+      if (decision(step) === 'DENY' && !rs.includes('revoked')) for (const r of rs) if (SOLE_REASON_CLASS[r] && !supports(SOLE_REASON_CLASS[r])) o(step, 'decision', SOLE_REASON_CLASS[r], `the denial rests on ${r} alone, which the runtime does not enforce`);
       return;
     }
     // commit, deliver, cancel_ack: need an execution the runtime started for this authority.
@@ -80,7 +88,7 @@ export function classify(c: Case, truth: Expected, rules: CapabilityRules = LEGA
       return o(step, 'decision', 'cancel_ack_without_cancellation_request', 'the runtime acknowledges only a requested cancellation');
     }
     const rs = reasons(step);
-    if (decision(step) === 'DENY' && rs.length === 1 && SOLE_REASON_CLASS[rs[0]] && (s.op === 'commit' || s.op === 'deliver')) o(step, 'decision', SOLE_REASON_CLASS[rs[0]], `the denial rests on ${rs[0]} alone, which the runtime does not enforce`);
+    if (decision(step) === 'DENY' && rs.length === 1 && SOLE_REASON_CLASS[rs[0]] && !supports(SOLE_REASON_CLASS[rs[0]]) && (s.op === 'commit' || s.op === 'deliver')) o(step, 'decision', SOLE_REASON_CLASS[rs[0]], `the denial rests on ${rs[0]} alone, which the runtime does not enforce`);
   });
   return { id: c.id, applicability: out.length ? 'OUT_OF_SCOPE' : 'IN_PROFILE', out_of_scope: out, not_assessed_requirements: notAssessed };
 }

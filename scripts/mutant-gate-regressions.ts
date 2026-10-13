@@ -43,9 +43,10 @@ export function main(argv: string[]): number {
         args.push('--inject', inject);
       }
       const r = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
-      let gate: { sut_mutants?: { id: string; outcome: string; failures?: string[]; technical?: string[] }[] } | null = null;
+      type Result = { id: string; outcome: string; failures?: string[]; technical?: string[] };
+      let gate: { sut_mutants?: Result[]; masked_mutants?: Result[] } | null = null;
       try { gate = JSON.parse(readFileSync(join(work, c.id, 'mutants.json'), 'utf8')); } catch { gate = null; }
-      const m = gate?.sut_mutants?.find(x => x.id === c.mutant);
+      const m = [...(gate?.sut_mutants ?? []), ...(gate?.masked_mutants ?? [])].find(x => x.id === c.mutant);
       if (!m) {
         technical++;
         results.push({ id: c.id, ok: false, technical: true, exit: r.status, signal: r.signal, stderr: (r.stderr ?? '').slice(-2000) });

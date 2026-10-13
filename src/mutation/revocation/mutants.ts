@@ -1,5 +1,6 @@
 /**
- * SUT mutants of the revocation track's pinned runtime (docs/revocation/runtime-adapter-compatibility.md, section 10).
+ * SUT mutants of the revocation track's pinned runtime (docs/revocation/runtime-adapter-compatibility.md, sections 10
+ * and 14; approval-permit lifecycle plan section 8.1).
  * Each is one type-safe patch of one file of the pinned acs-guardrail-demo tree under mutations/revocation/, applied to
  * a fresh checkout. Patches, witnesses, exact expected values and evidence kinds are fixed in the committed, golden-
  * hashed manifest mutations/revocation/manifest.json before any mutant run, together with every harness error and
@@ -15,6 +16,34 @@ import { sha256Hex } from '../../util/hash';
 
 export const MUTANT_MANIFEST = 'mutations/revocation/manifest.json';
 export type MutantEvidenceKind = 'decision_and_effect' | 'effect' | 'missing_evidence';
+/**
+ * What a witness's effect findings show, reported apart and never merged (approval-permit lifecycle plan section 8):
+ *  - containment: something ran, was committed or delivered that must not (unexpected start, commit or delivery, or a
+ *    side effect after the terminal);
+ *  - lifecycle: an approval or a permit that must not exist (unexpected approval_granted or permit_issued); runtime
+ *    state, never containment;
+ *  - availability: an allowed action that did not happen (a missing start, commit, delivery, approval or permit);
+ *  - signal: revocation signalling and terminal evidence (cancellation and revocation acknowledgements, a premature or
+ *    unexpected terminal);
+ *  - check_point: decision findings without any effect finding;
+ *  - missing_evidence: no finding; the witness is UNASSESSABLE through missing evidence.
+ * Component evidence does not exist in the eval gate (it observes the runtime through its public API only).
+ */
+export type EvidencePart = 'containment' | 'lifecycle' | 'availability' | 'signal' | 'check_point' | 'missing_evidence';
+export const EVIDENCE_PARTS: readonly EvidencePart[] = ['containment', 'lifecycle', 'availability', 'signal', 'check_point', 'missing_evidence'];
+const PART_OF_REASON: Record<string, EvidencePart> = {
+  unexpected_execution_started: 'containment', unexpected_tool_commit: 'containment', unexpected_output_delivery: 'containment', tool_commit_after_terminal: 'containment', output_delivery_after_terminal: 'containment',
+  unexpected_approval_granted: 'lifecycle', unexpected_permit_issued: 'lifecycle',
+  missing_execution_started: 'availability', missing_tool_commit: 'availability', missing_output_delivery: 'availability', missing_approval_granted: 'availability', missing_permit_issued: 'availability',
+  missing_cancellation_ack: 'signal', unexpected_cancellation_ack: 'signal', unexpected_execution_terminal: 'signal', missing_revocation_ack: 'signal', unexpected_revocation_ack: 'signal',
+};
+/** The evidence parts a witness shows, derived from its expected values alone (sorted, in EVIDENCE_PARTS order). */
+export function witnessParts(w: Pick<Witness, 'verdict' | 'decision_findings' | 'effect_findings'>): EvidencePart[] {
+  if (w.effect_findings.length === 0) return w.decision_findings.length ? ['check_point'] : w.verdict === 'UNASSESSABLE' ? ['missing_evidence'] : [];
+  const parts = new Set(w.effect_findings.map(f => PART_OF_REASON[f.reason] ?? 'unknown'));
+  if (parts.has('unknown' as EvidencePart)) return [];
+  return EVIDENCE_PARTS.filter(p => parts.has(p));
+}
 
 export interface Witness {
   /** corpus: an IN_PROFILE corpus case; supplement: a supplement case. */
@@ -51,9 +80,31 @@ export interface RevocationMutant {
   /** Where a patch copied byte for byte from the pinned runtime's own mutant gate comes from; null for eval-side patches. */
   source: MutantSource | null;
   evidence_kind: MutantEvidenceKind;
+  /** The evidence parts the witness shows (witnessParts of its expected values). */
+  parts: EvidencePart[];
+  /** Plan section 8.1 mutants: the plan's kind, and why the parts differ from it where they do. */
+  plan_kind?: string;
+  kind_note?: string;
   witness: Witness;
   run_exceptions: RunExceptions;
 }
+/**
+ * A mutant whose change no case of the profile run can show under the pinned runtime mode: its whole run is pinned to
+ * equal the control (exit, every case's evidence, no new diagnostic). It is a recorded gap, never a detection; a run
+ * that differs from the control means the pin no longer holds and is a technical failure.
+ */
+export interface MaskedMutant {
+  id: string; patch: string; patch_sha256: string; target: string; description: string; source: MutantSource | null;
+  /** Why no case can show it, and what evidence of the check remains elsewhere. */
+  reason: string;
+  /** The witness it had under the previous pin, if any. */
+  previous_witness: { set: 'corpus' | 'supplement'; case_id: string; pin: string } | null;
+}
+/**
+ * A plan mutant that is not run, with the concrete conflict and its reproduction (never evidence, never a detection).
+ * coverage_gap states the property that thereby has no mutant evidence in the eval gate.
+ */
+export interface NotRunMutant { id: string; plan_row: string; reason: string; reproduction: string; coverage_gap: string }
 export interface MutantManifest {
   manifest: string; version: string; sut_repository: string; sut_commit: string; profile: string; supplement: string;
   baseline: { exit: number; exit_reason: string };
@@ -61,10 +112,14 @@ export interface MutantManifest {
   evidence_kinds: Record<MutantEvidenceKind, string>;
   technical_failures: string;
   mutants: RevocationMutant[];
+  masked: MaskedMutant[];
+  not_run: NotRunMutant[];
 }
 export class MutantManifestError extends Error {}
 
 const KINDS: MutantEvidenceKind[] = ['decision_and_effect', 'effect', 'missing_evidence'];
+/** A mutant id: M<number>, optionally with a lowercase name for a separately authorized mechanism (M25-overreach). */
+const MUTANT_ID = /^M\d+(-[a-z]+)?$/;
 const HEX = /^[0-9a-f]{64}$/;
 
 /** The evidence kind a witness shows, derived from its expected values alone. */
@@ -87,14 +142,15 @@ export function loadMutantManifest(root: string, lock: { sut_repository: string;
   if (sha256 !== golden) throw new MutantManifestError(`${MUTANT_MANIFEST} SHA-256 ${sha256} != golden ${golden}`);
   const m = JSON.parse(raw.toString('utf8')) as MutantManifest;
   const bad = (msg: string) => { throw new MutantManifestError(`${MUTANT_MANIFEST}: ${msg}`); };
-  if (m.manifest !== 'revocation-sut-mutants/2' || m.version !== version || m.match !== 'exact') bad('unknown manifest format or version');
+  if (m.manifest !== 'revocation-sut-mutants/3' || m.version !== version || m.match !== 'exact') bad('unknown manifest format or version');
   if (m.sut_repository !== lock.sut_repository || m.sut_commit !== lock.sut_commit) bad(`bound to ${m.sut_repository}@${m.sut_commit}, not the locked SUT`);
   if (m.profile !== lock.profile || m.supplement !== lock.supplement) bad('bound to another profile or supplement than the lock');
   if (m.baseline?.exit !== 3 || !m.baseline.exit_reason) bad('baseline exit must be 3, with its reason');
   if (!Array.isArray(m.mutants) || m.mutants.length === 0) bad('no mutants');
+  if (!Array.isArray(m.masked) || !Array.isArray(m.not_run)) bad('masked and not_run must be lists');
   const ids = new Set<string>();
-  for (const x of m.mutants) {
-    if (!/^M\d+$/.test(x.id) || ids.has(x.id)) bad(`invalid or duplicate mutant id ${x.id}`);
+  const checkPatch = (x: Pick<RevocationMutant, 'id' | 'patch' | 'patch_sha256' | 'target' | 'source'>) => {
+    if (!MUTANT_ID.test(x.id) || ids.has(x.id)) bad(`invalid or duplicate mutant id ${x.id}`);
     ids.add(x.id);
     if (!/^[A-Za-z0-9.-]+\.patch$/.test(x.patch) || !/^src\/[A-Za-z0-9/-]+\.ts$/.test(x.target)) bad(`${x.id}: invalid patch or target path`);
     if (!HEX.test(x.patch_sha256)) bad(`${x.id}: invalid patch_sha256`);
@@ -107,11 +163,26 @@ export function loadMutantManifest(root: string, lock: { sut_repository: string;
       if (x.source.repository !== m.sut_repository || x.source.commit !== m.sut_commit || !/^mutants\/[a-z]+\/M\d+\.patch$/.test(x.source.path)) bad(`${x.id}: source must be a mutant patch of the pinned SUT`);
       if (x.source.sha256 !== x.patch_sha256) bad(`${x.id}: copied patch differs from its source ${x.source.path}`);
     }
+  };
+  for (const x of m.masked) {
+    checkPatch(x);
+    if (!x.reason || (x.previous_witness !== null && (!['corpus', 'supplement'].includes(x.previous_witness?.set) || !x.previous_witness.case_id || !x.previous_witness.pin))) bad(`${x.id}: a masked mutant needs its reason and a previous witness or null`);
+  }
+  for (const x of m.not_run) {
+    if (!MUTANT_ID.test(x.id) || ids.has(x.id)) bad(`invalid or duplicate mutant id ${x.id}`);
+    ids.add(x.id);
+    if (!x.plan_row || !x.reason || !x.reproduction || !x.coverage_gap) bad(`${x.id}: a mutant that is not run needs its plan row, reason, reproduction and coverage gap`);
+  }
+  for (const x of m.mutants) {
+    checkPatch(x);
     if (!KINDS.includes(x.evidence_kind)) bad(`${x.id}: unknown evidence kind ${x.evidence_kind}`);
     const w = x.witness;
     if (!w || !['corpus', 'supplement'].includes(w.set) || typeof w.case_id !== 'string') bad(`${x.id}: invalid witness`);
     if (!Array.isArray(w.incomplete) || !Array.isArray(w.errors) || !Number.isInteger(w.exit) || !w.exit_reason || typeof w.run_confirmed_violation !== 'boolean') bad(`${x.id}: witness needs exact incomplete, errors, exit, exit_reason and run_confirmed_violation`);
     if (witnessKind(w) !== x.evidence_kind) bad(`${x.id}: evidence kind ${x.evidence_kind} does not match its expected values (${witnessKind(w)})`);
+    const parts = witnessParts(w);
+    if (!parts.length || !Array.isArray(x.parts) || JSON.stringify(x.parts) !== JSON.stringify(parts)) bad(`${x.id}: evidence parts ${JSON.stringify(x.parts)} do not match its expected values (${JSON.stringify(parts)})`);
+    if ((x.plan_kind === undefined) !== (x.kind_note === undefined)) bad(`${x.id}: plan_kind and kind_note go together`);
     const ex = x.run_exceptions;
     if (!ex || !Array.isArray(ex.harness_errors) || !Array.isArray(ex.barrier_timeouts)) bad(`${x.id}: run_exceptions must list harness_errors and barrier_timeouts`);
     for (const h of ex.harness_errors) if (!h || [h.case_id, h.code, h.path, h.message].some(v => typeof v !== 'string' || !v)) bad(`${x.id}: malformed predeclared harness error`);
@@ -176,6 +247,20 @@ export function unexpectedTechnical(run: RunFacts, control: RunFacts | null, ex:
 }
 
 const sameEvidence = (a: Evidence | undefined, b: Evidence | undefined) => !!a && !!b && canonicalJson({ ...a, case_id: '' }) === canonicalJson({ ...b, case_id: '' });
+
+/**
+ * Classifies the run of a masked mutant: its whole run must equal the control (the case inventory and every case's
+ * evidence, the exit, has_confirmed_violation and the diagnostics). Anything else means the masking pin no longer
+ * holds: a technical failure, never a detection.
+ */
+export function classifyMaskedRun(run: RunFacts, control: RunFacts): { outcome: 'masked' | 'technical_failure'; differences: string[] } {
+  const differences: string[] = [...unexpectedTechnical(run, control)];
+  for (const [id, e] of run.cases) if (!sameEvidence(e, control.cases.get(id))) differences.push(`case ${id} differs from the control (${e.verdict})`);
+  if (run.exit !== control.exit) differences.push(`exit ${run.exit} != control ${control.exit}`);
+  if (run.confirmed_violation !== control.confirmed_violation) differences.push('has_confirmed_violation differs from the control');
+  if (canonicalJson(run.diagnostics) !== canonicalJson(control.diagnostics)) differences.push('diagnostics differ from the control');
+  return { outcome: differences.length ? 'technical_failure' : 'masked', differences };
+}
 
 /**
  * Classifies one mutant run. The whole run is checked for technical errors first: any the manifest entry does not

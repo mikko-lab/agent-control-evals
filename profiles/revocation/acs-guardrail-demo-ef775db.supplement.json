@@ -1,0 +1,2284 @@
+{
+  "supplement": "acs-guardrail-demo-ef775db/revocation-0.4.0/supplement/3",
+  "contract": "revocation-0.4.0",
+  "sut_lock": {
+    "file": "sut.revocation.lock.json",
+    "sut_commit": "ef775dbff6c5691b4b2d44611b22eb33c431f451"
+  },
+  "cases": [
+    {
+      "id": "sup-pending-approval-revoked",
+      "family": "pending_approval",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "authority",
+            "id": "a"
+          }
+        },
+        {
+          "op": "approve",
+          "authority": "a"
+        },
+        {
+          "op": "issue",
+          "authority": "a"
+        },
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "purpose": "S1. A pending approval whose capability is revoked before the approval attempt: the approve, the issue and the start are denied, nothing is approved or issued, and the tool is never invoked.",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "DENY"
+          },
+          {
+            "step": 2,
+            "decision": "DENY"
+          },
+          {
+            "step": 3,
+            "decision": "DENY"
+          },
+          {
+            "step": 4,
+            "decision": "DENY"
+          },
+          {
+            "step": 5,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "earliest": 0,
+            "latest": 0
+          }
+        ],
+        "rationale": [
+          {
+            "step": 1,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 2,
+            "reasons": [
+              "revoked",
+              "not_approved"
+            ]
+          },
+          {
+            "step": 3,
+            "reasons": [
+              "revoked",
+              "permit_not_issued"
+            ]
+          },
+          {
+            "step": 4,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 0,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "pending",
+                "revoked": "by_cut",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-pending-approval-control",
+      "family": "control",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "approve",
+          "authority": "a"
+        },
+        {
+          "op": "issue",
+          "authority": "a"
+        },
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "purpose": "S2. Non-vacuity control for S1: the same pending lineage without any revocation is approved, issued and started (approval_granted, permit_issued and execution_started at their own steps).",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 3,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "approval_granted",
+            "authority": "a",
+            "execution": null,
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "permit_issued",
+            "authority": "a",
+            "execution": null,
+            "target": null,
+            "earliest": 1,
+            "latest": 1
+          },
+          {
+            "kind": "execution_started",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 2,
+            "latest": 2
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 3,
+            "latest": 4
+          }
+        ],
+        "rationale": [],
+        "cuts": []
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-commit-after-terminal-no-revocation",
+      "family": "observation_timing",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "commit",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "commit",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "purpose": "The terminal commit fence on its own: a commit through the retained context after the terminal is denied, without any revocation that could mask it. The first commit shows commits work (non-vacuity).",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 3,
+            "decision": "DENY"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "tool_commit",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 1,
+            "latest": 1
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 2,
+            "latest": 4
+          }
+        ],
+        "rationale": [
+          {
+            "step": 3,
+            "reasons": [
+              "finish_requested",
+              "already_committed"
+            ]
+          }
+        ],
+        "cuts": []
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-unobservable-pending-settlement",
+      "family": "observation_timing",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "double": "returns_unobservable_pending_promise",
+      "expectation_source": "contract_oracle",
+      "purpose": "Control run: the tool returns a pending native Promise whose settlement the runtime cannot observe. The correct outcome is missing terminal evidence; a reported terminal (for example premature) is a failure.",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 1,
+            "latest": 2
+          }
+        ],
+        "rationale": [],
+        "cuts": []
+      },
+      "expected_result": {
+        "verdict": "UNASSESSABLE",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [
+          "terminal evidence missing for e1 in window 1..2",
+          "execution not observed terminal: e1"
+        ],
+        "errors": []
+      },
+      "declared_incomplete": [
+        "terminal evidence missing for e1 in window 1..2",
+        "execution not observed terminal: e1"
+      ]
+    },
+    {
+      "id": "sup-ancestor-revoked-child-start",
+      "family": "descendant_scope",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        },
+        {
+          "id": "child",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": "a",
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "authority",
+            "id": "a"
+          }
+        },
+        {
+          "op": "start",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S5. An ancestor revoked before its descendant is ever used: the descendant's start is denied and the tool is never invoked (no approve or issue operation). Package-1 witness of M20.",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "DENY"
+          },
+          {
+            "step": 2,
+            "decision": "DENY"
+          },
+          {
+            "step": 3,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "earliest": 0,
+            "latest": 0
+          }
+        ],
+        "rationale": [
+          {
+            "step": 1,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 2,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 0,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "child",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-ancestor-control",
+      "family": "control",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        },
+        {
+          "id": "child",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": "a",
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "start",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S6. Non-vacuity control for S5: the same issuer-signed chain without any revocation starts the descendant, so S5's denial is caused by the ancestor revocation, not by a chain rejection.",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "child",
+            "execution": "e2",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "child",
+            "execution": "e2",
+            "target": null,
+            "earliest": 1,
+            "latest": 2
+          }
+        ],
+        "rationale": [],
+        "cuts": []
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-tenant-pending-approval-revoked",
+      "family": "pending_approval",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "tenant",
+            "tenant": "t1"
+          }
+        },
+        {
+          "op": "approve",
+          "authority": "a"
+        },
+        {
+          "op": "issue",
+          "authority": "a"
+        },
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S7. A pending approval whose tenant is revoked before the approval attempt: the approve, the issue and the start are denied, and the tool is never invoked.",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "DENY"
+          },
+          {
+            "step": 2,
+            "decision": "DENY"
+          },
+          {
+            "step": 3,
+            "decision": "DENY"
+          },
+          {
+            "step": 4,
+            "decision": "DENY"
+          },
+          {
+            "step": 5,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "tenant",
+              "tenant": "t1"
+            },
+            "earliest": 0,
+            "latest": 0
+          }
+        ],
+        "rationale": [
+          {
+            "step": 1,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 2,
+            "reasons": [
+              "revoked",
+              "not_approved"
+            ]
+          },
+          {
+            "step": 3,
+            "reasons": [
+              "revoked",
+              "permit_not_issued"
+            ]
+          },
+          {
+            "step": 4,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 0,
+            "target": {
+              "scope": "tenant",
+              "tenant": "t1"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "pending",
+                "revoked": "by_cut",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-ancestor-pending-approval-revoked",
+      "family": "pending_approval",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        },
+        {
+          "id": "child",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": "a",
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "authority",
+            "id": "a"
+          }
+        },
+        {
+          "op": "approve",
+          "authority": "child"
+        },
+        {
+          "op": "issue",
+          "authority": "child"
+        },
+        {
+          "op": "start",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S8. A pending approval of a descendant whose ancestor is revoked before the approval attempt: the approve, the issue and the start are denied, and the tool is never invoked.",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "DENY"
+          },
+          {
+            "step": 2,
+            "decision": "DENY"
+          },
+          {
+            "step": 3,
+            "decision": "DENY"
+          },
+          {
+            "step": 4,
+            "decision": "DENY"
+          },
+          {
+            "step": 5,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "earliest": 0,
+            "latest": 0
+          }
+        ],
+        "rationale": [
+          {
+            "step": 1,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 2,
+            "reasons": [
+              "revoked",
+              "not_approved"
+            ]
+          },
+          {
+            "step": 3,
+            "reasons": [
+              "revoked",
+              "permit_not_issued"
+            ]
+          },
+          {
+            "step": 4,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 0,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "child",
+                "grant": "pending",
+                "revoked": "by_cut",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-tenant-fences-in-flight",
+      "family": "in_flight_after_commit",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        },
+        {
+          "id": "b",
+          "tenant": "t2",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "start",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "commit",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "commit",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "tenant",
+            "tenant": "t1"
+          }
+        },
+        {
+          "op": "cancel_ack",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "deliver",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "deliver",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S9. Tenant revocation of in-flight work: the commits before the cut stay, the covered execution is signalled (cancellation acknowledged) and its delivery is withheld; the other tenant's execution in a session of the same name delivers. Witness of M28 (delivery) and M29 (cancellation signal).",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 3,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 5,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 6,
+            "decision": "DENY"
+          },
+          {
+            "step": 7,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 8,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 9,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 10,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "execution_started",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 1,
+            "latest": 1
+          },
+          {
+            "kind": "tool_commit",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 2,
+            "latest": 2
+          },
+          {
+            "kind": "tool_commit",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 3,
+            "latest": 3
+          },
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "tenant",
+              "tenant": "t1"
+            },
+            "earliest": 4,
+            "latest": 4
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 4,
+            "latest": 10
+          },
+          {
+            "kind": "cancellation_ack",
+            "authority": "a",
+            "execution": "e1",
+            "target": null,
+            "earliest": 5,
+            "latest": 5
+          },
+          {
+            "kind": "output_delivery",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 7,
+            "latest": 7
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 9,
+            "latest": 10
+          }
+        ],
+        "rationale": [
+          {
+            "step": 6,
+            "reasons": [
+              "revoked"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 4,
+            "target": {
+              "scope": "tenant",
+              "tenant": "t1"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "consumed",
+                "revoked": "by_cut",
+                "executions": [
+                  {
+                    "id": "e1",
+                    "phase": "committed"
+                  }
+                ]
+              },
+              {
+                "id": "b",
+                "grant": "consumed",
+                "revoked": "no",
+                "executions": [
+                  {
+                    "id": "e2",
+                    "phase": "committed"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-ancestor-fences-in-flight",
+      "family": "descendant_scope",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        },
+        {
+          "id": "child",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": "a",
+          "initial": "issued"
+        },
+        {
+          "id": "peer",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        }
+      ],
+      "steps": [
+        {
+          "op": "start",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "start",
+          "authority": "peer",
+          "execution": "e3"
+        },
+        {
+          "op": "commit",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "commit",
+          "authority": "peer",
+          "execution": "e3"
+        },
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "authority",
+            "id": "a"
+          }
+        },
+        {
+          "op": "cancel_ack",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "deliver",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "deliver",
+          "authority": "peer",
+          "execution": "e3"
+        },
+        {
+          "op": "finish",
+          "authority": "child",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "peer",
+          "execution": "e3"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S10. Ancestor revocation of in-flight work: the commits before the cut stay, the covered descendant is signalled and its delivery is withheld; an unrelated authority in the same session delivers. Witness of M35 (delivery) and M36 (cancellation signal).",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 3,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 5,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 6,
+            "decision": "DENY"
+          },
+          {
+            "step": 7,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 8,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 9,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 10,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "execution_started",
+            "authority": "child",
+            "execution": "e2",
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "execution_started",
+            "authority": "peer",
+            "execution": "e3",
+            "target": null,
+            "earliest": 1,
+            "latest": 1
+          },
+          {
+            "kind": "tool_commit",
+            "authority": "child",
+            "execution": "e2",
+            "target": null,
+            "earliest": 2,
+            "latest": 2
+          },
+          {
+            "kind": "tool_commit",
+            "authority": "peer",
+            "execution": "e3",
+            "target": null,
+            "earliest": 3,
+            "latest": 3
+          },
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "earliest": 4,
+            "latest": 4
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "child",
+            "execution": "e2",
+            "target": null,
+            "earliest": 4,
+            "latest": 10
+          },
+          {
+            "kind": "cancellation_ack",
+            "authority": "child",
+            "execution": "e2",
+            "target": null,
+            "earliest": 5,
+            "latest": 5
+          },
+          {
+            "kind": "output_delivery",
+            "authority": "peer",
+            "execution": "e3",
+            "target": null,
+            "earliest": 7,
+            "latest": 7
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "peer",
+            "execution": "e3",
+            "target": null,
+            "earliest": 9,
+            "latest": 10
+          }
+        ],
+        "rationale": [
+          {
+            "step": 6,
+            "reasons": [
+              "revoked"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 4,
+            "target": {
+              "scope": "authority",
+              "id": "a"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "child",
+                "grant": "consumed",
+                "revoked": "by_cut",
+                "executions": [
+                  {
+                    "id": "e2",
+                    "phase": "committed"
+                  }
+                ]
+              },
+              {
+                "id": "peer",
+                "grant": "consumed",
+                "revoked": "no",
+                "executions": [
+                  {
+                    "id": "e3",
+                    "phase": "committed"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-session-revoke-pending-approval",
+      "family": "pending_approval",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        },
+        {
+          "id": "b",
+          "tenant": "t1",
+          "session": "s2",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "session",
+            "tenant": "t1",
+            "session": "s1"
+          }
+        },
+        {
+          "op": "approve",
+          "authority": "a"
+        },
+        {
+          "op": "issue",
+          "authority": "a"
+        },
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "approve",
+          "authority": "b"
+        },
+        {
+          "op": "issue",
+          "authority": "b"
+        },
+        {
+          "op": "start",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S11. A session revocation covers a pending approval: the approve, the issue and the start of a (revoked session) are denied; b, pending in another session of the same tenant, is approved, issued and started (non-coverage).",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "DENY"
+          },
+          {
+            "step": 2,
+            "decision": "DENY"
+          },
+          {
+            "step": 3,
+            "decision": "DENY"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 5,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 6,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 7,
+            "decision": "DENY"
+          },
+          {
+            "step": 8,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 9,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "session",
+              "tenant": "t1",
+              "session": "s1"
+            },
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "approval_granted",
+            "authority": "b",
+            "execution": null,
+            "target": null,
+            "earliest": 4,
+            "latest": 4
+          },
+          {
+            "kind": "permit_issued",
+            "authority": "b",
+            "execution": null,
+            "target": null,
+            "earliest": 5,
+            "latest": 5
+          },
+          {
+            "kind": "execution_started",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 6,
+            "latest": 6
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 8,
+            "latest": 9
+          }
+        ],
+        "rationale": [
+          {
+            "step": 1,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 2,
+            "reasons": [
+              "revoked",
+              "not_approved"
+            ]
+          },
+          {
+            "step": 3,
+            "reasons": [
+              "revoked",
+              "permit_not_issued"
+            ]
+          },
+          {
+            "step": 7,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 0,
+            "target": {
+              "scope": "session",
+              "tenant": "t1",
+              "session": "s1"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "pending",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "b",
+                "grant": "pending",
+                "revoked": "no",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-tenant-revoke-unused-permit",
+      "family": "issued_permit",
+      "authorities": [
+        {
+          "id": "a",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        },
+        {
+          "id": "b",
+          "tenant": "t2",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "approve",
+          "authority": "a"
+        },
+        {
+          "op": "issue",
+          "authority": "a"
+        },
+        {
+          "op": "approve",
+          "authority": "b"
+        },
+        {
+          "op": "issue",
+          "authority": "b"
+        },
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "tenant",
+            "tenant": "t1"
+          }
+        },
+        {
+          "op": "start",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "start",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "a",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "b",
+          "execution": "e2"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S12. A tenant revocation covers an issued, unused permit: both permits are issued before the revocation; the start of a (revoked tenant) is denied, the start of b (another tenant, a session of the same name) runs.",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 3,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 5,
+            "decision": "DENY"
+          },
+          {
+            "step": 6,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 7,
+            "decision": "DENY"
+          },
+          {
+            "step": 8,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 9,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "approval_granted",
+            "authority": "a",
+            "execution": null,
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "permit_issued",
+            "authority": "a",
+            "execution": null,
+            "target": null,
+            "earliest": 1,
+            "latest": 1
+          },
+          {
+            "kind": "approval_granted",
+            "authority": "b",
+            "execution": null,
+            "target": null,
+            "earliest": 2,
+            "latest": 2
+          },
+          {
+            "kind": "permit_issued",
+            "authority": "b",
+            "execution": null,
+            "target": null,
+            "earliest": 3,
+            "latest": 3
+          },
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "tenant",
+              "tenant": "t1"
+            },
+            "earliest": 4,
+            "latest": 4
+          },
+          {
+            "kind": "execution_started",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 6,
+            "latest": 6
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "b",
+            "execution": "e2",
+            "target": null,
+            "earliest": 8,
+            "latest": 9
+          }
+        ],
+        "rationale": [
+          {
+            "step": 5,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 7,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 4,
+            "target": {
+              "scope": "tenant",
+              "tenant": "t1"
+            },
+            "authorities": [
+              {
+                "id": "a",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "b",
+                "grant": "issued",
+                "revoked": "no",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-ancestor-revoke-unused-permit",
+      "family": "descendant_scope",
+      "authorities": [
+        {
+          "id": "p",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        },
+        {
+          "id": "c",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": "p",
+          "initial": "pending"
+        },
+        {
+          "id": "q",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "approve",
+          "authority": "c"
+        },
+        {
+          "op": "issue",
+          "authority": "c"
+        },
+        {
+          "op": "approve",
+          "authority": "q"
+        },
+        {
+          "op": "issue",
+          "authority": "q"
+        },
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "authority",
+            "id": "p"
+          }
+        },
+        {
+          "op": "start",
+          "authority": "c",
+          "execution": "e1"
+        },
+        {
+          "op": "start",
+          "authority": "q",
+          "execution": "e2"
+        },
+        {
+          "op": "finish",
+          "authority": "c",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "q",
+          "execution": "e2"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S13. An ancestor revocation covers a descendant's issued, unused permit: the start of c (child of the revoked p) is denied, the start of q (no parent) runs.",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 3,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 4,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 5,
+            "decision": "DENY"
+          },
+          {
+            "step": 6,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 7,
+            "decision": "DENY"
+          },
+          {
+            "step": 8,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 9,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "approval_granted",
+            "authority": "c",
+            "execution": null,
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "permit_issued",
+            "authority": "c",
+            "execution": null,
+            "target": null,
+            "earliest": 1,
+            "latest": 1
+          },
+          {
+            "kind": "approval_granted",
+            "authority": "q",
+            "execution": null,
+            "target": null,
+            "earliest": 2,
+            "latest": 2
+          },
+          {
+            "kind": "permit_issued",
+            "authority": "q",
+            "execution": null,
+            "target": null,
+            "earliest": 3,
+            "latest": 3
+          },
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "authority",
+              "id": "p"
+            },
+            "earliest": 4,
+            "latest": 4
+          },
+          {
+            "kind": "execution_started",
+            "authority": "q",
+            "execution": "e2",
+            "target": null,
+            "earliest": 6,
+            "latest": 6
+          },
+          {
+            "kind": "execution_terminal",
+            "authority": "q",
+            "execution": "e2",
+            "target": null,
+            "earliest": 8,
+            "latest": 9
+          }
+        ],
+        "rationale": [
+          {
+            "step": 5,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 7,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 4,
+            "target": {
+              "scope": "authority",
+              "id": "p"
+            },
+            "authorities": [
+              {
+                "id": "p",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "c",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "q",
+                "grant": "issued",
+                "revoked": "no",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    },
+    {
+      "id": "sup-ancestor-revoke-approved-before-issue",
+      "family": "descendant_scope",
+      "authorities": [
+        {
+          "id": "p",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": null,
+          "initial": "issued"
+        },
+        {
+          "id": "c",
+          "tenant": "t1",
+          "session": "s1",
+          "parent": "p",
+          "initial": "pending"
+        }
+      ],
+      "steps": [
+        {
+          "op": "approve",
+          "authority": "c"
+        },
+        {
+          "op": "revoke",
+          "target": {
+            "scope": "authority",
+            "id": "p"
+          }
+        },
+        {
+          "op": "issue",
+          "authority": "c"
+        },
+        {
+          "op": "start",
+          "authority": "c",
+          "execution": "e1"
+        },
+        {
+          "op": "finish",
+          "authority": "c",
+          "execution": "e1"
+        },
+        {
+          "op": "seal"
+        }
+      ],
+      "purpose": "S14. An ancestor revocation between a descendant's approval and its issue: the approval granted before the revocation stays; the issue and the start are denied.",
+      "double": "default",
+      "expectation_source": "contract_oracle",
+      "expected": {
+        "decisions": [
+          {
+            "step": 0,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 1,
+            "decision": "ALLOW"
+          },
+          {
+            "step": 2,
+            "decision": "DENY"
+          },
+          {
+            "step": 3,
+            "decision": "DENY"
+          },
+          {
+            "step": 4,
+            "decision": "DENY"
+          },
+          {
+            "step": 5,
+            "decision": "ALLOW"
+          }
+        ],
+        "effects": [
+          {
+            "kind": "approval_granted",
+            "authority": "c",
+            "execution": null,
+            "target": null,
+            "earliest": 0,
+            "latest": 0
+          },
+          {
+            "kind": "revocation_ack",
+            "authority": null,
+            "execution": null,
+            "target": {
+              "scope": "authority",
+              "id": "p"
+            },
+            "earliest": 1,
+            "latest": 1
+          }
+        ],
+        "rationale": [
+          {
+            "step": 2,
+            "reasons": [
+              "revoked"
+            ]
+          },
+          {
+            "step": 3,
+            "reasons": [
+              "revoked",
+              "permit_not_issued"
+            ]
+          },
+          {
+            "step": 4,
+            "reasons": [
+              "unbound_execution"
+            ]
+          }
+        ],
+        "cuts": [
+          {
+            "step": 1,
+            "target": {
+              "scope": "authority",
+              "id": "p"
+            },
+            "authorities": [
+              {
+                "id": "p",
+                "grant": "issued",
+                "revoked": "by_cut",
+                "executions": []
+              },
+              {
+                "id": "c",
+                "grant": "approved",
+                "revoked": "by_cut",
+                "executions": []
+              }
+            ]
+          }
+        ]
+      },
+      "expected_result": {
+        "verdict": "PASS",
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "errors": []
+      }
+    }
+  ]
+}

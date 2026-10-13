@@ -1,6 +1,6 @@
 /**
- * Adapter mutants AM1-AM13 (docs/revocation/runtime-adapter-compatibility.md, section 10; AM11-AM13: coverage
- * expansion plan, section 7.7). Each check runs the
+ * Adapter mutants AM1-AM19 (docs/revocation/runtime-adapter-compatibility.md, section 10; AM11-AM13: coverage
+ * expansion plan, section 7.7; AM14-AM19: approval-permit lifecycle plan section 8.3). Each check runs the
  * adapter with one deliberate defect against a real pinned runtime build (or applies the defect to a real observation
  * where the defect needs SUT behaviour the baseline runtime does not show) and states how the defect is detected.
  */
@@ -152,6 +152,48 @@ export async function adapterMutantChecks(builds: { baseline: string; m10?: stri
     const corpus = r.corpus[0].evidence, s5 = r.supplement[0].evidence;
     const allowed = s5.decision_findings.some(f => f.reason === 'false_allow' && f.step === 1) && s5.effect_findings.some(f => f.reason === 'unexpected_execution_started' && f.step === 1);
     add('AM13_drop_parent_links', [corpus, s5].every(e => e.verdict === 'HARNESS_ERROR' && codes(e).includes('identity_mapping_invalid')) && allowed, `${corpus.case_id}: ${corpus.verdict} [${[...new Set(codes(corpus))].join(',')}]; S5: ${s5.verdict} [${[...new Set(codes(s5))].join(',')}] ${JSON.stringify(s5.decision_findings)} ${JSON.stringify(s5.effect_findings)}`);
+  }
+  // AM14: the adapter refuses a start itself when it believes no permit exists; the runtime is never called, so the
+  // decision it reports has no call record (decision_without_evidence).
+  {
+    const e = (await runProfile(builds.baseline, cases, truths, profile, supplement, { only: one('fresh-id-retry-unused-permit'), fault: 'AM14_refuse_start_without_permit' })).corpus[0].evidence;
+    add('AM14_refuse_start_without_permit', e.verdict === 'HARNESS_ERROR' && codes(e).includes('decision_without_evidence'), `fresh-id-retry-unused-permit: ${e.verdict} [${[...new Set(codes(e))].join(',')}]`);
+  }
+  // AM15: the setup approves and issues a lineage the case declares pending; the setup baseline shows it approved and
+  // issued against `initial: pending` (identity_mapping_invalid).
+  {
+    const r = await runProfile(builds.baseline, cases, truths, profile, supplement, { only: x => x === 'pending-approval' || x === 'sup-pending-approval-control', fault: 'AM15_setup_issues_pending' });
+    const all = [...r.corpus.map(x => x.evidence), ...r.supplement.map(x => x.evidence)];
+    add('AM15_setup_issues_pending', all.length === 2 && all.every(e => e.verdict === 'HARNESS_ERROR' && codes(e).includes('identity_mapping_invalid')), all.map(e => `${e.case_id}: ${e.verdict} [${[...new Set(codes(e))].join(',')}]`).join('; '));
+  }
+  // AM16: lifecycle effects from the call's receipt instead of the lineage snapshot. The runtime's snapshot is edited
+  // so that it never shows the approval (a receipt without the state change, as for AM3/AM6): the correct report
+  // misses the approval and is not PASS; the AM16 report claims it without probe evidence.
+  {
+    const { c, truth } = caseOf('approval-before-cut');
+    const base = (await runProfile(builds.baseline, cases, truths, profile, supplement, { only: one(c.id) })).corpus[0].run.observation;
+    const hidden = editProbes(base, 0, st => { for (const l of st.lineages ?? []) Object.assign(l, { approval_state: 'pending', approved_seq: null, state: l.permit_state === 'none' ? 'pending' : l.state }); });
+    const correct = ev(c, truth, rereport(c, hidden));
+    const am = ev(c, truth, rereport(c, hidden, 'AM16_lifecycle_effects_from_receipts'));
+    add('AM16_lifecycle_effects_from_receipts', correct.verdict !== 'PASS' && correct.effect_findings.some(f => f.reason === 'missing_approval_granted' && f.step === 0) && am.verdict === 'HARNESS_ERROR' && codes(am).includes('effect_without_probe_evidence'), `correct report on a hidden approval: ${correct.verdict} ${JSON.stringify(correct.effect_findings)}; AM16: ${am.verdict} [${codes(am).join(',')}]`);
+  }
+  // AM17: one authority mapped to two lineages (identity_mapping_invalid).
+  {
+    const e = (await runProfile(builds.baseline, cases, truths, profile, supplement, { only: one('approval-before-cut'), fault: 'AM17_two_lineages_per_authority' })).corpus[0].evidence;
+    add('AM17_two_lineages_per_authority', e.verdict === 'HARNESS_ERROR' && codes(e).includes('identity_mapping_invalid'), `approval-before-cut: ${e.verdict} [${[...new Set(codes(e))].join(',')}]`);
+  }
+  // AM18: after a start denied for a permit not issued, the adapter approves and issues on the runtime's behalf; the
+  // transitions appear at a start step, whose own call cannot make them (lifecycle_transition_mismatch).
+  {
+    const e = (await runProfile(builds.baseline, cases, truths, profile, supplement, { only: one('fresh-id-retry-unused-permit'), fault: 'AM18_issue_on_runtime_behalf' })).corpus[0].evidence;
+    add('AM18_issue_on_runtime_behalf', e.verdict === 'HARNESS_ERROR' && codes(e).includes('lifecycle_transition_mismatch'), `fresh-id-retry-unused-permit: ${e.verdict} [${[...new Set(codes(e))].join(',')}]`);
+  }
+  // AM19: the setup state of an `initial: issued` authority reported as step-0 effects; no post-baseline transition
+  // exists (effect_without_probe_evidence; regression AR1).
+  {
+    const r = await runProfile(builds.baseline, cases, truths, profile, supplement, { only: x => x === 'permit-single-use' || x === 'sup-commit-after-terminal-no-revocation', fault: 'AM19_setup_state_as_step_effects' });
+    const all = [...r.corpus.map(x => x.evidence), ...r.supplement.map(x => x.evidence)];
+    add('AM19_setup_state_as_step_effects', all.length === 2 && all.every(e => e.verdict === 'HARNESS_ERROR' && codes(e).includes('effect_without_probe_evidence')), all.map(e => `${e.case_id}: ${e.verdict} [${[...new Set(codes(e))].join(',')}]`).join('; '));
   }
   return out;
 }
