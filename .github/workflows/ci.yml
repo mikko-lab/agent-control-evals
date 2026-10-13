@@ -323,3 +323,34 @@ jobs:
           name: revocation-runtime-gates-${{ matrix.gate }}-node${{ matrix.node }}
           path: out/revocation-runtime-gates/**
           if-no-files-found: warn
+
+  external-actions-p1b:
+    name: external actions P1b local reference run (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: 0. runner capability probe (temporary; replaced by the environment check)
+        run: |
+          set -x
+          uname -a
+          grep cgroup /proc/mounts
+          ls -ld /home/runner /home/runner/work || true
+          sudo modprobe sch_netem
+          sudo ip netns add probe0
+          sudo ip -n probe0 link set lo up
+          sudo ip netns exec probe0 tc qdisc add dev lo root netem delay 100ms
+          sudo ip netns exec probe0 tc -s -j qdisc show
+          sudo ip netns exec probe0 iptables -L -n
+          sudo mkdir /sys/fs/cgroup/ea-probe && ls /sys/fs/cgroup/ea-probe && sudo rmdir /sys/fs/cgroup/ea-probe
+          which setpriv nsenter unshare
+          sudo ip netns del probe0
+          cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns || true
