@@ -12,6 +12,8 @@ None of the tracks shows that any system is secure, safe, certified, compliant o
 
 How this harness relates to the control runtime and to the execution-evidence library, with claims, evidence and trust boundaries: [Control, evaluation and evidence](docs/architecture/control-evaluation-evidence.md).
 
+Planned, not implemented: [External Action Boundary Evaluation plan](docs/external-actions/evaluation-plan.md), a separate track for effects at external recipients.
+
 # ACS runtime-control evaluation
 
 The ACS track has exactly one System Under Test (SUT):
