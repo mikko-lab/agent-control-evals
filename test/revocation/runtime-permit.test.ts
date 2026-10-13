@@ -537,6 +537,14 @@ function scopingScenarios(): Record<string, { id: string; o: RuntimeObservation 
   const noConsumption = editLineage(single, lid, 0, { state: 'issued', permit_state: 'issued', consumed_seq: null, execution_id: null, start_request_id: null });
   const consumedAt = single.probes.findIndex(p => p.state.lineages!.some(l => l.permit_state === 'consumed'));
   const ghostExecution = editLineage(single, lid, consumedAt, { execution_id: 'exec-ghost' });
+  // The consumption's bindings missing where it is first shown, and supplied only by a later snapshot (review of 31460ec):
+  // in its first probe only, in every probe of its start step, and the start request in its first probe only.
+  const startStep = single.probes[consumedAt].step;
+  const stepProbes = single.probes.map((p, k) => ({ p, k })).filter(x => x.p.step === startStep).map(x => x.k);
+  assert.ok(stepProbes.length > 1 && stepProbes.at(-1)! < single.probes.length - 1, 'the start step has several probes, and later steps follow');
+  const execIdLateFirstProbe = editLineage(single, lid, consumedAt, { execution_id: null }, consumedAt);
+  const execIdLateStartStep = editLineage(single, lid, consumedAt, { execution_id: null }, stepProbes.at(-1)!);
+  const requestIdLateFirstProbe = editLineage(single, lid, consumedAt, { start_request_id: null }, consumedAt);
   const s11 = obsOf(S11);
   const a = lineageOf(s11, 'a'), b = lineageOf(s11, 'b');
   const base = s11.probes[0].state.authority_seq!;
@@ -553,12 +561,23 @@ function scopingScenarios(): Record<string, { id: string; o: RuntimeObservation 
   return {
     noConsumption: re('permit-single-use', noConsumption),
     ghostExecution: re('permit-single-use', ghostExecution),
+    execIdLateFirstProbe: re('permit-single-use', execIdLateFirstProbe),
+    execIdLateStartStep: re('permit-single-use', execIdLateStartStep),
+    requestIdLateFirstProbe: re('permit-single-use', requestIdLateFirstProbe),
     bPermitHidden: re(S11, bPermitHidden),
     aPermitContradiction: re(S11, aPermitContradiction),
     bApprovalHidden: re(S11, bApprovalHidden),
     aApprovalContradiction: re(S11, aApprovalContradiction),
   };
 }
+/** A binding that a later snapshot supplies never completes the start's evidence: UNASSESSABLE, never PASS. */
+const lateBinding = (e: Evidence, what: string) => {
+  assert.equal(e.verdict, 'UNASSESSABLE');
+  assert.deepEqual([findings(e), e.errors], [[], []]);
+  assert.ok(e.incomplete.some(x => x.includes('start:e1: execution started with no permit consumption of its own') && x.includes(what)), JSON.stringify(e.incomplete));
+};
+/** The exit of evaluate --observations with the scenario in place of its case (every other case as recorded). */
+const SCOPING_EXITS: Record<string, number> = { noConsumption: 2, ghostExecution: 2, execIdLateFirstProbe: 2, execIdLateStartStep: 2, requestIdLateFirstProbe: 2, bPermitHidden: 2, aPermitContradiction: 2, bApprovalHidden: 1, aApprovalContradiction: 2 };
 const SCOPING_EXPECTATIONS: Record<string, (e: Evidence) => void> = {
   noConsumption: e => {
     assert.notEqual(e.verdict, 'PASS');
@@ -567,6 +586,13 @@ const SCOPING_EXPECTATIONS: Record<string, (e: Evidence) => void> = {
   ghostExecution: e => {
     assert.equal(e.verdict, 'HARNESS_ERROR');
     assert.ok(e.errors.some(x => x.code === 'lifecycle_transition_mismatch' && x.message.includes('exec-ghost')), JSON.stringify(e.errors));
+  },
+  execIdLateFirstProbe: e => lateBinding(e, 'names execution none'),
+  execIdLateStartStep: e => lateBinding(e, 'names execution none'),
+  // The forward check already reads the start request from the consumption's first snapshot: a misattributed consumption.
+  requestIdLateFirstProbe: e => {
+    assert.equal(e.verdict, 'HARNESS_ERROR');
+    assert.ok(e.errors.some(x => x.code === 'lifecycle_transition_mismatch' && x.message.includes('consumed by start request null')), JSON.stringify(e.errors));
   },
   bPermitHidden: e => { assert.equal(e.verdict, 'VIOLATION'); assert.ok(findings(e).includes('missing_permit_issued@5'), JSON.stringify(findings(e))); },
   aPermitContradiction: e => {
@@ -584,6 +610,7 @@ test('consumption binding, both directions: a start needs its own consumption; a
   const s = scopingScenarios();
   SCOPING_EXPECTATIONS.noConsumption(ev(s.noConsumption.id, s.noConsumption.o));
   SCOPING_EXPECTATIONS.ghostExecution(ev(s.ghostExecution.id, s.ghostExecution.o));
+  for (const k of ['execIdLateFirstProbe', 'execIdLateStartStep', 'requestIdLateFirstProbe']) SCOPING_EXPECTATIONS[k](ev(s[k].id, s[k].o));
   // The unedited baseline keeps passing: every start has its consumption.
   for (const o of [...fixture.corpus, ...fixture.supplement]) assert.equal(ev(o.case_id, o).verdict, o.case_id === 'sup-unobservable-pending-settlement' ? 'UNASSESSABLE' : 'PASS', o.case_id);
 });
@@ -607,7 +634,7 @@ test('evidence-scoping regressions give the same evidence through evaluate --obs
       const file = join(dir, `${name}.json`);
       writeFileSync(file, JSON.stringify(bundle));
       const r = cliRun('evaluate', '--observations', file, '--lock', LOCK, '--profile', lock.profile, '--out', join(dir, name));
-      assert.ok(r.status === 1 || r.status === 2, `${name}: exit ${r.status} ${r.stderr}`);
+      assert.equal(r.status, SCOPING_EXITS[name], `${name}: exit ${r.status} ${r.stderr}`);
       const lines = [...readFileSync(join(dir, name, 'evidence.jsonl'), 'utf8').split('\n'), ...readFileSync(join(dir, name, 'supplement-evidence.jsonl'), 'utf8').split('\n')].filter(Boolean).map(l => JSON.parse(l));
       const row = lines.find(x => x.case_id === id)!;
       const recorded: Evidence = row.evidence ?? row;

@@ -294,8 +294,9 @@ export function lineageIssues(authorities: Authority[], steps: Step[], probes: P
     }
   }
   // The other direction: every observed start needs the permit consumption of its own authority's lineage, first shown
-  // at the start's own step, naming exactly that execution and that step's start request. Missing or other consumption
-  // evidence leaves the start's state evidence incomplete (never PASS); its findings stay.
+  // at the start's own step, naming exactly that execution and that step's start request in the snapshot that first
+  // shows it. A later snapshot never supplies a binding that this snapshot lacks. Missing or other consumption evidence
+  // leaves the start's state evidence incomplete (never PASS); its findings stay.
   for (const entry of last?.entries ?? []) {
     const record = last!.executions.find(x => x.execution_id === entry.execution_id);
     const startSteps = steps.map((s, i) => ({ s, i })).filter(({ s }) => s.op === 'start' && s.execution === entry.label);
@@ -305,11 +306,13 @@ export function lineageIssues(authorities: Authority[], steps: Step[], probes: P
     const at = probes.findIndex(p => p.state.entries.some(x => x.label === entry.label));
     const l = lineageId ? last!.lineages?.find(x => x.lineage_id === lineageId) : undefined;
     const consumption = lineageId ? transitions.find(t => t.kind === 'permit_consumed' && t.lineage_id === lineageId) : undefined;
+    // The consumption as first shown: its execution and start request are bound in that snapshot, or not at all.
+    const c = consumption ? probes[consumption.probe].state.lineages?.find(x => x.lineage_id === lineageId) : undefined;
     const why = !own ? `no start call of step starting ${entry.label} names its request` : !l ? `its authority ${authority ?? 'unmapped'} has no observed lineage`
-      : l.permit_state !== 'consumed' || !consumption ? `lineage ${l.lineage_id} shows no permit consumption`
+      : l.permit_state !== 'consumed' || !consumption || !c ? `lineage ${l.lineage_id} shows no permit consumption`
       : probes[consumption.probe].step !== own.i ? `the consumption of lineage ${l.lineage_id} is first shown at step ${probes[consumption.probe].step}, the start is step ${own.i}`
-      : l.execution_id !== entry.execution_id ? `the consumption of lineage ${l.lineage_id} names execution ${l.execution_id ?? 'none'}, the start ran ${entry.execution_id}`
-      : l.start_request_id !== (own.call!.request_id ?? null) ? `the consumption of lineage ${l.lineage_id} names start request ${l.start_request_id ?? 'none'}, step ${own.i} submitted ${own.call!.request_id ?? 'none'}`
+      : c.execution_id !== entry.execution_id ? `the consumption of lineage ${l.lineage_id}, first shown at probe ${consumption.probe}, names execution ${c.execution_id ?? 'none'}, the start ran ${entry.execution_id}`
+      : c.start_request_id !== (own.call!.request_id ?? null) ? `the consumption of lineage ${l.lineage_id}, first shown at probe ${consumption.probe}, names start request ${c.start_request_id ?? 'none'}, step ${own.i} submitted ${own.call!.request_id ?? 'none'}`
       : null;
     if (why) missing.push({ probe: Math.max(at, 0), execution: entry.label, authority, reason: `execution started with no permit consumption of its own: ${why}` });
   }
