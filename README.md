@@ -10,6 +10,8 @@ Deterministic, reproducible evaluation harnesses for AI agent systems. The repos
 
 None of the tracks shows that any system is secure, safe, certified, compliant or production-ready.
 
+How this harness relates to the control runtime and to the execution-evidence library, with claims, evidence and trust boundaries: [Control, evaluation and evidence](docs/architecture/control-evaluation-evidence.md).
+
 # ACS runtime-control evaluation
 
 The ACS track has exactly one System Under Test (SUT):
