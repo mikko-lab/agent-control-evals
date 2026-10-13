@@ -226,8 +226,12 @@ const TRANSITION_OP: Record<LifecycleTransition['kind'], Step['op']> = { approva
  *    consumption's start_request_id and whose execution, when the runtime started one, is the consumption's
  *    execution_id (AM18).
  */
-/** An observed start without its own permit consumption: incomplete state evidence of that execution (format 3). */
-export interface MissingConsumption { probe: number; execution: string; authority: string | null; reason: string }
+/**
+ * Incomplete consumption evidence of a start (format 3): an observed start without its own permit consumption, or a
+ * consumption whose execution or start request changes or disappears after the snapshot that first shows it. key names
+ * the fact (start:<label>, or consume:<lineage> when no start step names the execution).
+ */
+export interface MissingConsumption { probe: number; key: string; execution: string | null; authority: string | null; reason: string }
 
 export function lineageIssues(authorities: Authority[], steps: Step[], probes: Probe[], calls: CallRecord[], identity: IdentityMapping): { identity: string[]; transitions: string[]; missing: MissingConsumption[] } {
   const idIssues: string[] = [];
@@ -314,7 +318,26 @@ export function lineageIssues(authorities: Authority[], steps: Step[], probes: P
       : c.execution_id !== entry.execution_id ? `the consumption of lineage ${l.lineage_id}, first shown at probe ${consumption.probe}, names execution ${c.execution_id ?? 'none'}, the start ran ${entry.execution_id}`
       : c.start_request_id !== (own.call!.request_id ?? null) ? `the consumption of lineage ${l.lineage_id}, first shown at probe ${consumption.probe}, names start request ${c.start_request_id ?? 'none'}, step ${own.i} submitted ${own.call!.request_id ?? 'none'}`
       : null;
-    if (why) missing.push({ probe: Math.max(at, 0), execution: entry.label, authority, reason: `execution started with no permit consumption of its own: ${why}` });
+    if (why) missing.push({ probe: Math.max(at, 0), key: `start:${entry.label}`, execution: entry.label, authority, reason: `execution started with no permit consumption of its own: ${why}` });
+  }
+  // Persistence: a binding confirmed in the snapshot that first shows the consumption stays fixed. A later snapshot that
+  // changes or drops the execution or the start request is contradictory consumption evidence (incomplete, never PASS);
+  // the observed start and the findings stay. A binding missing where first shown is already incomplete (above), and a
+  // later snapshot that supplies it changes nothing.
+  for (const t of transitions) {
+    if (t.kind !== 'permit_consumed') continue;
+    const first = probes[t.probe].state.lineages!.find(x => x.lineage_id === t.lineage_id)!;
+    const s = steps[probes[t.probe].step];
+    const label = (s?.op === 'start' ? (s as { execution: string }).execution : undefined) ?? probes.flatMap(p => p.state.entries).find(x => x.execution_id === first.execution_id)?.label ?? null;
+    for (const field of ['execution_id', 'start_request_id'] as const) {
+      if (first[field] === null) continue;
+      for (let k = t.probe + 1; k < probes.length; k++) {
+        const l = probes[k].state.lineages?.find(x => x.lineage_id === t.lineage_id);
+        if (!l || l[field] === first[field]) continue;
+        missing.push({ probe: k, key: label === null ? `consume:${t.lineage_id}` : `start:${label}`, execution: label, authority: lineages[t.lineage_id] ?? null, reason: `the permit consumption of lineage ${t.lineage_id}, first shown at probe ${t.probe} with ${field} ${first[field]}, shows ${field} ${l[field] ?? 'none'} at probe ${k}` });
+        break;
+      }
+    }
   }
   return { identity: [...new Set(idIssues)], transitions: [...new Set(trIssues)], missing };
 }

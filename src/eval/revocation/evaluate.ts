@@ -210,7 +210,7 @@ function checkRuntimeReport(c: Case, o: RuntimeObservation, malformed: Set<strin
   if (format3) {
     const li = lineageIssues(c.authorities, c.steps, o.probes, o.calls, o.identity);
     for (const m of li.missing) {
-      e.incomplete.push(`inconsistent state evidence (probe ${m.probe}): start:${m.execution}: ${m.reason}`);
+      e.incomplete.push(`inconsistent state evidence (probe ${m.probe}): ${m.key}: ${m.reason}`);
       missingConsumption.push({ kind: 'execution_started', execution: m.execution, probe: m.probe, authority: m.authority });
     }
     for (const issue of li.identity) error('identity_mapping_invalid', '/identity', issue);
