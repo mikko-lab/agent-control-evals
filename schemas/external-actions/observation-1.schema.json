@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "external-action-observation-1",
+  "$comment": "external-action-observation/1 (external-actions-0.1.0, P1a). One observation per case. Unknown fields fail closed. Journals are hash-chained; the evaluator, not this schema, checks the chain, the closure claims and their supporting fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "case_id", "source", "timing", "isolation", "delay_element", "attempts", "journals", "snapshots", "final_closure", "post_cleanup_collection"],
+  "properties": {
+    "format": { "const": "external-action-observation/1" },
+    "case_id": { "type": "string", "minLength": 1 },
+    "source": { "const": "synthetic_fixture" },
+    "timing": { "$ref": "#/$defs/timing" },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canary_probe_blocked", "canary_hits", "config_before_sha256", "config_after_sha256"],
+      "properties": {
+        "canary_probe_blocked": { "type": "boolean" },
+        "canary_hits": { "$ref": "#/$defs/count" },
+        "config_before_sha256": { "$ref": "#/$defs/sha256" },
+        "config_after_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "delay_element": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attempt", "delay_ms"],
+          "properties": { "attempt": { "type": "string", "minLength": 1 }, "delay_ms": { "$ref": "#/$defs/count" } }
+        }
+      ]
+    },
+    "attempts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/attempt" } },
+    "journals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["P", "Q"],
+      "properties": { "P": { "$ref": "#/$defs/journal" }, "Q": { "$ref": "#/$defs/journal" } }
+    },
+    "snapshots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline", "provisional"],
+      "properties": {
+        "baseline": { "$ref": "#/$defs/states" },
+        "provisional": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fence_id", "states"],
+            "properties": { "fence_id": { "type": "string", "minLength": 1 }, "states": { "$ref": "#/$defs/states" } }
+          }
+        }
+      }
+    },
+    "final_closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confirmed", "failure_reason", "steps"],
+      "properties": {
+        "confirmed": { "type": "boolean" },
+        "failure_reason": { "type": ["string", "null"] },
+        "steps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["executor_quiescence", "guard_queue", "recipient_quiescence", "final_fence", "final_snapshots"],
+          "properties": {
+            "executor_quiescence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "cgroup_populated", "natural_exit", "killed", "elapsed_ms", "recipient_view"],
+              "properties": {
+                "status": { "enum": ["natural", "timeout_killed", "not_started"] },
+                "cgroup_populated": { "type": ["boolean", "null"] },
+                "natural_exit": { "type": ["boolean", "null"] },
+                "killed": { "type": "boolean" },
+                "elapsed_ms": { "$ref": "#/$defs/optionalCount" },
+                "recipient_view": {
+                  "oneOf": [
+                    { "type": "null" },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["journal_seq", "states"],
+                      "properties": {
+                        "journal_seq": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["P", "Q"],
+                          "properties": { "P": { "type": "integer", "minimum": -1 }, "Q": { "type": "integer", "minimum": -1 } }
+                        },
+                        "states": { "$ref": "#/$defs/states" }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "guard_queue": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reported", "empty"],
+              "properties": { "reported": { "type": "boolean" }, "empty": { "type": ["boolean", "null"] } }
+            },
+            "recipient_quiescence": { "$ref": "#/$defs/recipientQuiescence" },
+            "final_fence": { "$ref": "#/$defs/fenceStep" },
+            "final_snapshots": { "$ref": "#/$defs/snapshotStep" }
+          }
+        }
+      }
+    },
+    "post_cleanup_collection": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trigger", "cgroup_kill", "recipient_quiescence", "fence", "snapshots"],
+          "properties": {
+            "trigger": { "enum": ["window_failure", "executor_timeout"] },
+            "cgroup_kill": { "type": "boolean" },
+            "recipient_quiescence": { "$ref": "#/$defs/recipientQuiescence" },
+            "fence": { "$ref": "#/$defs/fenceStep" },
+            "snapshots": { "$ref": "#/$defs/snapshotStep" }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "optionalCount": { "type": ["integer", "null"], "minimum": 0 },
+    "recipient": { "enum": ["P", "Q"] },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["T_w_ms", "T_q_ms", "T_r_ms"],
+      "properties": { "T_w_ms": { "$ref": "#/$defs/count" }, "T_q_ms": { "$ref": "#/$defs/count" }, "T_r_ms": { "$ref": "#/$defs/count" } }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "network_identity", "decision", "agent_claim", "window"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["issued", "not_issued_after_window_failure"] },
+        "network_identity": { "type": ["string", "null"], "minLength": 1 },
+        "decision": { "enum": ["ALLOW", "DENY", "UNKNOWN", null] },
+        "agent_claim": { "enum": ["submitted", "not_submitted", null] },
+        "window": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "failure_reason", "fence_id", "elapsed_ms", "signal_sent"],
+              "properties": {
+                "status": { "enum": ["closed", "failed"] },
+                "failure_reason": { "enum": ["fence_missing", "connections_open", null] },
+                "fence_id": { "type": "string", "minLength": 1 },
+                "elapsed_ms": { "$ref": "#/$defs/count" },
+                "signal_sent": { "type": "boolean" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "journal": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+      ]
+    },
+    "entry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seq", "prev", "hash", "kind", "mono_us", "peer", "connection_id"],
+          "properties": {
+            "seq": { "$ref": "#/$defs/count" }, "prev": { "$ref": "#/$defs/sha256" }, "hash": { "$ref": "#/$defs/sha256" }, "mono_us": { "$ref": "#/$defs/count" },
+            "kind": { "const": "connection_accepted" },
+            "peer": { "type": "string", "minLength": 1 },
+            "connection_id": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seq", "prev", "hash", "kind", "mono_us", "peer", "connection_id", "request_index", "method", "host", "path", "local_address", "action_class", "content_digest"],
+          "properties": {
+            "seq": { "$ref": "#/$defs/count" }, "prev": { "$ref": "#/$defs/sha256" }, "hash": { "$ref": "#/$defs/sha256" }, "mono_us": { "$ref": "#/$defs/count" },
+            "kind": { "const": "request_received" },
+            "peer": { "type": "string", "minLength": 1 },
+            "connection_id": { "type": "string", "minLength": 1 },
+            "request_index": { "$ref": "#/$defs/count" },
+            "method": { "type": "string", "minLength": 1 },
+            "host": { "type": "string", "minLength": 1 },
+            "path": { "type": "string", "minLength": 1 },
+            "local_address": { "type": "string", "minLength": 1 },
+            "action_class": { "enum": ["fill", "autosave", "submit", "other"] },
+            "content_digest": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seq", "prev", "hash", "kind", "mono_us", "request_seq", "logical_id", "content_digest"],
+          "properties": {
+            "seq": { "$ref": "#/$defs/count" }, "prev": { "$ref": "#/$defs/sha256" }, "hash": { "$ref": "#/$defs/sha256" }, "mono_us": { "$ref": "#/$defs/count" },
+            "kind": { "const": "submit_received" },
+            "request_seq": { "$ref": "#/$defs/count" },
+            "logical_id": { "$ref": "#/$defs/sha256" },
+            "content_digest": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seq", "prev", "hash", "kind", "mono_us", "received_seq", "reason"],
+          "properties": {
+            "seq": { "$ref": "#/$defs/count" }, "prev": { "$ref": "#/$defs/sha256" }, "hash": { "$ref": "#/$defs/sha256" }, "mono_us": { "$ref": "#/$defs/count" },
+            "kind": { "const": "submit_rejected" },
+            "received_seq": { "$ref": "#/$defs/count" },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seq", "prev", "hash", "kind", "mono_us", "received_seq", "record_id", "logical_id", "deferred", "before_digest", "after_digest"],
+          "properties": {
+            "seq": { "$ref": "#/$defs/count" }, "prev": { "$ref": "#/$defs/sha256" }, "hash": { "$ref": "#/$defs/sha256" }, "mono_us": { "$ref": "#/$defs/count" },
+            "kind": { "const": "submit_stored" },
+            "received_seq": { "$ref": "#/$defs/count" },
+            "record_id": { "type": "string", "minLength": 1 },
+            "logical_id": { "$ref": "#/$defs/sha256" },
+            "deferred": { "type": "boolean" },
+            "before_digest": { "$ref": "#/$defs/sha256" },
+            "after_digest": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seq", "prev", "hash", "kind", "mono_us", "request_seq", "form_id", "content_digest", "before_digest", "after_digest"],
+          "properties": {
+            "seq": { "$ref": "#/$defs/count" }, "prev": { "$ref": "#/$defs/sha256" }, "hash": { "$ref": "#/$defs/sha256" }, "mono_us": { "$ref": "#/$defs/count" },
+            "kind": { "const": "draft_stored" },
+            "request_seq": { "$ref": "#/$defs/count" },
+            "form_id": { "type": "string", "minLength": 1 },
+            "content_digest": { "$ref": "#/$defs/sha256" },
+            "before_digest": { "$ref": "#/$defs/sha256" },
+            "after_digest": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["seq", "prev", "hash", "kind", "mono_us", "fence_id"],
+          "properties": {
+            "seq": { "$ref": "#/$defs/count" }, "prev": { "$ref": "#/$defs/sha256" }, "hash": { "$ref": "#/$defs/sha256" }, "mono_us": { "$ref": "#/$defs/count" },
+            "kind": { "const": "fence" },
+            "fence_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connections", "requests", "drafts", "submissions"],
+      "properties": {
+        "connections": { "$ref": "#/$defs/count" },
+        "requests": { "$ref": "#/$defs/count" },
+        "drafts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["form_id", "digest"],
+            "properties": { "form_id": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/sha256" } }
+          }
+        },
+        "submissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["record_id", "logical_id", "content_digest"],
+            "properties": { "record_id": { "type": "string", "minLength": 1 }, "logical_id": { "$ref": "#/$defs/sha256" }, "content_digest": { "$ref": "#/$defs/sha256" } }
+          }
+        }
+      }
+    },
+    "states": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["P", "Q"],
+      "properties": { "P": { "$ref": "#/$defs/state" }, "Q": { "$ref": "#/$defs/state" } }
+    },
+    "tracker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open_connections", "running_handlers", "queued_jobs", "pending_writes"],
+      "properties": {
+        "open_connections": { "$ref": "#/$defs/count" },
+        "running_handlers": { "$ref": "#/$defs/count" },
+        "queued_jobs": { "$ref": "#/$defs/count" },
+        "pending_writes": { "$ref": "#/$defs/count" }
+      }
+    },
+    "recipientQuiescence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "elapsed_ms", "trackers", "netem_backlog_packets"],
+      "properties": {
+        "status": { "enum": ["observed", "timeout", "not_started"] },
+        "elapsed_ms": { "$ref": "#/$defs/optionalCount" },
+        "trackers": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["P", "Q"],
+              "properties": { "P": { "$ref": "#/$defs/tracker" }, "Q": { "$ref": "#/$defs/tracker" } }
+            }
+          ]
+        },
+        "netem_backlog_packets": { "$ref": "#/$defs/optionalCount" }
+      }
+    },
+    "fenceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "fence_id"],
+      "properties": { "status": { "enum": ["present", "missing", "not_started"] }, "fence_id": { "type": "string", "minLength": 1 } }
+    },
+    "snapshotStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "states"],
+      "properties": {
+        "status": { "enum": ["taken", "failed", "not_started"] },
+        "states": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/states" }] }
+      }
+    }
+  }
+}

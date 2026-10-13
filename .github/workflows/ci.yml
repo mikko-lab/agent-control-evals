@@ -160,6 +160,55 @@ jobs:
             out/revocation-a-regressions.json
           if-no-files-found: warn
 
+  external-actions:
+    name: external actions P1a synthetic validation (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: 1. typecheck and build (no sudo, no network namespaces, no guard run in P1a)
+        run: |
+          npm run typecheck
+          npm run build
+      - name: 2. oracle import boundary of the external-actions track
+        run: node dist/src/external-actions-cli.js oracle-boundary
+      - name: 3. evaluator, oracle, sensitivity and CLI tests
+        run: node --test --test-concurrency=1 dist/test/external-actions/*.test.js
+      - name: 4. self-test (goldens, full baseline profile, RV1-RV6, AX1-AX7 against their pins); exit 0 = gate passed
+        run: node dist/src/external-actions-cli.js self-test --out out/external-actions-a
+      - name: 5. independent rerun and complete bundle byte comparison (determinism)
+        run: |
+          node dist/src/external-actions-cli.js self-test --out out/external-actions-b
+          diff -r out/external-actions-a out/external-actions-b
+      - name: 6. recorded observations re-evaluated through the CLI give the in-process evidence and report; exit 0 = full profile accepted
+        run: |
+          node dist/src/external-actions-cli.js evaluate --observations test/fixtures/external-actions/p1a-baseline.observations.json --profile profiles/external-actions/p1a-synthetic.profile.json --out out/external-actions-recorded
+          cmp out/external-actions-recorded/evidence.jsonl out/external-actions-a/baseline/evidence.jsonl
+          cmp out/external-actions-recorded/report.json out/external-actions-a/baseline/report.json
+          cmp out/external-actions-recorded/observations.json test/fixtures/external-actions/p1a-baseline.observations.json
+      - name: 7. report schema validation
+        run: |
+          node dist/src/external-actions-cli.js validate-report --file out/external-actions-a/baseline/report.json
+          node dist/src/external-actions-cli.js validate-report --file out/external-actions-recorded/report.json
+      - name: upload external-actions evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-actions-p1a-node${{ matrix.node }}
+          path: |
+            out/external-actions-a/**
+            out/external-actions-recorded/**
+          if-no-files-found: warn
+
   revocation-runtime:
     name: revocation runtime adapter (Node ${{ matrix.node }})
     runs-on: ubuntu-latest

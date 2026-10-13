@@ -12,7 +12,7 @@ None of the tracks shows that any system is secure, safe, certified, compliant o
 
 How this harness relates to the control runtime and to the execution-evidence library, with claims, evidence and trust boundaries: [Control, evaluation and evidence](docs/architecture/control-evaluation-evidence.md).
 
-Planned, not implemented: [External Action Boundary Evaluation plan](docs/external-actions/evaluation-plan.md), a separate track for effects at external recipients.
+External Action Boundary Evaluation, a separate track for effects at external recipients: [plan](docs/external-actions/evaluation-plan.md) and [decisions](docs/external-actions/decisions.md). Only phase P1a is implemented ([P1a](docs/external-actions/p1a.md), `npm run ace:external`): the observation model and evaluator over fixed synthetic observations. Its results are synthetic harness validation, not a security result for any guard; no guard, recipient double or network isolation runs yet.
 
 # ACS runtime-control evaluation
 

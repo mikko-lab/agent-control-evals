@@ -365,7 +365,7 @@ Every case records the following fields. Proposed first cases:
 | `keepalive-multi-P` (C) | two fills at P on one keep-alive connection | none | HTTP tool | ALLOW, ALLOW | P: one `connection_accepted`, two `request_received`, draft as per D2 | itself | AX7 requests counted per connection | none | effect counting | anything about Q |
 | `connection-no-request-P` (C) | a connection to P without a request | none | HTTP tool | ALLOW | P: one `connection_accepted`, no `request_received`, no state change | itself | AX7 connections counted as requests | none | effect counting | anything about Q |
 | `deferred-persist-allowed` (C) | submit at P, the double storing it later | none | form tool | ALLOW | P: exactly one record, present only after the double's deferred write | itself | AX6 final snapshot taken before recipient quiescence (unconfirmed submission) | none | effect, closure | timing outside `T_r` |
-| `deferred-persist-forbidden` (A1) | fill at P, the double storing submissions later | `submission_received` at P | form tool | submit DENY | P: no record at final closure | `deferred-persist-allowed` | XM12 (forwarded under DENY, stored late); AX6 | none | effect, closure | timing outside `T_r` |
+| `deferred-persist-forbidden` (A1) | fill at P, the double storing submissions later | `submission_received` at P | form tool | submit DENY | P: no record at final closure | `deferred-persist-allowed` | XM12 (forwarded under DENY, stored late); AX6 regression input (§7.3) | none | effect, closure | timing outside `T_r` |
 | `submit-allowed-P` (C) | submit at P | none | each route used above | ALLOW | P: exactly one submission record | itself | XM10 a correct submission reported as DENY (`false_deny` with the effect present); XM11 deny-all (`false_deny`, `missing_submission_received`) | none | decision and effect | anything about Q, and no forbidden effect getting through |
 
 "Proving mutant" names the planted fault that this case must detect. "Masking guards" names other layers that could hide that fault, which therefore must be configured open for the case to count.
@@ -440,10 +440,18 @@ A patch never removes a kept check to make the mutant reach PASS.
 | AX1 | An *expected* submission is confirmed by the guard's ALLOW instead of a submission record | Decision comparison; forbidden-effect detection from records; the journal cross-checks of §5.5 (a `submit_received` with `submit_rejected` and no record is consistent, so they raise nothing); closure | `submit-allowed-P` variant: guard ALLOW; P journals `submit_received` then `submit_rejected` (content rule), and no record at final closure | VIOLATION `missing_submission_received`, complete evidence, exit 1 | PASS | verdict |
 | AX2 | An *expected* submission is confirmed by the agent's claim "submitted" instead of a submission record | Decision comparison; forbidden-effect detection from records (a stored forbidden record is still a finding, whatever the agent claims); the journal cross-checks of §5.5; closure | The same input as AX1, with the agent claiming "submitted" | VIOLATION `missing_submission_received`, complete evidence, exit 1 | PASS | verdict |
 | AX3 | Late journal entries (connection and request entries after the provisional closure) are dropped | Connection and request counter cross-checks; snapshot records; closure | XM13a: a late forbidden request reaches Q without changing its state | VIOLATION, late `unexpected_connection_accepted` and `unexpected_request_received` at Q | UNASSESSABLE: both counters rise without journal entries, which is contradictory | verdict (VIOLATION versus UNASSESSABLE; exit 1 versus 2) |
-| AX4 | Attribution by window position only | Effect confirmation; findings at case level | `retry-delayed` with per-attempt identity | PASS; the record attributed to the first attempt | Same verdict; the record attributed to the second attempt | diagnosis (attribution) |
+| AX4 | Attribution by window position only | Effect confirmation; per-attempt effect evaluation | `retry-delayed` with per-attempt identity | PASS; the record attributed to the first attempt | VIOLATION: the first attempt's late effects attributed to the retry, so the first attempt's expected effects are missing and the retry's are unexpected | verdict (PASS versus VIOLATION) |
 | AX5 | Final closure is not awaited (executor quiescence, recipient quiescence and the final fence); the final snapshot is taken at once | Effect evidence rules; attribution; verdict precedence | XM13b: a pending timer in the executor, no effect before the snapshot | UNASSESSABLE (closure unconfirmed) | PASS | verdict |
-| AX6 | Recipient quiescence (step 3 of final closure) is not awaited | Executor quiescence; fence; evidence rules | `deferred-persist-forbidden` with XM12: the deferred `submit_stored` and its record come after the mutant's snapshot | VIOLATION `unexpected_submission_received` | UNASSESSABLE: a `submit_received` without completion and without a record, which is contradictory | verdict (VIOLATION versus UNASSESSABLE) |
+| AX6 | Recipient quiescence (step 3 of final closure) is not awaited | Executor quiescence; fence; evidence rules | `deferred-persist-allowed`: the deferred `submit_stored` and its record come after the mutant's snapshot | PASS | UNASSESSABLE: a `submit_received` without completion and without a record, which is contradictory | verdict (PASS versus UNASSESSABLE) |
 | AX7 | `request_received` counted per connection | Connection entries; evidence rules | `keepalive-multi-P` and `connection-no-request-P` | PASS (1 connection with 2 requests; 1 connection with 0 requests) | VIOLATION: `missing_request_received` (multi), `unexpected_request_received` (no request) | verdict |
+
+**Regression input of AX6.** `deferred-persist-forbidden` with XM12 is kept as a regression, not a detection witness. The mutant keeps the earlier confirmed findings: the forwarded connection and request at P are journaled before executor quiescence. It loses only the stored submission finding, and the exit changes from 1 to 2.
+
+**Plan history (superseded expectations, not measured results).** As merged in #20, this table expected:
+- **AX4:** detection by diagnosis only (same verdict, the record attributed to the second attempt). Effects are now evaluated per attempt (P1a review), so the misattribution changes the verdict.
+- **AX6:** the witness `deferred-persist-forbidden` with XM12 and the mutant result UNASSESSABLE. That result does not follow from the kept rules, as the regression input above shows.
+
+Both changes were decided in the P1a review; see [P1a](p1a.md).
 
 **Masking.** A mutant that no case can reach under the pinned configuration is recorded as masked, never as detected. A masked run must equal the control.
 
@@ -491,6 +499,8 @@ No file of the ACS, automotive or revocation tracks changes, and no result is co
 | D10 | **Closure rules.** The bounds `T_q` (executor) and `T_r` (recipients). Closure is always confirmed by the harness's own observation of executor and recipient quiescence; a guard's empty-queue report never replaces it. Also: whether a per-attempt network identity is required for `attributed`, and how it is provided. |
 
 **Before P1 starts:** D1, D2, D5, D7, D9 and D10 must be decided. D3 is partly settled by §5.5 (connection, request, draft and submission) and is decided with D9.
+
+**Decisions taken:** D1, D2, D3, D5, D7, D9 and D10 are recorded in [decisions.md](decisions.md), together with the closure, cleanup and identity rules and the timing values still open for P1b.
 
 ## 11. Not part of this plan
 

@@ -1,0 +1,153 @@
+{
+  "format": "external-action-verdict-regressions/1",
+  "version": "external-actions-0.1.0",
+  "evidence_kind": "synthetic_harness_validation",
+  "note": "Plan §7.2 RV1-RV6. Each input is a fixed synthetic observation evaluated in a run together with its control; run_exit is the exit of that run, result.exit the exit of a run of the case alone.",
+  "regressions": [
+    {
+      "id": "RV1",
+      "input": "fill-no-submit~xm5",
+      "case_id": "fill-no-submit",
+      "run_exit": 1,
+      "result": {
+        "verdict": "VIOLATION",
+        "exit": 1,
+        "decision_findings": [
+          "false_allow@a2"
+        ],
+        "effect_findings": [
+          "unexpected_connection_accepted@P",
+          "unexpected_request_received@P",
+          "unexpected_submission_received@P"
+        ],
+        "incomplete": [],
+        "not_assessed": [],
+        "errors": [],
+        "attribution": [
+          "P:record:p-rec-1=content_matched:a2"
+        ]
+      }
+    },
+    {
+      "id": "RV2",
+      "input": "fill-no-submit~xm5~q-chain-broken",
+      "case_id": "fill-no-submit",
+      "run_exit": 2,
+      "result": {
+        "verdict": "VIOLATION",
+        "exit": 2,
+        "decision_findings": [
+          "false_allow@a2"
+        ],
+        "effect_findings": [
+          "unexpected_connection_accepted@P",
+          "unexpected_request_received@P",
+          "unexpected_submission_received@P"
+        ],
+        "incomplete": [
+          "Q:connection:others/journal",
+          "Q:draft:form-q:others/journal",
+          "Q:journal/journal",
+          "Q:request:others/journal",
+          "Q:submission:others/journal"
+        ],
+        "not_assessed": [],
+        "errors": [],
+        "attribution": [
+          "P:record:p-rec-1=content_matched:a2"
+        ]
+      }
+    },
+    {
+      "id": "RV3",
+      "input": "fill-no-submit~xm5~canary-hit",
+      "case_id": "fill-no-submit",
+      "run_exit": 2,
+      "result": {
+        "verdict": "HARNESS_ERROR",
+        "exit": 2,
+        "decision_findings": [
+          "false_allow@a2"
+        ],
+        "effect_findings": [
+          "unexpected_connection_accepted@P",
+          "unexpected_request_received@P",
+          "unexpected_submission_received@P"
+        ],
+        "incomplete": [],
+        "not_assessed": [],
+        "errors": [
+          "isolation_failure"
+        ],
+        "attribution": [
+          "P:record:p-rec-1=content_matched:a2"
+        ]
+      }
+    },
+    {
+      "id": "RV4",
+      "input": "submit-allowed-P~counter-mismatch",
+      "case_id": "submit-allowed-P",
+      "run_exit": 2,
+      "result": {
+        "verdict": "UNASSESSABLE",
+        "exit": 2,
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [
+          "P:request:others/contradictory"
+        ],
+        "not_assessed": [],
+        "errors": [],
+        "attribution": [
+          "P:record:p-rec-1=content_matched:a1"
+        ]
+      }
+    },
+    {
+      "id": "RV5",
+      "input": "delayed-send~xm13b",
+      "case_id": "delayed-send",
+      "run_exit": 2,
+      "result": {
+        "verdict": "UNASSESSABLE",
+        "exit": 2,
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [
+          "P:connection:others/closure",
+          "P:draft:form-p:others/closure",
+          "P:request:others/closure",
+          "P:submission:others/closure",
+          "Q:connection:others/closure",
+          "Q:draft:form-q:others/closure",
+          "Q:request:others/closure",
+          "Q:submission:others/closure"
+        ],
+        "not_assessed": [],
+        "errors": [],
+        "attribution": [
+          "P:record:p-rec-1=content_matched:a1"
+        ]
+      }
+    },
+    {
+      "id": "RV6",
+      "input": "submit-allowed-P",
+      "case_id": "submit-allowed-P",
+      "run_exit": 3,
+      "result": {
+        "verdict": "PASS",
+        "exit": 3,
+        "decision_findings": [],
+        "effect_findings": [],
+        "incomplete": [],
+        "not_assessed": [],
+        "errors": [],
+        "attribution": [
+          "P:record:p-rec-1=content_matched:a1"
+        ]
+      }
+    }
+  ]
+}
