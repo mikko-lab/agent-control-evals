@@ -31,7 +31,7 @@ test('verdict regressions RV1-RV6 reproduce their pins (precedence HARNESS_ERROR
   assert.ok(runRegression(profile, REGRESSIONS[2]).pin.effect_findings.includes('unexpected_submission_received@P'));
 });
 
-test('adapter mutants: pinned results, with verdict changes and diagnosis-only changes pinned apart; AX6 is a recorded conflict', () => {
+test('adapter mutants: pinned results, verdict and diagnosis detection kept apart; AX4 and AX6 are recorded conflicts with the plan', () => {
   const pins = JSON.parse(readFileSync(join(root, PATHS.mutants), 'utf8')).mutants;
   const kinds: string[] = [];
   for (const m of ADAPTER_MUTANTS) for (const input of MUTANT_INPUTS[m.id]) {
@@ -43,13 +43,15 @@ test('adapter mutants: pinned results, with verdict changes and diagnosis-only c
     kinds.push(`${m.id}:${pin.status}:${r.detection}`);
   }
   assert.deepEqual(kinds, [
-    'AX1:pinned:verdict', 'AX2:pinned:verdict', 'AX3:pinned:verdict', 'AX4:pinned:diagnosis', 'AX5:pinned:verdict',
+    'AX1:pinned:verdict', 'AX2:pinned:verdict', 'AX3:pinned:verdict', 'AX4:conflict_not_pinned:verdict', 'AX5:pinned:verdict',
     'AX6:conflict_not_pinned:findings_or_exit', 'AX6:conflict_not_pinned:verdict', 'AX7:pinned:verdict', 'AX7:pinned:verdict',
   ]);
-  // AX4 changes only the attribution: same verdict and findings, the record attributed to the retry instead of the first attempt.
+  // AX4 misattributes the first attempt's late effects to the retry. With per-attempt evaluation that is no longer a
+  // diagnosis-only change: a1's expected effects are missing and the retry's are unexpected.
   const ax4 = runMutant(profile, 'AX4', 'retry-delayed');
-  assert.deepEqual([ax4.correct.verdict, ax4.mutant.verdict], ['PASS', 'PASS']);
+  assert.deepEqual([ax4.correct.verdict, ax4.mutant.verdict], ['PASS', 'VIOLATION']);
   assert.deepEqual([ax4.correct.attribution, ax4.mutant.attribution], [['P:record:p-rec-1=attributed:a1'], ['P:record:p-rec-1=attributed:a2']]);
+  assert.ok(ax4.mutant.effect_findings.includes('missing_submission_received@P') && ax4.mutant.effect_findings.includes('unexpected_submission_received@P:late'));
 });
 
 test('self-test gate passes and every golden matches', () => {

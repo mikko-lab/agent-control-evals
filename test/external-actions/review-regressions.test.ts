@@ -50,7 +50,7 @@ const CASES: Record<string, (e: Evidence) => void> = {
   },
   'submit-allowed-P~record-relabelled': e => {
     assert.equal(e.verdict, 'VIOLATION');
-    assert.deepEqual(byAttempt(e), ['unexpected_submission_received@P/-']);
+    assert.deepEqual(byAttempt(e), ['unexpected_submission_received@P/a1']);
     assert.deepEqual(e.errors, []);
     assert.ok(incompleteWith(e, 'contradictory', /changes between snapshots/), JSON.stringify(e.incomplete));
     assert.equal(singleCaseExit(e), 2);

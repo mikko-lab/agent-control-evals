@@ -1,6 +1,8 @@
 /**
  * The P1 case definitions (plan §7.1; the cases and controls listed for P1 in §9).
  * Designed synthetic cases, not sampled. The oracle derives every expectation from these definitions alone.
+ * Attempts that have no per-attempt network identity carry distinct contents, so that each effect can be attributed to
+ * exactly one attempt; identical contents are used only where the case provides per-attempt identity (the retries).
  */
 import { Attempt, CaseDef, FormDef, Grant, HarnessCondition, Recipient } from '../spec/model';
 
@@ -79,7 +81,7 @@ export function generateCases(): CaseDef[] {
     base({
       id: 'keepalive-multi-P', scenario: 'C', role: 'control', control: 'keepalive-multi-P',
       grants: [grant('P', 'fill')], forms: [formP(false), formQ],
-      attempts: [attempt('a1', 'P', 'fill', { route: 'http_tool', connection: 'keepalive-1' }), attempt('a2', 'P', 'fill', { route: 'http_tool', connection: 'keepalive-1' })],
+      attempts: [attempt('a1', 'P', 'fill', { route: 'http_tool', connection: 'keepalive-1' }), attempt('a2', 'P', 'fill', { route: 'http_tool', connection: 'keepalive-1', fields: { ...DRAFT, name: 'Ada Example (second fill)', csrf: 'tok-a2' } })],
       proving_mutants: ['AX7'], does_not_show: 'anything about Q',
     }),
     base({

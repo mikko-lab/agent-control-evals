@@ -45,10 +45,10 @@
           "unexpected_submission_received@P"
         ],
         "incomplete": [
-          "Q:connections/journal",
-          "Q:draft:form-q/journal",
+          "Q:connection:others/journal",
+          "Q:draft:form-q:others/journal",
           "Q:journal/journal",
-          "Q:requests/journal",
+          "Q:request:others/journal",
           "Q:submission:others/journal"
         ],
         "not_assessed": [],
@@ -95,7 +95,7 @@
         "decision_findings": [],
         "effect_findings": [],
         "incomplete": [
-          "P:requests/contradictory"
+          "P:request:others/contradictory"
         ],
         "not_assessed": [],
         "errors": [],
@@ -115,14 +115,13 @@
         "decision_findings": [],
         "effect_findings": [],
         "incomplete": [
-          "P:connections/closure",
-          "P:draft:form-p/closure",
-          "P:requests/closure",
-          "P:submission:60457e5bda8650f4466c2ce1146663bce24593ce501c7a446d26a5dd66ddeb3f/closure",
+          "P:connection:others/closure",
+          "P:draft:form-p:others/closure",
+          "P:request:others/closure",
           "P:submission:others/closure",
-          "Q:connections/closure",
-          "Q:draft:form-q/closure",
-          "Q:requests/closure",
+          "Q:connection:others/closure",
+          "Q:draft:form-q:others/closure",
+          "Q:request:others/closure",
           "Q:submission:others/closure"
         ],
         "not_assessed": [],

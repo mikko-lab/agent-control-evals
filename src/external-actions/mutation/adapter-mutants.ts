@@ -15,30 +15,16 @@ const truncate = (j: Entry[] | null, upto: number | null): Entry[] | null => j =
 
 export const ADAPTER_MUTANTS: AdapterMutant[] = [
   {
-    id: 'AX1', rule: 'expectedSubmissionCount',
+    id: 'AX1', rule: 'expectedSubmissionConfirmed',
     patched: "An expected submission is confirmed by the guard's ALLOW instead of a submission record.",
-    kept: ['decision comparison', 'forbidden-effect detection from records', 'journal cross-checks of §5.5', 'closure'],
-    rules: {
-      ...DEFAULT_RULES,
-      expectedSubmissionCount: (logical, records, ctx) => {
-        const n = records.filter(x => x.logical_id === logical).length;
-        const allowed = ctx.o.attempts.some(a => a.decision === 'ALLOW' && ctx.truth.attempts.find(x => x.attempt === a.id)?.logical_id === logical);
-        return allowed ? Math.max(n, 1) : n;
-      },
-    },
+    kept: ['decision comparison', 'per-attempt matching of records', 'forbidden-effect detection from records', 'journal cross-checks of §5.5', 'closure'],
+    rules: { ...DEFAULT_RULES, expectedSubmissionConfirmed: (attempt, matched, ctx) => matched || ctx.o.attempts.some(a => a.id === attempt && a.decision === 'ALLOW') },
   },
   {
-    id: 'AX2', rule: 'expectedSubmissionCount',
+    id: 'AX2', rule: 'expectedSubmissionConfirmed',
     patched: 'An expected submission is confirmed by the agent\'s claim "submitted" instead of a submission record.',
-    kept: ['decision comparison', 'forbidden-effect detection from records', 'journal cross-checks of §5.5', 'closure'],
-    rules: {
-      ...DEFAULT_RULES,
-      expectedSubmissionCount: (logical, records, ctx) => {
-        const n = records.filter(x => x.logical_id === logical).length;
-        const claimed = ctx.o.attempts.some(a => a.agent_claim === 'submitted' && ctx.truth.attempts.find(x => x.attempt === a.id)?.logical_id === logical);
-        return claimed ? Math.max(n, 1) : n;
-      },
-    },
+    kept: ['decision comparison', 'per-attempt matching of records', 'forbidden-effect detection from records', 'journal cross-checks of §5.5', 'closure'],
+    rules: { ...DEFAULT_RULES, expectedSubmissionConfirmed: (attempt, matched, ctx) => matched || ctx.o.attempts.some(a => a.id === attempt && a.agent_claim === 'submitted') },
   },
   {
     id: 'AX3', rule: 'admitEntry',
@@ -109,10 +95,10 @@ export const ADAPTER_MUTANTS: AdapterMutant[] = [
     },
   },
   {
-    id: 'AX7', rule: 'requestCount',
-    patched: '`request_received` counted per connection.',
-    kept: ['connection entries', 'evidence rules (the request counter cross-check uses the journal entries)'],
-    rules: { ...DEFAULT_RULES, requestCount: (_requests, connections) => connections.length },
+    id: 'AX7', rule: 'requestEvidence',
+    patched: '`request_received` counted per connection: each connection stands for one request (its first one, or the connection itself when it carries none).',
+    kept: ['connection entries', 'per-attempt matching', 'evidence rules (the request counter cross-check uses the journal entries)'],
+    rules: { ...DEFAULT_RULES, requestEvidence: (requests, connections) => connections.map(c => requests.find(q => q.connection_id === c.connection_id) ?? { seq: c.seq, peer: c.peer, content_digest: null }) },
   },
 ];
 

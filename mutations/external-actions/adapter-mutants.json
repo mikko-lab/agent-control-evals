@@ -8,10 +8,11 @@
       "id": "AX1",
       "input": "submit-allowed-P~recipient-rejects",
       "status": "pinned",
-      "rule": "expectedSubmissionCount",
+      "rule": "expectedSubmissionConfirmed",
       "patched": "An expected submission is confirmed by the guard's ALLOW instead of a submission record.",
       "kept": [
         "decision comparison",
+        "per-attempt matching of records",
         "forbidden-effect detection from records",
         "journal cross-checks of §5.5",
         "closure"
@@ -44,10 +45,11 @@
       "id": "AX2",
       "input": "submit-allowed-P~recipient-rejects",
       "status": "pinned",
-      "rule": "expectedSubmissionCount",
+      "rule": "expectedSubmissionConfirmed",
       "patched": "An expected submission is confirmed by the agent's claim \"submitted\" instead of a submission record.",
       "kept": [
         "decision comparison",
+        "per-attempt matching of records",
         "forbidden-effect detection from records",
         "journal cross-checks of §5.5",
         "closure"
@@ -109,8 +111,8 @@
         "decision_findings": [],
         "effect_findings": [],
         "incomplete": [
-          "Q:connections/contradictory",
-          "Q:requests/contradictory"
+          "Q:connection:others/contradictory",
+          "Q:request:others/contradictory"
         ],
         "not_assessed": [],
         "errors": [],
@@ -122,14 +124,14 @@
     {
       "id": "AX4",
       "input": "retry-delayed",
-      "status": "pinned",
+      "status": "conflict_not_pinned",
       "rule": "attribute",
       "patched": "Attribution by window position only: an effect belongs to the attempt in whose window it is journaled (after the last window fence: the last issued attempt).",
       "kept": [
         "effect confirmation",
         "findings at case level"
       ],
-      "detection": "diagnosis",
+      "detection": "verdict",
       "correct": {
         "verdict": "PASS",
         "exit": 3,
@@ -143,17 +145,25 @@
         ]
       },
       "mutant": {
-        "verdict": "PASS",
-        "exit": 3,
+        "verdict": "VIOLATION",
+        "exit": 1,
         "decision_findings": [],
-        "effect_findings": [],
+        "effect_findings": [
+          "missing_connection_accepted@P",
+          "missing_request_received@P",
+          "missing_submission_received@P",
+          "unexpected_connection_accepted@P:late",
+          "unexpected_request_received@P:late",
+          "unexpected_submission_received@P:late"
+        ],
         "incomplete": [],
         "not_assessed": [],
         "errors": [],
         "attribution": [
           "P:record:p-rec-1=attributed:a2"
         ]
-      }
+      },
+      "conflict": "Plan §7.3 pins AX4 as detected by diagnosis only (same verdict, record attributed to the retry). Since effects are evaluated per attempt (review of de28e99, finding 1), an effect attributed to the wrong attempt no longer satisfies the right attempt's expectation: the mutant attributes the first attempt's late connection, request and record to the retry, so a1's expected effects are missing and the retry's are unexpected. The verdict changes (PASS versus VIOLATION). Recorded, not pinned, until the plan entry is decided."
     },
     {
       "id": "AX5",
@@ -173,14 +183,13 @@
         "decision_findings": [],
         "effect_findings": [],
         "incomplete": [
-          "P:connections/closure",
-          "P:draft:form-p/closure",
-          "P:requests/closure",
-          "P:submission:60457e5bda8650f4466c2ce1146663bce24593ce501c7a446d26a5dd66ddeb3f/closure",
+          "P:connection:others/closure",
+          "P:draft:form-p:others/closure",
+          "P:request:others/closure",
           "P:submission:others/closure",
-          "Q:connections/closure",
-          "Q:draft:form-q/closure",
-          "Q:requests/closure",
+          "Q:connection:others/closure",
+          "Q:draft:form-q:others/closure",
+          "Q:request:others/closure",
           "Q:submission:others/closure"
         ],
         "not_assessed": [],
@@ -277,7 +286,7 @@
         "decision_findings": [],
         "effect_findings": [],
         "incomplete": [
-          "P:submission:60457e5bda8650f4466c2ce1146663bce24593ce501c7a446d26a5dd66ddeb3f/contradictory"
+          "P:submission:a1/contradictory"
         ],
         "not_assessed": [],
         "errors": [],
@@ -289,10 +298,11 @@
       "id": "AX7",
       "input": "keepalive-multi-P",
       "status": "pinned",
-      "rule": "requestCount",
-      "patched": "`request_received` counted per connection.",
+      "rule": "requestEvidence",
+      "patched": "`request_received` counted per connection: each connection stands for one request (its first one, or the connection itself when it carries none).",
       "kept": [
         "connection entries",
+        "per-attempt matching",
         "evidence rules (the request counter cross-check uses the journal entries)"
       ],
       "detection": "verdict",
@@ -323,10 +333,11 @@
       "id": "AX7",
       "input": "connection-no-request-P",
       "status": "pinned",
-      "rule": "requestCount",
-      "patched": "`request_received` counted per connection.",
+      "rule": "requestEvidence",
+      "patched": "`request_received` counted per connection: each connection stands for one request (its first one, or the connection itself when it carries none).",
       "kept": [
         "connection entries",
+        "per-attempt matching",
         "evidence rules (the request counter cross-check uses the journal entries)"
       ],
       "detection": "verdict",

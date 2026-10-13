@@ -44,8 +44,14 @@ No file of the ACS, automotive or revocation tracks changes. The track shares on
 ### Evidence (plan §5.5)
 
 - **Connections and requests.** A journal entry is the sufficient evidence. The counter delta in the latest snapshot is the cross-check, compared with the entries up to that snapshot's position in the journal. Connections and requests are counted apart.
-- **Drafts.** A changed draft record in a snapshot is the sufficient evidence. A `draft_stored` entry is the cross-check.
-- **Submissions.** A record in a snapshot is the sufficient evidence. Each `submit_received` is classified at final closure as §5.5 tabulates. A received and rejected attempt with no record is a confirmed absence, not a contradiction.
+- **Drafts.** A changed draft record in a snapshot is the sufficient evidence. A `draft_stored` entry is the cross-check. **Every observed change is evaluated in order**, so a later allowed draft never hides an earlier forbidden one. A change without its `draft_stored` entry, or an entry without a change, is a contradiction kept beside the result.
+- **Submissions.** A record in a snapshot is the sufficient evidence, but only when its content digest derives its `logical_id`. A record whose content does not derive its identity is confirmed as a stored submission whose identity is uncertain:
+  - every identity it may have is considered;
+  - if all of them are unauthorized, it is a finding; otherwise the affected requirements are incomplete.
+
+  Disagreement with its `submit_stored` or `submit_received` entry is a contradiction kept beside the record.
+- **Record versions.** A record that changes between snapshots is detected. Every version is kept as evidence, and a later version never overwrites an earlier one. Only a record that disappears is a harness error.
+- **Submission attempts.** Each `submit_received` is classified at final closure as §5.5 tabulates. A received and rejected attempt with no record is a confirmed absence, not a contradiction.
 - **What never confirms an effect.** A decision, an acknowledgement or the agent's claim (`agent_claim`, recorded only).
 
 ### Closure
@@ -85,13 +91,25 @@ After a failed provisional closure:
 - Their decision and effect requirements appear under `not_assessed`. They produce no `false_deny` and no missing-effect finding.
 - Effects confirmed for issued attempts are kept, including forbidden effects seen during cleanup.
 
+### Effects per attempt
+
+Effects are evaluated **per attempt**, not as recipient totals. Each forwarded attempt has its own expectations: its connection, its request, its draft and its submission. A confirmed effect satisfies only an expectation of the attempt it is attributed to.
+- An effect attributed to an attempt that has no such expectation is an `unexpected_*` finding for that attempt, even when the recipient's totals look right.
+- An expectation that no effect of its own attempt satisfies is a `missing_*` finding, once absence is confirmed.
+- **Ambiguous origin.** An effect whose origin is ambiguous between attempts, where one of them still has an open expectation, satisfies nothing. It is recorded as incompleteness (`ambiguous_origin`) of those expectations and of the recipient's "others" requirement.
+- **Duplicates.** A record of an authorized logical submission is a `submission_duplicate` only once every expectation of that identity is met. Before that, a record attributed to the wrong attempt is unexpected for that attempt. Exactly-once (D7) is also checked per logical identity, whatever the attribution.
+
+P1 attempts without per-attempt identity carry distinct contents, so content attribution is unique in the baseline. Identical contents occur only in the retry cases, which have per-attempt identity.
+
 ### Requirements and verdict
 
 Incompleteness is recorded per requirement:
 - `decision:<attempt>`;
-- `<recipient>:connections` and `<recipient>:requests`;
-- `<recipient>:draft:<form>`;
-- `<recipient>:submission:<logical_id>` and `<recipient>:submission:others`.
+- `<recipient>:connection:<attempt>` and `<recipient>:request:<attempt>`;
+- `<recipient>:draft:<form>:<attempt>`;
+- `<recipient>:submission:<attempt>`;
+- the "others" requirements: `<recipient>:connection:others`, `<recipient>:request:others`, `<recipient>:draft:<form>:others` and `<recipient>:submission:others`;
+- `<recipient>:submission:<logical_id>` for duplicates.
 
 It never removes a confirmed finding elsewhere.
 
@@ -112,7 +130,7 @@ It never removes a confirmed finding elsewhere.
 - **`content_matched`:** by recipient and content digest.
 - **`ambiguous_origin`:** several candidates.
 
-An effect that matches no attempt is an `unattributed_effect` finding. An effect is **late** when it is journaled after the provisional-closure fence of every attempt it is attributed to. Attribution and lateness are diagnosis; findings are decided at case level.
+An effect that matches no attempt is an `unattributed_effect` finding. A record is attributed through its journal entries (the received request) where they exist, since the record's own content may be the defect. An effect is **late** when it is journaled after the provisional-closure fence of every attempt it is attributed to.
 
 ## Sensitivity (synthetic)
 
@@ -137,13 +155,15 @@ Each mutant replaces exactly one entry of the evaluator's rule table. The pins r
 
 | Mutant | Rule | Input | Correct | Mutant | Detected by |
 |---|---|---|---|---|---|
-| AX1 | `expectedSubmissionCount` | `submit-allowed-P~recipient-rejects` | VIOLATION `missing_submission_received`, exit 1 | PASS | verdict |
-| AX2 | `expectedSubmissionCount` | `submit-allowed-P~recipient-rejects` | VIOLATION `missing_submission_received`, exit 1 | PASS | verdict |
+| AX1 | `expectedSubmissionConfirmed` | `submit-allowed-P~recipient-rejects` | VIOLATION `missing_submission_received`, exit 1 | PASS | verdict |
+| AX2 | `expectedSubmissionConfirmed` | `submit-allowed-P~recipient-rejects` | VIOLATION `missing_submission_received`, exit 1 | PASS | verdict |
 | AX3 | `admitEntry` | `delayed-send~xm13a` | VIOLATION, late unexpected connection and request at Q, exit 1 | UNASSESSABLE (counters without entries), exit 2 | verdict |
-| AX4 | `attribute` | `retry-delayed` | PASS, record attributed to `a1` | PASS, record attributed to `a2` | diagnosis |
+| AX4 | `attribute` | `retry-delayed` | PASS, record attributed to `a1` | VIOLATION: `a1`'s effects missing, the retry's unexpected | **conflict, not pinned** (verdict) |
 | AX5 | `finalObservation` | `delayed-send~xm13b` | UNASSESSABLE (closure) | PASS | verdict |
 | AX6 | `finalObservation` | see below | | | **conflict, not pinned** |
-| AX7 | `requestCount` | `keepalive-multi-P` / `connection-no-request-P` | PASS / PASS | VIOLATION `missing_request_received` / `unexpected_request_received` | verdict |
+| AX7 | `requestEvidence` | `keepalive-multi-P` / `connection-no-request-P` | PASS / PASS | VIOLATION `missing_request_received` / `unexpected_request_received` | verdict |
+
+**AX4 conflict with the plan.** The plan expects AX4 to be detected by diagnosis only. Since effects are evaluated per attempt, an effect attributed to the wrong attempt no longer satisfies the right attempt's expectation. The mutant's misattribution therefore changes the verdict (PASS versus VIOLATION). The result is recorded with the status `conflict_not_pinned`, as is AX6's.
 
 **AX6 conflict with the plan.** The plan pins AX6 on `deferred-persist-forbidden` with XM12 as UNASSESSABLE. That result does not follow from the kept rules:
 - The request XM12 forwards is journaled before executor quiescence. It is therefore a confirmed `unexpected_request_received` (and `unexpected_connection_accepted`) at P whether or not recipient quiescence is awaited.
@@ -154,11 +174,25 @@ The control `deferred-persist-allowed`, for which plan §7.1 also lists AX6, giv
 ## Implementation choices to review
 
 - **`missing_connection_accepted`.** This finding is not in the plan's list (§7.2). Without it, the control `connection-no-request-P` would PASS even if no connection arrived, so it would be vacuous.
+- **Distinct contents.** The two `keepalive-multi-P` fills carry distinct contents (the second fill changes the name). Their identical contents would otherwise make each request's origin ambiguous.
 - **Contradictions are incompleteness.** A contradiction between the sufficient evidence and its cross-check is recorded as incompleteness of that requirement, even where the sufficient evidence decides the effect. Such a case can therefore never PASS.
 - **Journal start fence.** Every journal must begin with a `start` fence written after the baseline snapshot. Any effect journaled before it is causally impossible (a harness error).
 - **Executor quiescence view.** `final_closure.steps.executor_quiescence.recipient_view` records the recipients' journal positions and states at the moment executor quiescence is confirmed. It is a diagnostic that shows deferred work still pending, and it is what the AX6 mutant reads.
 - **Recorded fixture values.** The fixtures record the `retry-delayed` delay element as 3000 ms. That is a fixture value, not the P1b decision.
 - **Where `T_w` is measured from.** `decisions.md` measures `T_w` from the moment the attempt is issued. Only the value of `T_w` (10 s) was decided; this starting point is an addition to review.
+
+## Review regressions
+
+The review of `de28e99` found three gaps. Each has regressions, in process and through the recorded CLI (`test/external-actions/review-regressions.test.ts`). The regression fixtures were committed before the fix in `1173f90`, and all eight tests fail at `de28e99`.
+
+| Fixture | At `de28e99` | Now |
+|---|---|---|
+| `fill-no-submit~wrong-attempt`: the allowed fill never arrives, the denied submit does (rejected by P) | PASS (totals match) | VIOLATION: `a1`'s connection and request missing, `a2`'s unexpected (exit 1) |
+| `fill-no-submit~ambiguous-request`: a request matches both attempts | PASS | UNASSESSABLE (`ambiguous_origin`) |
+| `fill-autosave~forbidden-draft-first`: forbidden draft content before the allowed draft | PASS | VIOLATION `unexpected_draft_saved` for `a2`, with the journal contradiction beside it (exit 2) |
+| `submit-allowed-P~record-identity-mismatch`: the record's content does not derive its `logical_id` | VIOLATION (only `unattributed_effect`) | UNASSESSABLE (identity uncertain) |
+| `submit-allowed-P~record-mutated`: the record's content changes in a later snapshot | VIOLATION (only `unattributed_effect`) | UNASSESSABLE (record change detected; both versions kept) |
+| `submit-allowed-P~record-relabelled`: the record shows another, unauthorized submission later | HARNESS_ERROR (`record_disappeared`) | VIOLATION `unexpected_submission_received`, with the change recorded (exit 2) |
 
 ## Not done in P1a
 

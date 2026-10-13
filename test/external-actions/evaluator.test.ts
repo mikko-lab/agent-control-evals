@@ -75,7 +75,7 @@ test('missing and contradictory journal or state evidence leaves the affected re
   const missing = runFixture('fill-no-submit~xm5', o => { o.journals.Q = null; });
   assert.equal(missing.verdict, 'VIOLATION');
   assert.deepEqual(findings(missing), ['false_allow@a2', 'unexpected_connection_accepted@P', 'unexpected_request_received@P', 'unexpected_submission_received@P']);
-  assert.ok(flags(missing).includes('Q:connections/journal') && flags(missing).includes('Q:requests/journal'));
+  assert.ok(flags(missing).includes('Q:connection:others/journal') && flags(missing).includes('Q:request:others/journal'));
   assert.equal(missing.closure.recipients_confirmed.Q, false);
   assert.equal(missing.closure.recipients_confirmed.P, true);
   const broken = runFixture('fill-no-submit~xm5~q-chain-broken');
@@ -84,11 +84,11 @@ test('missing and contradictory journal or state evidence leaves the affected re
   assert.ok(broken.incomplete.some(x => x.requirement === 'Q:journal' && /hash chain/.test(x.reason)));
   const counter = runFixture('submit-allowed-P~counter-mismatch');
   assert.equal(counter.verdict, 'UNASSESSABLE');
-  assert.deepEqual(flags(counter), ['P:requests/contradictory']);
+  assert.deepEqual(flags(counter), ['P:request:others/contradictory']);
   const draft = runFixture('fill-autosave', o => { for (const s of allStates(o)) s.P.drafts = []; });
   assert.equal(draft.verdict, 'UNASSESSABLE');
   assert.deepEqual(findings(draft), []);
-  assert.ok(draft.incomplete.some(x => x.requirement === 'P:draft:form-p' && x.flag === 'contradictory'));
+  assert.ok(draft.incomplete.some(x => x.requirement === 'P:draft:form-p:others' && x.flag === 'contradictory'));
 });
 
 test('late effects keep their class and attribution; identical attempts without per-attempt identity are ambiguous', () => {
@@ -143,7 +143,7 @@ test('post-cleanup collection confirms presence only, never absence or final clo
   assert.equal(e.verdict, 'UNASSESSABLE');
   assert.equal(e.closure.final_confirmed, false);
   assert.equal(e.closure.post_cleanup_used, true);
-  assert.ok(e.incomplete.some(x => x.requirement === 'Q:requests' && x.flag === 'closure'));
+  assert.ok(e.incomplete.some(x => x.requirement === 'Q:request:others' && x.flag === 'closure'));
   // Failed post-cleanup steps are recorded; journal-confirmed findings stay.
   const failed = runFixture('deferred-persist-forbidden~xm12~executor-timeout', x => {
     const pc = x.post_cleanup_collection!;
