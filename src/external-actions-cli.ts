@@ -122,7 +122,15 @@ async function p1b(command: string, args: string[]): Promise<number | null> {
     const a = readFileSync(join(resolve(o.get('--a')!), 'canonical.json'), 'utf8'), b = readFileSync(join(resolve(o.get('--b')!), 'canonical.json'), 'utf8');
     if (a === b) { console.log(JSON.stringify({ identical: true, sha256: sha256Hex(a) })); return 0; }
     const ca = JSON.parse(a) as unknown[], cb = JSON.parse(b) as unknown[];
-    ca.forEach((x, i) => { if (canonicalJson(x) !== canonicalJson(cb[i])) console.error(`differs: case ${i} ${JSON.stringify((x as { record?: { case_id?: string } }).record?.case_id)}`); });
+    const paths: string[] = [];
+    const diff = (x: unknown, y: unknown, path: string) => {
+      if (paths.length >= 40) return;
+      if (typeof x !== typeof y || Array.isArray(x) !== Array.isArray(y) || x === null || y === null || typeof x !== 'object') { if (canonicalJson(x ?? null) !== canonicalJson(y ?? null)) paths.push(`${path}: ${canonicalJson(x ?? null).slice(0, 300)} | ${canonicalJson(y ?? null).slice(0, 300)}`); return; }
+      const keys = [...new Set([...Object.keys(x as object), ...Object.keys(y as object)])].sort();
+      for (const k of keys) diff((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k], `${path}/${k}`);
+    };
+    ca.forEach((x, i) => { if (canonicalJson(x) !== canonicalJson(cb[i])) { console.error(`differs: case ${i} ${JSON.stringify((x as { record?: { case_id?: string } }).record?.case_id)}`); diff(x, cb[i], `[${i}]`); } });
+    for (const p of paths) console.error(`  ${p}`);
     return 1;
   }
   if (command === 'p1b-regressions') {
