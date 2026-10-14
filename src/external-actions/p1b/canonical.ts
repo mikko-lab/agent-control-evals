@@ -3,18 +3,17 @@
  *
  * Replaced explicitly: the run id (dropped), clock readings (a journal entry's `mono_us` becomes the number of
  * attempts issued before it; an elapsed time becomes its comparison with its bound; timeline readings become their
- * presence) and the per-run names and MAC addresses inside the configuration texts. Dropped: entry hashes and `prev`
+ * presence) and the per-run names, MAC addresses and the netem random seed inside the configuration texts. Dropped: entry hashes and `prev`
  * (the chain is verified first). Kept unchanged: order within each journal and per attempt, sequence numbers, kinds,
  * peers, connection, request and record ids, digests, logical ids, fences, states, decisions, late answers, window
  * statuses, attribution, findings, gaps and errors. The raw observations are never modified.
  */
 import { canonicalJson } from '../../util/canonical-json';
-import { sha256Hex } from '../../util/hash';
 import { Entry, entryHash, Evidence, GENESIS, Observation } from '../spec/model';
 import type { RunRecord } from './record';
 
 export function normalizeConfig(text: string): string {
-  return text.replace(/\/run\/ea(-exec|-code)?\/[0-9a-f]{6}/g, '/run/ea$1/<rid>').replace(/ea[0-9a-f]{6}/g, 'ea<rid>').replace(/([0-9a-f]{2}:){5}[0-9a-f]{2}/g, '<mac>');
+  return text.replace(/\/run\/ea(-exec|-code)?\/[0-9a-f]{6}/g, '/run/ea$1/<rid>').replace(/ea[0-9a-f]{6}/g, 'ea<rid>').replace(/([0-9a-f]{2}:){5}[0-9a-f]{2}/g, '<mac>').replace(/\bseed \d+/g, 'seed <seed>');
 }
 const chainOk = (j: Entry[]) => { let prev = GENESIS; return j.every((e, i) => { const ok = e.seq === i && e.prev === prev && entryHash(e) === e.hash; prev = e.hash; return ok; }); };
 
@@ -47,7 +46,7 @@ export function canonicalCase(observation: unknown, recordIn: unknown, evidence:
     protocol_errors: rec.protocol_errors,
     isolation: {
       probes: rec.isolation.probes.map(p => ({ ns: p.ns, results: p.results.map(r => ({ name: r.name, target: normalizeConfig(r.target), blocked: r.blocked })) })),
-      config_before_sha256: sha256Hex(normalizeConfig(rec.isolation.config_before)), config_unchanged: rec.isolation.config_after_sha256 === rec.isolation.config_before_sha256,
+      config_before: normalizeConfig(rec.isolation.config_before).split('\n'), config_unchanged: rec.isolation.config_after_sha256 === rec.isolation.config_before_sha256,
       drop_counters_before: rec.isolation.drop_counters_before, drop_counters_after: rec.isolation.drop_counters_after,
       canary_hits: rec.isolation.canary_hits.length, netem: rec.isolation.netem.map(n => ({ dev: normalizeConfig(n.dev), delay_us: n.delay_us })),
       channel: rec.isolation.channel,

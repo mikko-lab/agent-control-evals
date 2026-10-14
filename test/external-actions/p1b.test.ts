@@ -222,6 +222,7 @@ test('canonical form: run ids, clock readings and per-run names are replaced; or
   const a = canonicalJson(canonicalCase(o, r, null, profile.timing)), b = canonicalJson(canonicalCase(shifted, r2, null, profile.timing));
   assert.equal(a, b);
   assert.equal(normalizeConfig('ea0a1b2cd'), 'ea<rid>d');
+  assert.equal(normalizeConfig('qdisc netem 8001: root refcnt 2 limit 1000 seed 4155914843 delay 3s'), 'qdisc netem 8001: root refcnt 2 limit 1000 seed <seed> delay 3s');
   const reordered = clone(o);
   const j = reordered.journals.P!; const i = j.findIndex(e => e.kind === 'request_received');
   [j[i - 1], j[i]] = [j[i], j[i - 1]];
