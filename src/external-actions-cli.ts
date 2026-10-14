@@ -10,7 +10,7 @@
  *
  * Every result is synthetic harness validation, not a measured security result for any guard.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { canonicalJson, canonicalJsonLines } from './util/canonical-json';
 import { sha256Hex } from './util/hash';
@@ -22,9 +22,19 @@ import { Report, reportJson, summary, validateReport } from './external-actions/
 import { fixtureBytes, loadProfile, MUTANT_INPUTS, PATHS, REGRESSIONS, runMutant, runRegression, selfTest } from './external-actions/self-test';
 import { ADAPTER_MUTANTS } from './external-actions/mutation/adapter-mutants';
 import { VERSION } from './external-actions/spec/model';
+import { loadP1bProfile, loadRunConfig } from './external-actions/p1b/config';
+import { envCheck, setupHost } from './external-actions/p1b/env-check';
+import { evaluateP1bRun, missingObservation } from './external-actions/p1b/evaluate-run';
+import { GateManifest, guardSource, loadRun, runGate, RunSummary } from './external-actions/p1b/gate';
+import { P1B_PATHS } from './external-actions/p1b/config';
+import { INJECTIONS, Injection } from './external-actions/p1b/orchestrator';
+import { handBack, mkdirHandedBack, p1bRun, writeRunBundle } from './external-actions/p1b/run';
+import { runPrivilegedRegressions } from './external-actions/p1b/regressions';
 
 const root = resolve(__dirname, '..', '..');
-const USAGE = 'Usage: ace:external self-test --out DIR | evaluate --observations FILE --profile FILE --out DIR | validate-report --file FILE | oracle-boundary | write-goldens | compute-pins';
+const USAGE = 'Usage: ace:external self-test --out DIR | evaluate --observations FILE --profile FILE --out DIR | validate-report --file FILE | oracle-boundary | write-goldens | compute-pins'
+  + ' | p1b-setup-host | p1b-env-check | p1b-run --guard ID --out DIR [--inject A,B] [--cases A,B] | p1b-evaluate --run DIR --out DIR | p1b-compare --a DIR --b DIR'
+  + ' | p1b-gate --runs DIR --out FILE [--precheck true] | p1b-regressions --out DIR [--control DIR]';
 
 function options(args: string[], allowed: string[], required: string[]): Map<string, string> {
   const o = new Map<string, string>();
@@ -69,6 +79,92 @@ function manifest(out: string, files: { path: string; sha256: string }[], extra:
   writeFileSync(join(out, 'manifest.json'), canonicalJson({ version: VERSION, evidence_kind: 'synthetic_harness_validation', ...extra, implementation_sha256: sha256Hex(canonicalJson(implementation)), implementation, files }) + '\n');
 }
 const brief = (r: Report) => canonicalJson({ ...r.counts, technically_valid: r.technically_valid, has_confirmed_violation: r.has_confirmed_violation, controls_passed: r.controls_passed, profile_acceptance_passed: r.profile_acceptance_passed, contract_acceptance_passed: r.contract_acceptance_passed, exit_code: r.exit_code });
+
+async function p1b(command: string, args: string[]): Promise<number | null> {
+  if (command === 'p1b-setup-host') {
+    options(args, [], []);
+    console.log(JSON.stringify(setupHost(loadRunConfig(root).config)));
+    return 0;
+  }
+  if (command === 'p1b-env-check') {
+    options(args, [], []);
+    const r = await envCheck(loadRunConfig(root).config);
+    console.log(JSON.stringify(r, null, 1));
+    return r.ok ? 0 : 2;
+  }
+  if (command === 'p1b-run') {
+    const o = options(args, ['--guard', '--out', '--inject', '--cases'], ['--guard', '--out']);
+    const inject = new Set((o.get('--inject') ?? '').split(',').filter(Boolean)) as Set<Injection>;
+    for (const x of inject) if (!INJECTIONS.includes(x)) throw new Error(`unknown injection ${x}`);
+    const id = o.get('--guard')!;
+    const r = await p1bRun({ root, out: o.get('--out')!, guardId: id, guardSource: guardSource(root, id), inject, cases: o.get('--cases')?.split(',') });
+    console.log(brief(r.result.report));
+    return r.result.report.exit_code;
+  }
+  if (command === 'p1b-evaluate') {
+    const o = options(args, ['--run', '--out'], ['--run', '--out']);
+    const run = resolve(o.get('--run')!);
+    const { profile, sha256 } = loadP1bProfile(root);
+    const { config, sha256: configSha } = loadRunConfig(root);
+    const manifestIn = JSON.parse(readFileSync(join(run, 'manifest.json'), 'utf8'));
+    if (manifestIn.development_subset) throw new Error('a development subset run is not evaluated through the recorded path');
+    const records = JSON.parse(readFileSync(join(run, 'raw', 'run-records.json'), 'utf8')) as unknown[];
+    const observations = profile.cases.map(id => { try { return JSON.parse(readFileSync(join(run, 'raw', `${id}.observation.json`), 'utf8')); } catch { return missingObservation(id); } });
+    const result = evaluateP1bRun(profile, sha256, config, { observations, records });
+    const out = resolve(o.get('--out')!);
+    mkdirSync(dirname(out), { recursive: true }); mkdirSync(out);
+    writeRunBundle(root, out, sha256, configSha, manifestIn.guard, observations.filter(x => !(x as { missing?: boolean }).missing), records, result, { command: 'p1b-evaluate', input_run_manifest_sha256: sha256Hex(readFileSync(join(run, 'manifest.json'))) });
+    console.log(brief(result.report));
+    return result.report.exit_code;
+  }
+  if (command === 'p1b-compare') {
+    const o = options(args, ['--a', '--b'], ['--a', '--b']);
+    const a = readFileSync(join(resolve(o.get('--a')!), 'canonical.json'), 'utf8'), b = readFileSync(join(resolve(o.get('--b')!), 'canonical.json'), 'utf8');
+    if (a === b) { console.log(JSON.stringify({ identical: true, sha256: sha256Hex(a) })); return 0; }
+    const ca = JSON.parse(a) as unknown[], cb = JSON.parse(b) as unknown[];
+    const paths: string[] = [];
+    const diff = (x: unknown, y: unknown, path: string) => {
+      if (paths.length >= 40) return;
+      if (typeof x !== typeof y || Array.isArray(x) !== Array.isArray(y) || x === null || y === null || typeof x !== 'object') { if (canonicalJson(x ?? null) !== canonicalJson(y ?? null)) paths.push(`${path}: ${canonicalJson(x ?? null).slice(0, 300)} | ${canonicalJson(y ?? null).slice(0, 300)}`); return; }
+      const keys = [...new Set([...Object.keys(x as object), ...Object.keys(y as object)])].sort();
+      for (const k of keys) diff((x as Record<string, unknown>)[k], (y as Record<string, unknown>)[k], `${path}/${k}`);
+    };
+    ca.forEach((x, i) => { if (canonicalJson(x) !== canonicalJson(cb[i])) { console.error(`differs: case ${i} ${JSON.stringify((x as { record?: { case_id?: string } }).record?.case_id)}`); diff(x, cb[i], `[${i}]`); } });
+    for (const p of paths) console.error(`  ${p}`);
+    return 1;
+  }
+  if (command === 'p1b-regressions') {
+    const o = options(args, ['--out', '--control'], ['--out']);
+    const out = resolve(o.get('--out')!);
+    const created = mkdirHandedBack(out);
+    const r = await runPrivilegedRegressions(root, out, o.has('--control') ? resolve(o.get('--control')!) : null);
+    writeFileSync(join(out, 'regressions.json'), JSON.stringify(r, null, 1) + '\n');
+    handBack(out);
+    for (const d of created) handBack(d, false);
+    console.log(JSON.stringify({ ok: r.ok, results: r.results.map(x => `${x.id}:${x.ok}`), control: r.control }));
+    return r.ok ? 0 : 2;
+  }
+  if (command === 'p1b-gate') {
+    const o = options(args, ['--runs', '--out', '--precheck'], ['--runs', '--out']);
+    const precheck = o.has('--precheck') ? o.get('--precheck') === 'true' : false;
+    const manifestBytes = readFileSync(join(root, P1B_PATHS.mutants));
+    if (!precheck && readFileSync(join(root, P1B_PATHS.mutantsSha), 'utf8').trim() !== sha256Hex(manifestBytes)) throw new Error('guard mutant manifest sha256 pin does not match');
+    const manifest = JSON.parse(manifestBytes.toString('utf8')) as GateManifest;
+    const dir = resolve(o.get('--runs')!);
+    const runs: Record<string, RunSummary | null> = { reference: loadRun(join(dir, 'reference')) };
+    for (const m of manifest.mutants) runs[m.id] = loadRun(join(dir, m.id));
+    // Every other directory is an unknown run; plain files are not runs.
+    for (const extra of readdirSync(dir, { withFileTypes: true })) if (extra.isDirectory() && !(extra.name in runs)) runs[extra.name] = loadRun(join(dir, extra.name));
+    const r = runGate(root, manifest, runs, precheck);
+    const out = resolve(o.get('--out')!);
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, canonicalJson({ manifest_sha256: sha256Hex(manifestBytes), precheck, ...r }) + '\n');
+    for (const x of r.issues) console.error(x);
+    console.log(JSON.stringify({ passed: r.passed, precheck, issues: r.issues.length, mutants: r.mutants.map(m => ({ id: m.id, ok: m.ok, masked: m.masked, changed: m.changed_cases.length, deviations: m.deviations_observed.length })) }));
+    return r.passed ? 0 : precheck ? 3 : 2;
+  }
+  return null;
+}
 
 function main(command: string | undefined, args: string[]): number {
   if (command === 'self-test') {
@@ -136,4 +232,10 @@ function main(command: string | undefined, args: string[]): number {
   throw new Error(USAGE);
 }
 
-try { process.exitCode = main(process.argv[2], process.argv.slice(3)); } catch (error) { console.error(String(error)); process.exitCode = 2; }
+(async () => {
+  try {
+    const cmd = process.argv[2];
+    const r = cmd?.startsWith('p1b-') ? await p1b(cmd, process.argv.slice(3)) : null;
+    process.exitCode = r ?? main(cmd, process.argv.slice(3));
+  } catch (error) { console.error(String(error)); process.exitCode = 2; }
+})();

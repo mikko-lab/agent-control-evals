@@ -1,0 +1,47 @@
+{
+  "format": "external-action-p1b-run/1",
+  "run_config_id": "external-actions-p1b-local-reference-run",
+  "profile_sha256": "b279917161905d34cf0a8aff30940269e6b2ed6fe9796476d849ca40d5ee2843",
+  "timing": {
+    "driver_answer_timeout_ms": 1000,
+    "retry_once_hold_ms": 3000,
+    "retry_delayed_netem_ms": 3000,
+    "retry_start_limit_ms": 500,
+    "probe_timeout_ms": 300,
+    "poll_interval_ms": 10
+  },
+  "network": {
+    "recipients": {
+      "P": {
+        "address": "10.88.0.10",
+        "port": 8080,
+        "host": "practice.test"
+      },
+      "Q": {
+        "address": "10.88.0.20",
+        "port": 8080,
+        "host": "protected.test"
+      }
+    },
+    "shared_identity": "10.77.0.2",
+    "per_attempt_identities": [
+      "10.77.1.1",
+      "10.77.1.2"
+    ],
+    "canary": {
+      "address": "10.99.0.1",
+      "tcp_ports": [
+        80,
+        443
+      ],
+      "dns_port": 53
+    },
+    "no_route_probe": "192.0.2.1",
+    "filtered_probe_port": 9
+  },
+  "users": {
+    "executor": "ea-exec",
+    "doubles": "ea-dbl",
+    "observer": "ea-obs"
+  }
+}

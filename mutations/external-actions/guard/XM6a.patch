@@ -1,0 +1,11 @@
+--- a/guards/external-actions/reference-guard.cjs
++++ b/guards/external-actions/reference-guard.cjs
+@@ -51,7 +51,7 @@
+     if (attempt.method !== 'POST' || !form) return 'other';
+     if (attempt.path.endsWith('/autosave')) return 'submit';
+     if (attempt.path.endsWith('/submit')) return 'submit';
+-    if (attempt.path.endsWith('/fill')) return 'fill';
++    if (attempt.path.endsWith('/fill')) return form.autosave ? 'submit' : 'fill';
+     return 'other';
+     // RULE classify END
+   }

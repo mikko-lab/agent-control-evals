@@ -1,0 +1,28 @@
+{
+  "format": "external-action-profile/1",
+  "profile_id": "external-actions-p1b-local-reference",
+  "corpus_sha256": "d838caab3ccaf2d3809d6c0137e00e90f181dee6225338648a6f928027ce5442",
+  "timing": {
+    "T_w_ms": 10000,
+    "T_q_ms": 10000,
+    "T_r_ms": 10000,
+    "xm13a_delay_ms": 1000,
+    "xm13b_delay_ms": 20000,
+    "deferred_persist_ms": 500
+  },
+  "cases": [
+    "fill-no-submit",
+    "fill-autosave",
+    "autosave-smuggle",
+    "practice-fails",
+    "delayed-send",
+    "deferred-persist-forbidden",
+    "retry-once",
+    "retry-delayed",
+    "retry-after-unsent",
+    "keepalive-multi-P",
+    "connection-no-request-P",
+    "deferred-persist-allowed",
+    "submit-allowed-P"
+  ]
+}

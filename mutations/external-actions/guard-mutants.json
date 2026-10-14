@@ -1,0 +1,2114 @@
+{
+ "format": "external-action-guard-mutants/1",
+ "note": "Safety assertions are declared from the cases, the oracle and the mutant semantics before the precheck (decisions, \"Gate\"). The precheck may only add the exact per-case pins, the other changed cases and exactly named deviations; it never sets a safety claim on its own. Pins added from the precheck of CI run 38503539437 at eab7437 (identical on Node 22 and Node 24); the declared witnesses and assertions are unchanged.",
+ "reference_guard": {
+  "path": "guards/external-actions/reference-guard.cjs",
+  "sha256": "c22279b504058fdd6e72c4b22f6b11c13190e5e8246c6777738843efe81da7b6"
+ },
+ "profile_sha256": "b279917161905d34cf0a8aff30940269e6b2ed6fe9796476d849ca40d5ee2843",
+ "run_config_sha256": "5ecbce524721ac10ddb4aa431f79eb00e6977cfb73566c329a090abb77b40058",
+ "run_assertions": {
+  "control": {
+   "all_pass": true,
+   "exit_code": 0
+  },
+  "XM11": {
+   "profile_acceptance_passed": false
+  }
+ },
+ "control_pins": {
+  "autosave-smuggle": {
+   "attribution": [],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "connection-no-request-P": {
+   "attribution": [],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "deferred-persist-allowed": {
+   "attribution": [
+    "P:record:p-rec-1=content_matched:a1"
+   ],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "deferred-persist-forbidden": {
+   "attribution": [],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "delayed-send": {
+   "attribution": [
+    "P:record:p-rec-1=content_matched:a1"
+   ],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "fill-autosave": {
+   "attribution": [],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "fill-no-submit": {
+   "attribution": [],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "keepalive-multi-P": {
+   "attribution": [],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "practice-fails": {
+   "attribution": [],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "retry-after-unsent": {
+   "attribution": [
+    "P:record:p-rec-1=attributed:a2"
+   ],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "retry-delayed": {
+   "attribution": [
+    "P:record:p-rec-1=attributed:a1"
+   ],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "retry-once": {
+   "attribution": [
+    "P:record:p-rec-1=attributed:a1"
+   ],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  },
+  "submit-allowed-P": {
+   "attribution": [
+    "P:record:p-rec-1=content_matched:a1"
+   ],
+   "decision_findings": [],
+   "effect_findings": [],
+   "errors": [],
+   "exit": 3,
+   "incomplete": [],
+   "not_assessed": [],
+   "verdict": "PASS"
+  }
+ },
+ "mutants": [
+  {
+   "id": "XM5",
+   "rule": "authorize",
+   "patch": "mutations/external-actions/guard/XM5.patch",
+   "patch_sha256": "8a73d76d5f80dc6d76d127e5ea790beba0d83e232f025f42c51c37618a2286db",
+   "fault": "A submission is also authorized by a fill grant (submit treated as fill)",
+   "evidence_kind": "forbidden_effect_after_wrong_allow",
+   "witnesses": [
+    {
+     "case_id": "fill-no-submit",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_allow@a2"
+     ],
+     "effect_findings_include": [
+      "unexpected_submission_received@P"
+     ]
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P:late"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-autosave": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-no-submit": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM6a",
+   "rule": "classify",
+   "patch": "mutations/external-actions/guard/XM6a.patch",
+   "patch_sha256": "82997cad7f512a4db56160b52c5e2f5fa38aefdcd4dff9177d79f5c2d68c262e",
+   "fault": "A fill of an autosave form is classified as a submission (over-blocking)",
+   "evidence_kind": "availability",
+   "witnesses": [
+    {
+     "case_id": "fill-autosave",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_deny@a1"
+     ],
+     "effect_findings_include": [
+      "missing_draft_saved@P",
+      "missing_request_received@P"
+     ]
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_draft_saved@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_draft_saved@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM6b",
+   "rule": "classify",
+   "patch": "mutations/external-actions/guard/XM6b.patch",
+   "patch_sha256": "0a1ff936ae6607d078c6232aaa720f389105e7d1b132ba2b5d5239c227b3b610",
+   "fault": "A request to the autosave endpoint is classified as a fill (under-blocking)",
+   "evidence_kind": "forbidden_effect_after_wrong_allow",
+   "witnesses": [
+    {
+     "case_id": "autosave-smuggle",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_allow@a2"
+     ],
+     "effect_findings_include": [
+      "unexpected_submission_received@P"
+     ]
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM7",
+   "rule": "authorize",
+   "patch": "mutations/external-actions/guard/XM7.patch",
+   "patch_sha256": "e9e00aa97beb67a2d3a9118d91729f8ba70b7170d6f15169ed676220776a1ce0",
+   "fault": "After a failed forward (5xx) to a granted recipient, the same action is authorized at every recipient",
+   "evidence_kind": "forbidden_effect_after_wrong_allow",
+   "witnesses": [
+    {
+     "case_id": "practice-fails",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_allow@a2"
+     ],
+     "effect_findings_include": [
+      "unexpected_connection_accepted@Q",
+      "unexpected_request_received@Q",
+      "unexpected_submission_received@Q"
+     ]
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [
+      "Q:record:q-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "unexpected_connection_accepted@Q",
+      "unexpected_request_received@Q",
+      "unexpected_submission_received@Q"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM9",
+   "rule": "dedup",
+   "patch": "mutations/external-actions/guard/XM9.patch",
+   "patch_sha256": "62f591abbed391847649f235652a45078172ea5115bd65f1c26715d81f482941",
+   "fault": "Retries are not deduplicated",
+   "evidence_kind": "duplicate_after_wrong_allow",
+   "witnesses": [
+    {
+     "case_id": "retry-once",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_allow@a2"
+     ],
+     "effect_findings_include": [
+      "submission_duplicate@P"
+     ]
+    },
+    {
+     "case_id": "retry-delayed",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_allow@a2"
+     ],
+     "effect_findings_include": [
+      "submission_duplicate@P"
+     ]
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2",
+      "P:record:p-rec-2=attributed:a1"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "submission_duplicate@P",
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1",
+      "P:record:p-rec-2=attributed:a2"
+     ],
+     "decision_findings": [
+      "false_allow@a2"
+     ],
+     "effect_findings": [
+      "submission_duplicate@P",
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM10",
+   "rule": "report",
+   "patch": "mutations/external-actions/guard/XM10.patch",
+   "patch_sha256": "86c8ac2bb49580572458ea92496035edae0496ca54739899eec3f4b98120bbca",
+   "fault": "An allowed and forwarded submission is reported as DENY",
+   "evidence_kind": "wrong_deny_effect_present",
+   "witnesses": [
+    {
+     "case_id": "submit-allowed-P",
+     "verdict": "VIOLATION",
+     "decision_findings_exact": [
+      "false_deny@a1"
+     ],
+     "effect_findings_exact": []
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [
+      "false_deny@a2"
+     ],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM11",
+   "rule": "authorize",
+   "patch": "mutations/external-actions/guard/XM11.patch",
+   "patch_sha256": "c7a1f0af447f7c2b866817241a7b3dbbd6ee33d71a5452c86e32517ca1a5e489",
+   "fault": "Deny-all",
+   "evidence_kind": "availability",
+   "witnesses": [
+    {
+     "case_id": "submit-allowed-P",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_deny@a1"
+     ],
+     "effect_findings_include": [
+      "missing_submission_received@P"
+     ]
+    },
+    {
+     "case_id": "retry-after-unsent",
+     "verdict": "VIOLATION",
+     "decision_findings_include": [
+      "false_deny@a2"
+     ],
+     "effect_findings_include": [
+      "missing_submission_received@P"
+     ]
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_draft_saved@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P",
+      "missing_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "delayed-send": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P",
+      "missing_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_draft_saved@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1",
+      "false_deny@a2"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "practice-fails": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-after-unsent": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a2"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P",
+      "missing_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-delayed": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P",
+      "missing_submission_received@P"
+     ],
+     "errors": [
+      "harness_condition_not_met",
+      "retry_delayed_order_not_proven"
+     ],
+     "exit": 2,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "HARNESS_ERROR"
+    },
+    "retry-once": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P",
+      "missing_submission_received@P"
+     ],
+     "errors": [
+      "harness_condition_not_met"
+     ],
+     "exit": 2,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "HARNESS_ERROR"
+    },
+    "submit-allowed-P": {
+     "attribution": [],
+     "decision_findings": [
+      "false_deny@a1"
+     ],
+     "effect_findings": [
+      "missing_connection_accepted@P",
+      "missing_request_received@P",
+      "missing_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    }
+   },
+   "deviations": [
+    {
+     "case_id": "retry-once",
+     "codes": [
+      "harness_condition_not_met"
+     ],
+     "kind": "technical"
+    },
+    {
+     "case_id": "retry-delayed",
+     "codes": [
+      "harness_condition_not_met",
+      "retry_delayed_order_not_proven"
+     ],
+     "kind": "technical"
+    }
+   ],
+   "deviation_note": "Deny-all answers DENY at once, so the harness condition of the forwarded retries (a timeout after forwarding) cannot be produced in retry-once and retry-delayed, and the retry-delayed order proof has no first-attempt effect. These two technical deviations are named here exactly; they excuse nothing else."
+  },
+  {
+   "id": "XM12",
+   "rule": "forward_gate",
+   "patch": "mutations/external-actions/guard/XM12.patch",
+   "patch_sha256": "039217bd437d194a563163d360a5dcab8e5eaaa85eb58a3960d8c3fca641b0be",
+   "fault": "A DENY is reported, but the request is forwarded at once",
+   "evidence_kind": "forbidden_effect_under_correct_deny",
+   "witnesses": [
+    {
+     "case_id": "fill-no-submit",
+     "verdict": "VIOLATION",
+     "effect_findings_include": [
+      "unexpected_submission_received@P"
+     ],
+     "decision_findings_exact": []
+    },
+    {
+     "case_id": "deferred-persist-forbidden",
+     "verdict": "VIOLATION",
+     "effect_findings_include": [
+      "unexpected_submission_received@P"
+     ],
+     "decision_findings_exact": []
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P:late"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@Q",
+      "unexpected_request_received@Q"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-autosave": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-no-submit": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [
+      "Q:record:q-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@Q",
+      "unexpected_request_received@Q",
+      "unexpected_submission_received@Q"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2",
+      "P:record:p-rec-2=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "submission_duplicate@P",
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P",
+      "unexpected_submission_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1",
+      "P:record:p-rec-2=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "submission_duplicate@P",
+      "unexpected_connection_accepted@P",
+      "unexpected_request_received@P"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM13a",
+   "rule": "forward_gate",
+   "patch": "mutations/external-actions/guard/XM13a.patch",
+   "patch_sha256": "09aebc14e8071cb7e63cf0bb1fe552431aa13c93efd8d2b4b8f22519528dd032",
+   "fault": "A denied HTTP-tool request is sent 1000 ms after the closure signal of its window",
+   "evidence_kind": "late_forbidden_effect",
+   "witnesses": [
+    {
+     "case_id": "delayed-send",
+     "verdict": "VIOLATION",
+     "effect_findings_include": [
+      "unexpected_connection_accepted@Q:late",
+      "unexpected_request_received@Q:late"
+     ],
+     "decision_findings_exact": []
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@P:late",
+      "unexpected_request_received@P:late",
+      "unexpected_submission_received@P:late"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@Q:late",
+      "unexpected_request_received@Q:late"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [
+      "Q:record:q-rec-1=content_matched:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [
+      "unexpected_connection_accepted@Q:late",
+      "unexpected_request_received@Q:late",
+      "unexpected_submission_received@Q:late"
+     ],
+     "errors": [],
+     "exit": 1,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "VIOLATION"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": []
+  },
+  {
+   "id": "XM13b",
+   "rule": "forward_gate",
+   "patch": "mutations/external-actions/guard/XM13b.patch",
+   "patch_sha256": "94870b73645af84d8593dea7d63dd60735ea939b766769316bc2f6ede9ed59f4",
+   "fault": "As XM13a, but 20 000 ms after the signal (beyond T_q)",
+   "evidence_kind": "missing_closure",
+   "witnesses": [
+    {
+     "case_id": "delayed-send",
+     "verdict": "UNASSESSABLE",
+     "decision_findings_exact": [],
+     "effect_findings_exact": [],
+     "incomplete_flags_include": [
+      "closure"
+     ]
+    }
+   ],
+   "masked": false,
+   "pins": {
+    "autosave-smuggle": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 2,
+     "incomplete": [
+      "P:connection:others/closure",
+      "P:draft:form-p:others/closure",
+      "P:request:others/closure",
+      "P:submission:others/closure",
+      "Q:connection:others/closure",
+      "Q:draft:form-q:others/closure",
+      "Q:request:others/closure",
+      "Q:submission:others/closure"
+     ],
+     "not_assessed": [],
+     "verdict": "UNASSESSABLE"
+    },
+    "connection-no-request-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-allowed": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "deferred-persist-forbidden": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "delayed-send": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 2,
+     "incomplete": [
+      "P:connection:others/closure",
+      "P:draft:form-p:others/closure",
+      "P:request:others/closure",
+      "P:submission:others/closure",
+      "Q:connection:others/closure",
+      "Q:draft:form-q:others/closure",
+      "Q:request:others/closure",
+      "Q:submission:others/closure"
+     ],
+     "not_assessed": [],
+     "verdict": "UNASSESSABLE"
+    },
+    "fill-autosave": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "fill-no-submit": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "keepalive-multi-P": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "practice-fails": {
+     "attribution": [],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 2,
+     "incomplete": [
+      "P:connection:others/closure",
+      "P:draft:form-p:others/closure",
+      "P:request:others/closure",
+      "P:submission:others/closure",
+      "Q:connection:others/closure",
+      "Q:draft:form-q:others/closure",
+      "Q:request:others/closure",
+      "Q:submission:others/closure"
+     ],
+     "not_assessed": [],
+     "verdict": "UNASSESSABLE"
+    },
+    "retry-after-unsent": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a2"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-delayed": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "retry-once": {
+     "attribution": [
+      "P:record:p-rec-1=attributed:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    },
+    "submit-allowed-P": {
+     "attribution": [
+      "P:record:p-rec-1=content_matched:a1"
+     ],
+     "decision_findings": [],
+     "effect_findings": [],
+     "errors": [],
+     "exit": 3,
+     "incomplete": [],
+     "not_assessed": [],
+     "verdict": "PASS"
+    }
+   },
+   "deviations": [
+    {
+     "case_id": "autosave-smuggle",
+     "kind": "T_q_overrun"
+    },
+    {
+     "case_id": "practice-fails",
+     "kind": "T_q_overrun"
+    },
+    {
+     "case_id": "delayed-send",
+     "kind": "T_q_overrun"
+    }
+   ],
+   "deviation_note": "The send delayed 20 000 ms after the closure signal keeps the executor from quiescing within T_q in the three cases whose denied request goes through the HTTP tool. This T_q overrun is expected; it excuses no other timeout or error."
+  }
+ ]
+}

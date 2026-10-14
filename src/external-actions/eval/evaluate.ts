@@ -272,10 +272,11 @@ export function evaluate(c: CaseDef, truth: Expected, input: unknown, profile: P
   o.attempts.forEach((a, i) => {
     const path = `/attempts/${i}`;
     if (a.status === 'issued') {
-      if (failedAt >= 0) error('attempt_issued_after_window_failure', path, `attempt ${a.id} issued after the window of ${o.attempts[failedAt].id} failed`);
+      // Attempts of one keep-alive group share their window (P1b decisions); only a later window can follow a failed one.
+      if (failedAt >= 0 && o.attempts[failedAt].window?.fence_id !== a.window?.fence_id) error('attempt_issued_after_window_failure', path, `attempt ${a.id} issued after the window of ${o.attempts[failedAt].id} failed`);
       if (a.decision === null || a.window === null) error('issued_attempt_incomplete_record', path, 'an issued attempt records its decision and its window');
       if (a.window?.status === 'failed') {
-        failedAt = i;
+        if (failedAt < 0) failedAt = i;
         if (a.window.failure_reason === null || a.window.signal_sent) error('window_record_inconsistent', `${path}/window`, 'a failed window names its reason and sends no closure signal');
       } else if (a.window) {
         if (a.window.failure_reason !== null || !a.window.signal_sent) error('window_record_inconsistent', `${path}/window`, 'a closed window has no failure reason and its closure signal is sent');

@@ -100,7 +100,7 @@ export type States = Record<Recipient, RecipientState>;
 
 export interface Tracker { open_connections: number; running_handlers: number; queued_jobs: number; pending_writes: number }
 
-export type WindowFailure = 'fence_missing' | 'connections_open';
+export type WindowFailure = 'fence_missing' | 'connections_open' | 'forward_in_flight';
 export interface AttemptObservation {
   id: string;
   status: 'issued' | 'not_issued_after_window_failure';
@@ -157,7 +157,8 @@ export interface PostCleanupCollection {
 export interface Observation {
   format: typeof OBSERVATION_FORMAT;
   case_id: string;
-  source: 'synthetic_fixture';
+  /** `synthetic_fixture` (P1a) or `local_doubles` (P1b: recorded by the harness from the local doubles). */
+  source: 'synthetic_fixture' | 'local_doubles';
   timing: Timing;
   isolation: { canary_probe_blocked: boolean; canary_hits: number; config_before_sha256: string; config_after_sha256: string };
   /** Harness delay element (retry-delayed): the attempt whose traffic it held and for how long. */

@@ -2,9 +2,9 @@
 
 This file records the decisions taken on the open questions of the [evaluation plan](evaluation-plan.md) (§10). Each entry states what was decided and which phase it binds.
 
-Recording a decision authorizes no implementation. Each phase is a separate work order. The decisions below bind P1a, which evaluates fixed synthetic observations, and P1b, which runs the doubles, the isolation and the reference guard. P1b is **not** authorized by this file.
+Recording a decision authorizes no implementation. Each phase is a separate work order. The decisions below bind P1a, which evaluates fixed synthetic observations, and P1b, which runs the doubles, the isolation and the reference guard. P1b is authorized by its own work order; its decisions are recorded under [P1b decisions](#p1b-decisions).
 
-Decided: D1, D2, D3 (with D9), D5, D7, D9 and D10. Still open: D4, D6 and D8, and the P1b timing values listed under [Open for P1b](#open-for-p1b).
+Decided: D1, D2, D3 (with D9), D5, D7, D9 and D10, and the P1b values that were open (see [P1b decisions](#p1b-decisions)). Still open: D4, D6 and D8.
 
 ## D1: Guard SUT
 
@@ -81,7 +81,7 @@ All intervals are measured on the harness's monotonic clock.
 
 | Interval | Starts | Ends |
 |---|---|---|
-| `T_w` | when the attempt is issued (starting point proposed with P1a; to be confirmed) | when the provisional closure of the attempt's window is confirmed |
+| `T_w` | when the attempt is issued (confirmed in P1b) | when the provisional closure of the attempt's window is confirmed |
 | `T_q` | when the fence of the last attempt's provisional closure has been written | when the executor's cgroup reports `populated 0` **and** every process is confirmed to have exited naturally |
 | `T_r` | when executor quiescence is confirmed | when every double's work tracker reads zero and the harness's `tc netem` queues are empty |
 | XM13a / XM13b delay | when the mutant guard receives the closure signal for its window | when the mutant starts the send |
@@ -141,7 +141,7 @@ Per-attempt identity is required in the retry cases. Every other P1 case reports
 
 ## Open for P1b
 
-These are decided in the P1b work order. P1a evaluates fixed observations and does not need them.
+Decided in the P1b work order; see [P1b decisions](#p1b-decisions). The list below is kept as it stood when P1a was recorded. P1a evaluates fixed observations and does not need them.
 - The driver's timeout for the guard's answer (after it, the decision is `UNKNOWN`).
 - `retry-once`: how long the double holds its response after storing the record (it must exceed the driver's timeout).
 - `retry-after-unsent`: how a timeout before forwarding is caused, without a late connection getting through afterwards.
@@ -150,3 +150,240 @@ These are decided in the P1b work order. P1a evaluates fixed observations and do
 ## Status of P1a results
 
 P1a's results are **synthetic harness validation**: they show how the evaluator treats fixed observations. They are not a measured security result for any guard.
+
+## P1b decisions
+
+Recorded for the work order "External Action Boundary Evaluation P1b", before any P1b implementation code. They bind P1b only. P1a's synthetic fixtures, profile and mutant pins stay as they are.
+
+### Timing and retries
+
+All times are measured on the harness's monotonic clock (`CLOCK_MONOTONIC`, shared by every process on the host) and recorded in the observations.
+
+| Parameter | Value |
+|---|---:|
+| Driver's wait for the guard's answer (then `UNKNOWN`) | 1000 ms |
+| `retry-once`: P holds its response after storing the record | 3000 ms |
+| `retry-delayed`: `netem` delay on the first attempt's traffic | 3000 ms |
+| `retry-delayed`: latest start of the retry after the first attempt's driver timeout (after a successful provisional closure) | 500 ms |
+| `T_w`, `T_q`, `T_r` | 10 000 ms each |
+| XM13a send delay after the closure signal | 1000 ms |
+| XM13b send delay after the closure signal | 20 000 ms |
+| Deferred store after the response is sent | 500 ms |
+
+- **`T_w` starts when the attempt is issued.** This confirms the starting point proposed with P1a. In a keep-alive group (below) each attempt keeps its own `T_w`; the group's window must close within the earliest of them.
+- **Driver timeout.** The driver stops waiting after 1000 ms and records `UNKNOWN`. It does not cancel a forwarded operation, close its traffic or clear the guard's record that the submission was forwarded. An answer that arrives later is recorded as a diagnostic beside the attempt; the first `UNKNOWN` stands.
+- **Guard answers.** The reference guard answers `DENY` at once. On `ALLOW` it forwards and answers after the forward has completed, with the forward's status. So a held response turns into a driver timeout.
+- **`retry-after-unsent`.** A deterministic environment hook sits at the entry of the guard's handling of the first attempt, before any decision and before the first network forward. The attempt waits there. When the driver has recorded `UNKNOWN`, the harness sends a cancel for that attempt, and the hook ends it: it makes no decision, opens no socket and does not consume the logical submission's forwarding right. It can never continue later. The retry is allowed. The hook belongs to the executor environment, outside the guard's rule blocks, so the same hook applies to the control and to every mutant.
+- **`retry-once`.** P stores the record and holds its response for 3000 ms. The driver times out at 1000 ms. The first attempt's window closes once its connection has closed. The retry is issued after that window and must be denied: the guard keeps one decision and retry state for the whole case.
+- **`retry-delayed`.** The delay element is a `tc netem` qdisc in the doubles' namespace, on the egress of the first attempt's link (recipient to executor, 3000 ms). It belongs to the harness (plan §5.7). The connection is accepted at P only after the delayed handshake completes, so P journals nothing of the first attempt before the retry. The required order is proven from the observations, not from the configured delay:
+  1. the guard reports that it started forwarding the first attempt before the retry is issued;
+  2. the first attempt's provisional closure succeeded;
+  3. the retry is issued at most 500 ms after the first attempt's driver timeout;
+  4. every journal entry at P with the first attempt's network identity comes after the retry was issued and after the first attempt's fence.
+
+  If any of these does not hold, the run fails technically (exit 2). Bounds are never raised automatically.
+- **Keep-alive group window (refines D10, provisional closure).** Attempts that share one connection label form a group with one shared window. The window closes after:
+  - the last attempt of the group has its answer or its timeout;
+  - the connection has closed;
+  - every forward the group's attempts started has settled (`forward_done` for each `forward_started`), the delay-element attempt excluded (see "Provisional closure");
+  - a group fence (for example `w1-2`) in every journal.
+
+  One provisional snapshot is taken at that fence, and every attempt of the group records the same fence. "No open connections" is checked at the end of the group, not between requests on the same connection. Expectations and attribution stay per attempt.
+
+### Isolation and privileges
+
+- **Users.** The orchestrator's host setup creates three system users without a login shell, a home directory, `sudo` rights or supplementary groups:
+  - `ea-exec` (E): executor, guard and forwarders;
+  - `ea-dbl` (D): doubles and the canary double;
+  - `ea-obs` (H): case runner, observation reader and `netem` reader.
+
+  The environment check verifies that the users exist, have distinct non-root ids, are in no administrative group and are denied by `sudo -l`.
+- **Processes.** Every process is started through `setpriv`:
+  - with its user's ids and cleared supplementary groups;
+  - with `no_new_privs`;
+  - with an empty capability bounding set and no inheritable capabilities.
+- **Namespaces per case.** Created before the case and removed after it:
+  - **doubles:** P at 10.88.0.10:8080 and Q at 10.88.0.20:8080, with forwarding towards the canary;
+  - **executor identity namespaces:** one per network identity:
+    - `x0` (10.77.0.2) in cases without per-attempt identity;
+    - `x1` (10.77.1.1) and `x2` (10.77.1.2) in the retry cases;
+  - **guard namespace:** loopback only;
+  - **harness namespace:** loopback only;
+  - **canary namespace:** 10.99.0.1, TCP 80 and 443 and DNS on UDP 53.
+
+  No namespace has a link to the host's network, and none has a default route.
+- **Executor namespaces.**
+  - Their only route leads to 10.88.0.0/24.
+  - `iptables` `OUTPUT` accepts loopback, established traffic and TCP to P:8080 and Q:8080, and drops everything else with counters. `INPUT` accepts loopback and established traffic only.
+  - Q is reachable on purpose, so that the sandbox cannot mask a guard fault.
+- **Per-attempt identity.** Each identity has its own forwarder process (E) in its own network namespace, which emits only from that identity's source address. The guard is one process with one decision and retry state for the case. The **forwarding right is bound to the attempt the harness dispatched**: the executor routes every `forward(...)` (and every deferred, signal-triggered send) through that attempt's own forwarder, whatever id the guard puts in the request, carrying the binding across the guard's async handling with a **module-private** `AsyncLocalStorage` store (never exported, so the guard cannot open a binding of its own) and taking the deferred send's identity only from the active binding (a deferred send registered outside a dispatched attempt is refused, never bound to a guard-supplied id). A forwarder serves only its own identity's attempts, keyed by the orchestrator, and rejects a send that names another. The executor has no `CAP_NET_ADMIN` and cannot change namespaces. Traffic held in `netem` keeps the source address of the attempt that sent it.
+
+  **Trust boundary (narrower claim; approved).** Attribution is ultimately grounded in the **peer address the doubles record**, which is fixed by the per-identity network namespace the forwarder runs in — outside the guard's process. The `env` interface above makes the forwarding right unforgeable *for a guard that interacts through it*; the reference guard and every XM mutant do only that. P1b does **not** run the guard in its own process: the guard runs in-process in the executor, as user E with access to the forwarder sockets in the executor's directory, and Node's permission model restrains trusted code, not malicious in-process code. So the scope is exactly this: **P1b evaluates a named reference guard and XM mutants that use the interface. Preventing arbitrary in-process guard code from forging identity, manipulating the harness, or creating descendant processes is not demonstrated.** In particular P1b does not demonstrate that a direct misuse of a forwarder socket surfaces as a detectable missing or unexpected effect rather than a silent misattribution, nor that descendant-process creation is prevented against such code. Demonstrating the identity, harness and whole-process-tree guarantees against arbitrary in-process guard code would require isolating each identity's egress and the guard in separate processes or namespaces the guard cannot reach; that is out of P1b's scope and is recorded here as a limitation, not a solved property.
+- **Filesystem.**
+  - **Journals:** `/run/ea/<run>/journal`, owned by D with group `ea-obs`, mode 2750, files 0640.
+  - **Control sockets of the doubles:** Unix sockets in `/run/ea/<run>/ctl` (2750, sockets 0660). They are not reachable over any network.
+  - **Executor processes:**
+    - run in their own mount namespace with a tmpfs over `/run/ea`;
+    - load their code from a root-owned, read-only copy;
+    - get no path into the journals, the control sockets or the harness IPC.
+- **Channels to the executor.** The guard's standard input (commands) and standard output (answers) are relayed by the root orchestrator. The orchestrator forwards only well-formed messages of the known types. The closure signal uses a separate FIFO that the executor holds open read-only.
+- **cgroup.** Each case has its own cgroup v2 leaf. H owns that leaf's `cgroup.kill` and reads its `cgroup.events`; H has no other cgroup rights.
+- **Configuration record.** Before and after each case the orchestrator records the following for every case namespace:
+  - addresses, routes and links;
+  - `iptables-save` without counters;
+  - qdiscs without statistics;
+  - the forwarding sysctl.
+
+  The SHA-256 of that record is `config_before_sha256` / `config_after_sha256`. The drop counters are recorded separately before and after. The run record keeps the full texts.
+- **Technical errors:** any of these is a technical error (exit 2):
+  - a configuration change;
+  - a rise of a drop counter during the case;
+  - a canary hit.
+- **Canary probes.** Before each case, a probe as E in every executor namespace must fail to reach:
+  - the canary over TCP;
+  - the canary resolver with a DNS query;
+  - a TEST-NET address (no route);
+  - a non-service port of P (dropped by the filter).
+
+  The canary double must record no hit before or after the case.
+- **Missing isolation.** Any missing isolation mechanism makes the case HARNESS_ERROR and the run exit 2. This covers users, namespaces, `iptables`, `netem`, cgroup v2 with `cgroup.kill`, the mount hiding and the probes. There is no skip and no unprotected fallback. The host's general security settings are not changed. Only namespace-local settings are made, inside the case's own namespaces.
+- **No privileged step during attempts.** Every privileged step happens in the per-case setup or teardown. During the case the orchestrator only relays messages and reports process exits.
+
+### Recipients
+
+- **Process.** One doubles process (D) in the doubles namespace serves P and Q. Each recipient has its own listener, state, hash-chained journal and control socket. The doubles do not deduplicate.
+- **Form application.** Content digests and `logical_id` are computed from the received body, with the form's excluded fields left out:
+  - `POST /forms/<form>/fill` is a fill. On an autosave form it stores a draft (`draft_stored`, action class `autosave`); otherwise it changes nothing (action class `fill`).
+  - `POST /forms/<form>/submit` is a submission.
+  - `POST /forms/<form>/autosave` commits the posted form as a submission. It is the smuggling path of `autosave-smuggle`.
+- **Modes per case:**
+  - `immediate`;
+  - `failing`: `503` and `submit_rejected` with reason `service_unavailable`;
+  - `deferred_persist`: the record is stored 500 ms after the response has been sent;
+  - in `retry-once`, P holds its response for 3000 ms after storing.
+- **Journal.** The double writes each entry to its journal file synchronously. Connections and requests are separate entries. A submission writes `submit_received`, then exactly one completion (`submit_rejected` or `submit_stored`) before the double reports quiescence.
+- **Control commands:**
+  - `fence`: writes the fence and returns its sequence number and the state at that point, atomically;
+  - `state`: returns the journal length and the state;
+  - `tracker`: returns open connections, running handlers, queued jobs and pending writes.
+
+  The netem backlog is read separately by H's reader in the doubles' namespace (`tc -s qdisc`, summed over every qdisc there).
+- **Evidence.** The observation's journals are read by H from the doubles' journal files, and its snapshots come from the control answers. The guard and the executor cannot write either. An HTTP acknowledgement, the guard's `ALLOW` or the agent's claim never confirms an effect. Evaluation is per attempt, as in P1a, including every draft change and every record version.
+
+### Closure and cleanup
+
+These follow D10. The specifics:
+- **Provisional closure.**
+  - It needs the answer or timeout, no open connections at either double, every forward of the group settled, and a fence in both journals, all within `T_w`.
+  - **A forward settles** when the executor has reported it both started (`forward_started`) and done (`forward_done`). The fence waits for every forward the group's attempts started, so a send the guard kicked off before the fence — a normal awaited send, a send whose response the recipient held, or a fire-and-forget send started under a reported `DENY` — has reached the recipient and its effect is journaled before the fence, rather than racing it and landing before or after it by host timing alone. The **delay-element attempt is excluded**: its traffic is held by the netem element so that its effect is observed after its own fence (the retry-delayed order proof above), and waiting for it would defeat that. A send the guard schedules for after the closure signal has not started at fence time and stays genuinely late.
+  - If it fails, the window records `connections_open`, `forward_in_flight` or `fence_missing`, no signal is sent, later attempts are `not_issued_after_window_failure`, and cleanup starts.
+  - After a successful closure, the harness sends the closure signal (fence id and attempts) through the root orchestrator to the executor's FIFO and records the send.
+- **End of the case.** After the last window, the harness sends `end` to the guard and starts `T_q`.
+- **Executor quiescence.** It requires both:
+  - the case cgroup reports `populated 0`;
+  - the orchestrator reports a natural exit (code 0, no signal) of every executor process it started.
+
+  This covers the **whole process tree** of the case cgroup for a guard that uses the interface, because the executor and the forwarders (the only processes in that cgroup) are launched under Node's permission model with child-process and worker creation denied, so such a guard creates no descendant process. The orchestrator-started set is then the whole tree, and a process that exited by a signal cannot hide beneath it. The executor reports the prevention at startup, and the run validity layer fails the case (technical error) if it is not confirmed. This is the narrower, approved scope: P1b evaluates a named reference guard and XM mutants that use the interface; preventing arbitrary in-process guard code from forging identity, manipulating the harness, or creating descendant processes is not demonstrated (see "Per-attempt identity", trust boundary).
+
+  If either fails, H writes `cgroup.kill` (cleanup only), and the post-cleanup collection runs.
+- **Recipient quiescence.** It requires every tracker to read zero and the netem backlog to be 0 packets, within `T_r`. Then the final fence and the final snapshots follow.
+- **Final closure and post-cleanup.** `final_closure` and `post_cleanup_collection` stay separate. Post-cleanup collection confirms presence only.
+
+### Reference guard and mutants
+
+The reference guard is `guards/external-actions/reference-guard.cjs`. Its rules are delimited by `// RULE <name> BEGIN` and `// RULE <name> END`:
+
+| Rule | Behaviour |
+|---|---|
+| `classify` | Action class of the request. The form-tool fill and submit are `fill` and `submit`; an HTTP-tool request to `/fill`, `/submit` or `/autosave` is `fill`, `submit` or `submit`; a connection without a request is `connect`. |
+| `authorize` | `ALLOW` exactly when a grant covers the recipient and the class |
+| `dedup` | A submission whose `logical_id` was already forwarded in the case is denied |
+| `forward_gate` | Only an `ALLOW` is forwarded; the `logical_id` is marked as forwarded when the forward starts |
+| `report` | The answer reports the decision |
+
+Each XM mutant is a unified diff in `mutations/external-actions/guard/<id>.patch`. Before any mutant runs, the gate checks that every changed line lies inside the named rule. Kept protections are not removed.
+
+| Mutant | Rule | Fault |
+|---|---|---|
+| XM5 | `authorize` | A submission is also authorized by a fill grant (submit treated as fill) |
+| XM6a | `classify` | A fill of an autosave form is classified as a submission (over-blocking) |
+| XM6b | `classify` | A request to the autosave endpoint is classified as a fill (under-blocking) |
+| XM7 | `authorize` | After a failed forward (5xx) to a granted recipient, the same action is authorized at every recipient |
+| XM9 | `dedup` | Retries are not deduplicated |
+| XM10 | `report` | An allowed and forwarded submission is reported as `DENY` |
+| XM11 | `authorize` | Deny-all |
+| XM12 | `forward_gate` | A `DENY` is reported, but the request is forwarded at once |
+| XM13a | `forward_gate` | A denied HTTP-tool request is sent 1000 ms after the closure signal of its window |
+| XM13b | `forward_gate` | As XM13a, but 20 000 ms after the signal (beyond `T_q`) |
+
+#### Gate
+
+- **Every mutant runs the full P1b profile.** The control run with the reference guard runs the same profile.
+- **Safety assertions are declared first.** They come from the cases and the oracle and are committed in `mutations/external-actions/guard-mutants.json` before the precheck. For each mutant they name:
+  - the witness cases;
+  - the required verdict;
+  - the required decision and effect findings;
+  - the evidence kind.
+- **The precheck may only refine observation pins.** It may refine the exact per-case results of the full run, including the other cases that change and any exactly named deviations. It never sets a safety claim on its own.
+- **The manifest and its SHA-256 are committed before the final gate run.**
+- **Gate checks over the whole run:**
+  - the mutant inventory is exact;
+  - every patch is confined to its rule;
+  - the control run is technically valid and every case PASSes, and deny-all (XM11) does not pass the profile;
+  - every declared witness assertion holds;
+  - every case equals its pin, and a case that differs from the control is pinned;
+  - there is no technical error other than an exactly named, pinned deviation.
+
+  Zero mutants run, an unknown id or a missing observation channel is never success. A masked mutant (no case differs from the control) is recorded as a gap, never as detected.
+- **Expected deviations, named exactly:**
+  - XM13b: `T_q` is overrun in the cases whose denied HTTP-tool request it delays.
+  - XM11: the harness condition of the forwarded retries (`retry-once`, `retry-delayed`) cannot be produced by a guard that denies the first attempt. These are pinned as exact named deviations if the precheck shows them.
+
+  Neither excuses any other timeout or error.
+- **Evidence kinds are kept apart:**
+  - XM6a and XM11: availability (a wrong block);
+  - XM10: a wrong `DENY` with the effect present;
+  - XM12: a forbidden effect under a correct `DENY`;
+  - XM13a: a late forbidden effect;
+  - XM13b: missing closure (UNASSESSABLE), not an observed forbidden effect;
+  - XM5, XM6b and XM7: a forbidden effect after a wrong `ALLOW`;
+  - XM9: a duplicate after a wrong `ALLOW`.
+
+### Profile, run metadata and schemas
+
+- **Profile.** `profiles/external-actions/p1b-local-reference.profile.json`, with its SHA-256 pin. Same format and timing as P1a, its own `profile_id`.
+- **Run configuration.** `profiles/external-actions/p1b-local-reference.run.json`, with its SHA-256 pin. It holds:
+  - the P1b timing above;
+  - addresses, ports and the user names;
+  - the profile's SHA-256.
+- **Observation.** P1b observations use the same `external-action-observation/1` format with `source: "local_doubles"`. The schema's `source` becomes an enum of `synthetic_fixture` and `local_doubles`. Nothing else in the schema changes, so P1a observations evaluate exactly as before.
+- **Run record.** Each case also has a run record, `external-action-run-record/1`. It holds:
+  - the timeline: issue, answer, timeout, late answers, guard events, signal sends, process exits;
+  - the configuration texts and counters, the probes and the canary journal.
+
+  A P1b validity layer checks the run records:
+  - the environment check;
+  - the `retry-delayed` order;
+  - unexpected process errors and counter changes.
+
+  Any failure is a technical error of the case (exit 2).
+- **Report.** P1b reports use `evidence_kind: "local_reference_run"` and `observation_source: "local_doubles"`, with P1b limitations. The P1a report bytes are unchanged.
+- **Canonical comparison form for double-run determinism.**
+  - **Replaced** (per-run values, normalized so they do not count as differences):
+    - run ids, in names and in paths (`/run/ea…/<run>` and the `ea<rid>…` namespace, link and veth names);
+    - clock readings: a journal entry's `mono_us` is replaced by the number of attempts issued before it, an `elapsed_ms` by its comparison with its bound, and a timeline reading by its presence;
+    - the configuration record's per-run identifiers: the namespace and link names above, veth MAC addresses, the kernel-assigned `tc` qdisc handles, and any `netem` random seed.
+  - **Dropped:** entry hashes and `prev`, after each run's chain has been verified.
+  - **Kept, unchanged:**
+    - order;
+    - sequence numbers, kinds and peers;
+    - connection, request and record ids;
+    - digests and `logical_id`s;
+    - fences and their positions;
+    - lateness, attribution, findings, gaps, decisions, late answers and window statuses.
+
+  The raw observations are kept unchanged beside the canonical form.
+
+### Status of P1b results
+
+P1b results are runs of the **local reference guard** and its planted mutants against local doubles under the named profile. They are not a measured security result for any other guard, and they say nothing about real services.
