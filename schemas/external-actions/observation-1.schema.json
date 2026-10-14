@@ -160,7 +160,7 @@
               "required": ["status", "failure_reason", "fence_id", "elapsed_ms", "signal_sent"],
               "properties": {
                 "status": { "enum": ["closed", "failed"] },
-                "failure_reason": { "enum": ["fence_missing", "connections_open", null] },
+                "failure_reason": { "enum": ["fence_missing", "connections_open", "forward_in_flight", null] },
                 "fence_id": { "type": "string", "minLength": 1 },
                 "elapsed_ms": { "$ref": "#/$defs/count" },
                 "signal_sent": { "type": "boolean" }

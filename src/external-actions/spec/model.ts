@@ -100,7 +100,7 @@ export type States = Record<Recipient, RecipientState>;
 
 export interface Tracker { open_connections: number; running_handlers: number; queued_jobs: number; pending_writes: number }
 
-export type WindowFailure = 'fence_missing' | 'connections_open';
+export type WindowFailure = 'fence_missing' | 'connections_open' | 'forward_in_flight';
 export interface AttemptObservation {
   id: string;
   status: 'issued' | 'not_issued_after_window_failure';

@@ -184,16 +184,35 @@ async function main() {
     // Provisional closure of the group's window (decisions: keep-alive group window), bounded by the earliest T_w.
     const fenceId = group.length === 1 ? `w${plan.attempts.findIndex(x => x.request.id === group[0]) + 1}` : `w${plan.attempts.findIndex(x => x.request.id === group[0]) + 1}-${plan.attempts.findIndex(x => x.request.id === group[group.length - 1]) + 1}`;
     const deadline = Math.min(...[...issued.values()].map(x => x + timing.T_w_ms * 1000));
-    let reason: 'connections_open' | 'fence_missing' | null = null;
+    // A forward of this group that the executor has reported starting but not yet done is still in flight. The window
+    // is fenced only once every such forward has settled, so a forward the guard kicked off before the fence — a normal
+    // awaited send, a send whose response the recipient held, or a fire-and-forget send started under a reported DENY —
+    // has by then reached the recipient and its effect is journaled before this fence. Without this the fire-and-forget
+    // send races the fence and its effect is journaled after it only on some hosts, so the same guard would be judged
+    // late or in-window by timing alone. The delay-element attempt is excluded on purpose: its traffic is held by the
+    // netem element so its effect is observed after its own fence (the retry-delayed order proof), and waiting for it
+    // would defeat that. A send the guard schedules for after the closure signal has not started here and stays late.
+    // (decisions, "Provisional closure" and "retry-delayed".)
+    const delayAttempt = plan.delay_element?.attempt;
+    const waited = new Set(group.filter(id => id !== delayAttempt));
+    const forwardsSettled = () => {
+      let started = 0, done = 0;
+      for (const g of guardEvents) {
+        if (g.attempt === null || !waited.has(g.attempt)) continue;
+        if (g.event === 'forward_started') started++; else if (g.event === 'forward_done') done++;
+      }
+      return started === done;
+    };
+    let reason: 'connections_open' | 'forward_in_flight' | 'fence_missing' | null = null;
     let closedAt: number | null = null;
     for (;;) {
       const tr = await trackers();
-      if (tr && tr.P.open_connections === 0 && tr.Q.open_connections === 0) {
+      if (tr && tr.P.open_connections === 0 && tr.Q.open_connections === 0 && forwardsSettled()) {
         const f = nowUs() < deadline ? await fence(fenceId) : null;
         if (f && nowUs() <= deadline) { provisional.push({ fence_id: fenceId, states: states(f) }); closedAt = nowUs(); break; }
         reason = 'fence_missing'; break;
       }
-      if (nowUs() >= deadline) { reason = tr ? 'connections_open' : 'fence_missing'; break; }
+      if (nowUs() >= deadline) { reason = !tr ? 'fence_missing' : forwardsSettled() ? 'connections_open' : 'forward_in_flight'; break; }
       await sleep(timing.poll_interval_ms);
     }
     const w: WindowTimeline = { fence_id: fenceId, attempts: group, status: reason ? 'failed' : 'closed', failure_reason: reason, closed_at_us: closedAt, signal_sent_us: null };
