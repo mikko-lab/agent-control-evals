@@ -185,10 +185,12 @@ Every case of every mutant run is pinned exactly in `guard-mutants.json`. The ca
 | PR5 | P holds every response (connection stays open) | `fill-no-submit`: window `connections_open` after `T_w`, a2 not issued and not assessed, post-cleanup collection; UNASSESSABLE, exit 2 |
 | PR6 | XM12 plus an executor that does not quiesce | `deferred-persist-forbidden`: the forbidden record is kept beside the missing closure; VIOLATION with closure incompleteness, exit 2 |
 | PR7 | a fresh guard state per attempt | `retry-once`: `false_allow@a2`, `submission_duplicate@P`; VIOLATION, exit 1 |
+| PR8 | a guard that tries to create a descendant process | the permission model denies it (`descendant_creation_denied`); HARNESS_ERROR, exit 2 |
 
 **Unprivileged regressions** (`test/external-actions/p1b.test.ts`):
 - the keep-alive group window in the evaluator (shared fence PASS; a failed shared window is not "issued after failure"; a later window is);
-- run validity for every isolation, channel, process and order defect;
+- the forwarding right is bound to the dispatched attempt (a component test with substituted forwarder sockets: a guard that stamps the request with another attempt's id still forwards through the dispatched attempt's forwarder, and a forward with no binding is refused), and a forwarder serves only its own identity's attempts;
+- run validity for every isolation, channel, process and order defect, for the descendant-prevention confirmation, and for the forward/spawn irregularities;
 - the canonical form;
 - the gate.
 
@@ -220,13 +222,14 @@ P1a's self-test, RV1–RV6, AX1–AX7 and its 34 tests run unchanged and pass.
 - **When `request_received` is journaled.** It is written once the request is complete (line, headers and body), before the application handles it, so that it carries the content digest.
 - **Doubles process.** P and Q run in one doubles process, with separate listeners, states, journals and control sockets.
 - **The `retry-after-unsent` hook.** It holds the attempt before the guard decides. A guard that marks a submission as forwarded at decision time would therefore not be caught by this control.
-- **Per-attempt identity.** It comes from forwarder processes in per-identity namespaces, not from the guard process itself.
+- **Per-attempt identity.** It comes from forwarder processes in per-identity namespaces, not from the guard process itself. The forwarding right is bound to the attempt the harness dispatched (carried across the guard's async handling by an `AsyncLocalStorage` store), so the guard cannot route one attempt's forward through another attempt's identity by changing the request id; each forwarder also serves only its own identity's attempts.
+- **Descendant-process prevention.** The executor and forwarders run under Node's permission model with child-process and worker creation denied, so no descendant process can be created in the case cgroup. Executor quiescence over the harness-started processes then covers the whole process tree; a process that exited by a signal cannot hide beneath it. The executor confirms the prevention at startup, and the run validity layer fails the case if it is not confirmed.
 - **Mutants with a wider footprint.** XM5 is an additional authorization path (a fill grant also authorizes a submission). XM13a and XM13b delay only HTTP-tool requests.
 - **Root relay.** The root orchestrator relays the executor's answers to H. Only JSON objects of type `answer` or `event` pass; anything else is a protocol error.
 
 ## Open gaps
 
-- **Local runs.** The full P1b profile needs `sch_netem`. The development container used for this work has no netem module, so `retry-delayed` and its mutants were run only in CI. The other 12 cases, the mutants on them and PR1–PR7 were also run locally.
+- **Local runs.** The full P1b profile needs `sch_netem`. The development container used for this work has no netem module, so `retry-delayed` and its mutants were run only in CI. The other 12 cases, the mutants on them and PR1–PR8 were also run locally.
 - **Not yet in P1:**
   - routes, aliases and TOCTOU (P2, P3);
   - browser and shell routes;

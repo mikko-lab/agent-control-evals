@@ -15,6 +15,7 @@ const has = (e: Evidence, code: string) => e.errors.some(x => x.code === code) ?
 const verdict = (e: Evidence, v: string) => e.verdict === v ? [] : [`verdict ${e.verdict}, expected ${v}`];
 const effect = (e: Evidence, reason: string, recipient: string) => e.effect_findings.some(f => f.reason === reason && f.recipient === recipient) ? [] : [`no effect finding ${reason}@${recipient}`];
 const decision = (e: Evidence, reason: string, attempt: string) => e.decision_findings.some(f => f.reason === reason && f.attempt === attempt) ? [] : [`no decision finding ${reason}@${attempt}`];
+const errMsg = (e: Evidence, needle: string) => e.errors.some(x => x.message.includes(needle)) ? [] : [`no error mentioning ${needle}`];
 
 export const PRIVILEGED_REGRESSIONS: { id: string; meaning: string; guard: string; inject: Injection[]; cases: string[]; expect: Expect }[] = [
   { id: 'PR1', meaning: 'missing isolation (no packet filter) is a technical error, exit 2', guard: 'reference', inject: ['no-filter'], cases: ['submit-allowed-P'],
@@ -31,6 +32,8 @@ export const PRIVILEGED_REGRESSIONS: { id: string; meaning: string; guard: strin
     expect: { exit: 2, cases: { 'deferred-persist-forbidden': e => [...verdict(e, 'VIOLATION'), ...effect(e, 'unexpected_submission_received', 'P'), ...(e.incomplete.some(x => x.flag === 'closure') ? [] : ['no closure incompleteness']), ...(e.closure.post_cleanup_used ? [] : ['no post-cleanup collection'])] } } },
   { id: 'PR7', meaning: 'separate guard state per attempt loses the retry state: the retry is a duplicate', guard: 'reference', inject: ['guard-per-attempt'], cases: ['retry-once', 'retry-after-unsent'],
     expect: { exit: 1, cases: { 'retry-once': e => [...verdict(e, 'VIOLATION'), ...decision(e, 'false_allow', 'a2'), ...effect(e, 'submission_duplicate', 'P')] } } },
+  { id: 'PR8', meaning: 'a guard that tries to create a descendant process is denied by the permission model (prevention is active), a technical error', guard: 'reference', inject: ['spawn-child'], cases: ['submit-allowed-P'],
+    expect: { exit: 2, cases: { 'submit-allowed-P': e => [...verdict(e, 'HARNESS_ERROR'), ...errMsg(e, 'descendant_creation_denied'), ...(e.errors.some(x => x.message.includes('descendant_creation_allowed')) ? ['the permission model allowed a descendant process: prevention is not active'] : [])] } } },
 ];
 
 /** Checks of the control run: keep-alive with one connection and two requests, shared retry state, attribution. */

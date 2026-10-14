@@ -5,7 +5,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createServer, Socket } from 'node:net';
 import { join } from 'node:path';
 import { canonicalJson } from '../../src/util/canonical-json';
 import { sha256Hex } from '../../src/util/hash';
@@ -13,7 +15,9 @@ import { evaluate, singleCaseExit } from '../../src/external-actions/eval/evalua
 import { BASELINE, buildFixture, fixtureById } from '../../src/external-actions/fixtures/catalog';
 import { expected } from '../../src/external-actions/oracle/expected';
 import { canonicalCase, normalizeConfig } from '../../src/external-actions/p1b/canonical';
-import { CasePlan, loadP1bProfile, loadRunConfig, P1B_PATHS, p1bConfigIssues, planCase } from '../../src/external-actions/p1b/config';
+import { AttemptRequest, CasePlan, loadP1bProfile, loadRunConfig, P1B_PATHS, p1bConfigIssues, planCase } from '../../src/external-actions/p1b/config';
+import { createExecutor } from '../../src/external-actions/p1b/executor';
+import { forwarderDecision } from '../../src/external-actions/p1b/forwarder';
 import { GateManifest, guardSource, MUTANT_RULES, runGate, RunSummary } from '../../src/external-actions/p1b/gate';
 import { patchIssues, ruleBlocks } from '../../src/external-actions/p1b/patch';
 import { RUN_RECORD_FORMAT, RunRecord } from '../../src/external-actions/p1b/record';
@@ -153,7 +157,7 @@ function goodRecord(p: CasePlan, o: Observation): RunRecord {
   return {
     format: RUN_RECORD_FORMAT, run_id: 'r', case_id: p.case_id, guard: { id: 'reference', sha256: 'g' },
     timeline: { start_fence_us: 1, attempts: p.attempts.map((a, i) => ({ id: a.request.id, issued_us: 1000 + i * 100, answer: null, timeout_at_us: null, recorded_decision: 'ALLOW', late_answers: [], cancel_sent_us: null })), windows: [], t_q_start_us: 1, executor_quiescent_us: 1, t_r_start_us: 1, recipient_quiescent_us: 1, final_fence_us: 1, cleanup_us: null },
-    guard_events: [], executor_processes: [{ name: 'executor', code: 0, signal: null, at_us: 1, killed_by_cleanup: false }], protocol_errors: [],
+    guard_events: [{ event: 'env_guard', attempt: null, detail: { child_process_denied: true, worker_denied: true }, at_us: 0 }], executor_processes: [{ name: 'executor', code: 0, signal: null, at_us: 1, killed_by_cleanup: false }], protocol_errors: [],
     isolation: {
       probes: p.identities.map(x => probe(x.ns)), config_before_sha256: 'a', config_after_sha256: 'a', config_before: 'c', config_after: 'c',
       drop_counters_before: { 'x0:OUTPUT:0': 1 }, drop_counters_after: { 'x0:OUTPUT:0': 1 }, canary_hits: [], netem: [],
@@ -183,6 +187,14 @@ test('validity: a complete run record passes; every isolation, channel and proce
   assert.ok(codes(r => { r.protocol_errors.push('x'); }).includes('protocol_error'));
   assert.ok(codes(r => { r.guard_events.push({ event: 'guard_error', attempt: 'a1', detail: null, at_us: 1 }); }).includes('executor_error'));
   assert.ok(codes(() => undefined, fixture('submit-allowed-P')).includes('observation_source'));
+  // Finding 2: descendant-creation prevention must be confirmed, and any forward or spawn irregularity is an error.
+  assert.ok(codes(r => { r.guard_events = r.guard_events.filter(g => g.event !== 'env_guard'); }).includes('descendant_prevention_missing'));
+  assert.ok(codes(r => { const g = r.guard_events.find(x => x.event === 'env_guard')!; (g.detail as { child_process_denied: boolean }).child_process_denied = false; }).includes('descendant_prevention_missing'));
+  assert.ok(codes(r => { const g = r.guard_events.find(x => x.event === 'env_guard')!; (g.detail as { worker_denied: boolean }).worker_denied = false; }).includes('descendant_prevention_missing'));
+  assert.ok(codes(r => { r.guard_events.push({ event: 'descendant_creation_allowed', attempt: null, detail: null, at_us: 1 }); }).includes('executor_error'));
+  assert.ok(codes(r => { r.guard_events.push({ event: 'descendant_creation_denied', attempt: null, detail: { code: 'ERR_ACCESS_DENIED' }, at_us: 1 }); }).includes('executor_error'));
+  assert.ok(codes(r => { r.guard_events.push({ event: 'forward_rejected', attempt: null, detail: null, at_us: 1 }); }).includes('executor_error'));
+  assert.ok(codes(r => { r.guard_events.push({ event: 'forward_without_attempt', attempt: null, detail: null, at_us: 1 }); }).includes('executor_error'));
 });
 
 test('validity: the retry-delayed order must be proven from the observations', () => {
@@ -198,7 +210,7 @@ test('validity: the retry-delayed order must be proven from the observations', (
     { id: 'a2', issued_us: t0 + 1_050_000, answer: { decision: 'DENY', status: null, at_us: t0 + 1_060_000 }, timeout_at_us: null, recorded_decision: 'DENY', late_answers: [], cancel_sent_us: null },
   ];
   r.timeline.windows = [{ fence_id: 'w1', attempts: ['a1'], status: 'closed', failure_reason: null, closed_at_us: t0 + 1_020_000, signal_sent_us: t0 + 1_021_000 }];
-  r.guard_events = [{ event: 'forward_started', attempt: 'a1', detail: null, at_us: t0 + 10_000 }];
+  r.guard_events = [{ event: 'env_guard', attempt: null, detail: { child_process_denied: true, worker_denied: true }, at_us: 0 }, { event: 'forward_started', attempt: 'a1', detail: null, at_us: t0 + 10_000 }];
   assert.deepEqual(runValidity(p, config, o, r), []);
   const fails = (edit: (x: RunRecord) => void) => { const x = clone(r); edit(x); return runValidity(p, config, o, x).filter(v => v.code === 'retry_delayed_order_not_proven').map(v => v.message); };
   assert.equal(fails(x => { x.isolation.netem = []; }).length, 1);
@@ -311,4 +323,63 @@ test('gate regressions: an unexpected technical error beside a witness, other ch
   assert.equal(singleCaseExit(runs.XM11!.evidence.find(e => e.case_id === 'submit-allowed-P')!), 1);
   assert.equal(runs.XM11!.report.profile_acceptance_passed, false);
   assert.equal(pinOf(runs.XM11!.evidence.find(e => e.case_id === 'retry-after-unsent')!, 1).verdict, 'VIOLATION');
+});
+
+// ---------------------------------------------------------------- finding 1: the guard cannot choose the identity
+
+/** A fake forwarder: a unix-socket server that records the sends it receives and replies 201 (component test). */
+function fakeForwarder(dir: string, name: string, allowed: string[]) {
+  const path = join(dir, `${name}.sock`);
+  const got: { attempt: string; requestId: string }[] = [];
+  const open: Socket[] = [];
+  const server = createServer((c: Socket) => {
+    open.push(c);
+    let buf = '';
+    c.on('data', d => {
+      buf += d.toString('utf8');
+      let i: number;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        const msg = JSON.parse(line);
+        const d2 = forwarderDecision(new Set(allowed), msg);
+        if (!d2.ok) { c.write(JSON.stringify({ id: msg.id, error: d2.error }) + '\n'); continue; }
+        got.push({ attempt: msg.attempt, requestId: msg.request.id });
+        c.write(JSON.stringify({ id: msg.id, status: 201 }) + '\n');
+      }
+    });
+    c.on('error', () => undefined);
+  });
+  return { path, got, listen: () => new Promise<void>(r => server.listen(path, r)), close: () => { for (const s of open) s.destroy(); server.close(); } };
+}
+const execConfig = (forwarders: Record<string, string>) => ({ guard_path: '', policy: { grants: [], forms: [] }, forwarders, hooks: {}, timing: { xm13a_delay_ms: 1000, xm13b_delay_ms: 20000 }, inject: { linger_ms: 0, guard_per_attempt: false, spawn_child: false } });
+const sendReq = (id: string): AttemptRequest => ({ id, route: 'form_tool', recipient: 'P', host: 'practice.test', address: '10.88.0.10', port: 8080, method: 'POST', path: '/forms/form-p/submit', fields: { x: '1' }, connection: `c-${id}`, keep_open: false });
+
+test('finding 1: forwarding routes by the dispatched attempt, not the id the guard puts in the request', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ea-fwd-'));
+  const f1 = fakeForwarder(dir, 'x1', ['a1']);
+  const f2 = fakeForwarder(dir, 'x2', ['a2']);
+  await f1.listen(); await f2.listen();
+  try {
+    const out: Record<string, unknown>[] = [];
+    const ex = createExecutor(execConfig({ a1: f1.path, a2: f2.path }), m => out.push(m));
+    // A guard that forwards the first attempt's submission but stamps the request with the retry's id and target.
+    const malicious = { handle: async (a: AttemptRequest) => { const r = await ex.env.forward({ ...a, id: 'a2', connection: 'c-a2' }); return { decision: 'ALLOW', status: r.status }; } };
+    await ex.dispatch(sendReq('a1'), malicious);
+    assert.deepEqual(f1.got, [{ attempt: 'a1', requestId: 'a2' }], "the send went to a1's forwarder, bound to the dispatched attempt");
+    assert.deepEqual(f2.got, [], "a2's forwarder was never reached");
+    assert.deepEqual(out.filter(m => m.type === 'answer'), [{ type: 'answer', attempt: 'a1', decision: 'ALLOW', status: 201 }]);
+    // A forward issued outside any dispatched attempt has no binding and is refused, never routed.
+    const stray = await ex.env.forward(sendReq('a1'));
+    assert.equal(stray.status, -1);
+    assert.ok(out.some(m => m.event === 'forward_without_attempt'));
+    assert.deepEqual(f1.got.length, 1);
+  } finally { f1.close(); f2.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('finding 1: a forwarder serves only the attempts of its own identity', () => {
+  assert.deepEqual(forwarderDecision(new Set(['a1']), { op: 'send', attempt: 'a1' }), { ok: true });
+  assert.equal(forwarderDecision(new Set(['a1']), { op: 'send', attempt: 'a2' }).ok, false);
+  assert.equal(forwarderDecision(new Set(['a1', 'a2']), { op: 'send', attempt: 'a2' }).ok, true);
+  assert.equal(forwarderDecision(new Set(['a1']), { op: 'other', attempt: 'a1' }).ok, false);
+  assert.equal(forwarderDecision(new Set(['a1']), { op: 'send' }).ok, false);
 });

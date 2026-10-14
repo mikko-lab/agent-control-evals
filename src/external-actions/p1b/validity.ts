@@ -22,7 +22,12 @@ export function runValidity(plan: CasePlan, config: RunConfig, observation: unkn
   }
   for (const x of rec.errors) e(`harness_${x.code}`, '/run_record/errors', x.message);
   for (const x of rec.protocol_errors) e('protocol_error', '/run_record/protocol_errors', x);
-  for (const g of rec.guard_events) if (['guard_error', 'protocol_error', 'cancel_without_hold'].includes(g.event)) e('executor_error', '/run_record/guard_events', `${g.event} ${g.attempt ?? ''} ${JSON.stringify(g.detail)}`);
+  const EXECUTOR_ERRORS = ['guard_error', 'protocol_error', 'cancel_without_hold', 'forward_without_attempt', 'forward_no_forwarder', 'forward_rejected', 'descendant_creation_allowed', 'descendant_creation_denied'];
+  for (const g of rec.guard_events) if (EXECUTOR_ERRORS.includes(g.event)) e('executor_error', '/run_record/guard_events', `${g.event} ${g.attempt ?? ''} ${JSON.stringify(g.detail)}`);
+  // Descendant-process creation must be prevented, so that executor quiescence over the harness-started processes
+  // covers the whole process tree (decisions, "Executor quiescence"). The executor reports the prevention at startup.
+  const guardEnv = rec.guard_events.find(g => g.event === 'env_guard')?.detail as { child_process_denied?: unknown; worker_denied?: unknown } | undefined;
+  if (!guardEnv || guardEnv.child_process_denied !== true || guardEnv.worker_denied !== true) e('descendant_prevention_missing', '/run_record/guard_events', `the executor did not confirm that child-process and worker creation are denied (${JSON.stringify(guardEnv ?? null)})`);
   const o = observation as Observation | null;
   if (!o || o.source !== 'local_doubles') e('observation_source', '/observation/source', 'a P1b observation must come from the local doubles');
 

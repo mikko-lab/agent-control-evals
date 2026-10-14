@@ -24,8 +24,8 @@ export const EXEC_BASE = '/run/ea-exec';
 const nowUs = (): number => Number(process.hrtime.bigint() / 1000n);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-export type Injection = 'no-filter' | 'journal-writable' | 'no-mount-hide' | 'hold-connection' | 'executor-linger' | 'guard-per-attempt' | 'no-journal-P' | 'no-netem';
-export const INJECTIONS: Injection[] = ['no-filter', 'journal-writable', 'no-mount-hide', 'hold-connection', 'executor-linger', 'guard-per-attempt', 'no-journal-P', 'no-netem'];
+export type Injection = 'no-filter' | 'journal-writable' | 'no-mount-hide' | 'hold-connection' | 'executor-linger' | 'guard-per-attempt' | 'no-journal-P' | 'no-netem' | 'spawn-child';
+export const INJECTIONS: Injection[] = ['no-filter', 'journal-writable', 'no-mount-hide', 'hold-connection', 'executor-linger', 'guard-per-attempt', 'no-journal-P', 'no-netem', 'spawn-child'];
 
 export function sh(cmd: string, args: string[], input?: string): string {
   return execFileSync(cmd, args, { encoding: 'utf8', stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], input, env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C' } });
@@ -217,6 +217,12 @@ export async function runCase(o: {
     note('network ready');
 
     const node = process.execPath;
+    // Node's permission model with child-process and worker creation denied: the executor and the forwarders (the only
+    // processes in the case cgroup) cannot create any descendant process, so the harness-started set is the whole
+    // process tree and natural quiescence covers it (decisions, "Executor quiescence"). `--allow-fs-read=*` keeps file
+    // reads (the code and config) working; nothing in the cgroup writes to a real path except each forwarder's own
+    // socket, so a forwarder also gets `--allow-fs-write` for its directory.
+    const permFlag = Number(process.versions.node.split('.')[0]) >= 23 ? '--permission' : '--experimental-permission';
     const js = (name: string) => join(o.code.dir, 'dist/src/external-actions/p1b', `${name}.js`);
     const cfgFile = (name: string, value: unknown) => { const p = join(dirs.cfg, `${name}.json`); writeFileSync(p, JSON.stringify(value, null, 1)); chmodSync(p, 0o644); return p; };
     const execCfgDir = join(o.code.dir, 'cases', o.c.id); mkdirSync(execCfgDir, { recursive: true }); chmodSync(execCfgDir, 0o755);
@@ -275,10 +281,11 @@ export async function runCase(o: {
     const execProcs: { name: string; p: ChildProcess }[] = [];
     for (const x of net.identities) {
       const sock = join(execDir, `${x.key}.sock`);
-      const p = spawnAs({ ns: x.ns, user: users.E, argv: [node, js('forwarder'), sock], cgroup, hide: o.inject.has('no-mount-hide') ? '' : RUN_BASE });
+      const allowed = plan.attempts.filter(a => a.identity.ns === x.key).map(a => a.request.id);
+      const p = spawnAs({ ns: x.ns, user: users.E, argv: [node, permFlag, '--allow-fs-read=*', `--allow-fs-write=${execDir}`, js('forwarder'), sock, allowed.join(',')], cgroup, hide: o.inject.has('no-mount-hide') ? '' : RUN_BASE });
       procs.push(p); execProcs.push({ name: `forwarder-${x.key}`, p });
       if (!(await waitPath(sock, 10_000))) throw new Error(`forwarder ${x.key} did not start`);
-      for (const a of plan.attempts) if (a.identity.ns === x.key) fwd[a.request.id] = sock;
+      for (const a of allowed) fwd[a] = sock;
     }
     const fifo = join(dirs.ipc, 'signal');
     sh('mkfifo', ['-m', '0600', fifo]);
@@ -288,9 +295,9 @@ export async function runCase(o: {
       guard_path: o.code.guardPath, policy: plan.policy, forwarders: fwd,
       hooks: Object.fromEntries(plan.attempts.filter(a => a.hook).map(a => [a.request.id, a.hook!])),
       timing: { xm13a_delay_ms: o.profile.timing.xm13a_delay_ms, xm13b_delay_ms: o.profile.timing.xm13b_delay_ms },
-      inject: { linger_ms: o.inject.has('executor-linger') ? 20_000 : 0, guard_per_attempt: o.inject.has('guard-per-attempt') },
+      inject: { linger_ms: o.inject.has('executor-linger') ? 20_000 : 0, guard_per_attempt: o.inject.has('guard-per-attempt'), spawn_child: o.inject.has('spawn-child') },
     };
-    const executor = spawnAs({ ns: net.ns.g, user: users.E, argv: [node, js('executor'), execCfgFile('executor', execCfg)], cgroup, hide: o.inject.has('no-mount-hide') ? '' : RUN_BASE, stdio: ['pipe', 'pipe', 'pipe', fifoRead] });
+    const executor = spawnAs({ ns: net.ns.g, user: users.E, argv: [node, permFlag, '--allow-fs-read=*', js('executor'), execCfgFile('executor', execCfg)], cgroup, hide: o.inject.has('no-mount-hide') ? '' : RUN_BASE, stdio: ['pipe', 'pipe', 'pipe', fifoRead] });
     closeSync(fifoRead);
     procs.push(executor); execProcs.push({ name: 'executor', p: executor });
     let executorErr = ''; executor.stderr?.on('data', d => { executorErr += d; });

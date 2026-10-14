@@ -3,19 +3,30 @@
  * identity namespace, inside the case cgroup. The guard hands it the requests it forwards; the forwarder sends them
  * from its namespace, so its source address is the identity the harness assigned. It cannot choose another one.
  *
- *   node forwarder.js SOCKET
- *   request lines: { op: 'send', id, request: AttemptRequest } -> { id, status } | { id, error }
+ *   node forwarder.js SOCKET ALLOWED_ATTEMPT[,ALLOWED_ATTEMPT...]
+ *   request lines: { op: 'send', id, attempt, request: AttemptRequest } -> { id, status } | { id, error }
  *
- * Requests that name the same connection label and ask to keep it open reuse one keep-alive connection. The forwarder
- * accepts one client (the guard) and exits on its own once that client has gone and no request is in flight.
+ * The forwarder serves only the attempts of its own identity. A `send` naming any other attempt is rejected, so the
+ * forwarding right cannot be exercised for an identity the attempt was not assigned, even if a forwarder's socket were
+ * reached directly. Requests that name the same connection label and ask to keep it open reuse one keep-alive
+ * connection. The forwarder accepts one client (the guard) and exits on its own once that client has gone and no
+ * request is in flight.
  */
 import { chmodSync } from 'node:fs';
 import { Agent, request as httpRequest } from 'node:http';
 import { connect, createServer, Socket } from 'node:net';
 import type { AttemptRequest } from './config';
 
+/** The forwarding decision, split out so it can be checked without a socket: only this identity's attempts are served. */
+export function forwarderDecision(allowed: ReadonlySet<string>, msg: { op?: unknown; attempt?: unknown }): { ok: true } | { ok: false; error: string } {
+  if (msg.op !== 'send') return { ok: false, error: 'unknown op' };
+  if (typeof msg.attempt !== 'string' || !allowed.has(msg.attempt)) return { ok: false, error: `attempt ${String(msg.attempt)} is not bound to this identity` };
+  return { ok: true };
+}
+
 function main() {
   const sock = process.argv[2];
+  const allowed = new Set((process.argv[3] ?? '').split(',').filter(Boolean));
   const agents = new Map<string, Agent>();
   const server = createServer(client => {
     server.close();
@@ -25,10 +36,12 @@ function main() {
       let i: number;
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
-        let msg: { op: string; id: string; request: AttemptRequest };
+        let msg: { op: string; id: string; attempt: string; request: AttemptRequest };
         try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.op !== 'send') continue;
-        send(msg.request, agents, (r: { status: number } | { error: string }) => { if (!client.destroyed) client.write(JSON.stringify({ id: msg.id, ...r }) + '\n'); });
+        const reply = (r: { status: number } | { error: string }) => { if (!client.destroyed) client.write(JSON.stringify({ id: msg.id, ...r }) + '\n'); };
+        const d2 = forwarderDecision(allowed, msg);
+        if (!d2.ok) { reply({ error: d2.error }); continue; }
+        send(msg.request, agents, reply);
       }
     });
     client.on('error', () => { /* the guard went away */ });

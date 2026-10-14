@@ -215,7 +215,7 @@ All times are measured on the harness's monotonic clock (`CLOCK_MONOTONIC`, shar
   - Their only route leads to 10.88.0.0/24.
   - `iptables` `OUTPUT` accepts loopback, established traffic and TCP to P:8080 and Q:8080, and drops everything else with counters. `INPUT` accepts loopback and established traffic only.
   - Q is reachable on purpose, so that the sandbox cannot mask a guard fault.
-- **Per-attempt identity.** Each identity has its own forwarder process (E) in its namespace. The guard is one process with one decision and retry state for the case, and it hands each attempt to that attempt's forwarder. The executor has no `CAP_NET_ADMIN` and cannot change namespaces, so it cannot choose or forge an identity. Traffic held in `netem` keeps the source address of the attempt that sent it.
+- **Per-attempt identity.** Each identity has its own forwarder process (E) in its namespace. The guard is one process with one decision and retry state for the case. The **forwarding right is bound to the attempt the harness dispatched**: the executor routes every `forward(...)` (and every deferred, signal-triggered send) through that attempt's own forwarder, whatever id the guard puts in the request, carrying the binding across the guard's async handling with an `AsyncLocalStorage` store. The guard cannot select or forge a network identity, and a forwarder serves only its own identity's attempts (it rejects a send that names another). The executor has no `CAP_NET_ADMIN` and cannot change namespaces. Traffic held in `netem` keeps the source address of the attempt that sent it.
 - **Filesystem.**
   - **Journals:** `/run/ea/<run>/journal`, owned by D with group `ea-obs`, mode 2750, files 0640.
   - **Control sockets of the doubles:** Unix sockets in `/run/ea/<run>/ctl` (2750, sockets 0660). They are not reachable over any network.
@@ -278,6 +278,8 @@ These follow D10. The specifics:
 - **Executor quiescence.** It requires both:
   - the case cgroup reports `populated 0`;
   - the orchestrator reports a natural exit (code 0, no signal) of every executor process it started.
+
+  This covers the **whole process tree** of the case cgroup, because the executor and the forwarders (the only processes in that cgroup) are launched under Node's permission model with child-process and worker creation denied, so they cannot create any descendant process. The orchestrator-started set is therefore the whole tree, and a process that exited by a signal cannot hide beneath it. The executor reports the prevention at startup, and the run validity layer fails the case (technical error) if it is not confirmed.
 
   If either fails, H writes `cgroup.kill` (cleanup only), and the post-cleanup collection runs.
 - **Recipient quiescence.** It requires every tracker to read zero and the netem backlog to be 0 packets, within `T_r`. Then the final fence and the final snapshots follow.
@@ -363,9 +365,10 @@ Each XM mutant is a unified diff in `mutations/external-actions/guard/<id>.patch
   Any failure is a technical error of the case (exit 2).
 - **Report.** P1b reports use `evidence_kind: "local_reference_run"` and `observation_source: "local_doubles"`, with P1b limitations. The P1a report bytes are unchanged.
 - **Canonical comparison form for double-run determinism.**
-  - **Replaced:**
-    - run ids;
-    - clock readings: `mono_us` is replaced by the entry's rank in a global order, and `elapsed_ms` by its comparison with its bound.
+  - **Replaced** (per-run values, normalized so they do not count as differences):
+    - run ids, in names and in paths (`/run/ea…/<run>` and the `ea<rid>…` namespace, link and veth names);
+    - clock readings: a journal entry's `mono_us` is replaced by the number of attempts issued before it, an `elapsed_ms` by its comparison with its bound, and a timeline reading by its presence;
+    - the configuration record's per-run identifiers: the namespace and link names above, veth MAC addresses, the kernel-assigned `tc` qdisc handles, and any `netem` random seed.
   - **Dropped:** entry hashes and `prev`, after each run's chain has been verified.
   - **Kept, unchanged:**
     - order;
