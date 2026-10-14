@@ -16,6 +16,8 @@ import { BASELINE, buildFixture, fixtureById } from '../../src/external-actions/
 import { expected } from '../../src/external-actions/oracle/expected';
 import { canonicalCase, normalizeConfig } from '../../src/external-actions/p1b/canonical';
 import { AttemptRequest, CasePlan, loadP1bProfile, loadRunConfig, P1B_PATHS, p1bConfigIssues, planCase } from '../../src/external-actions/p1b/config';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import * as executorModule from '../../src/external-actions/p1b/executor';
 import { createExecutor } from '../../src/external-actions/p1b/executor';
 import { forwarderDecision } from '../../src/external-actions/p1b/forwarder';
 import { GateManifest, guardSource, MUTANT_RULES, runGate, RunSummary } from '../../src/external-actions/p1b/gate';
@@ -362,8 +364,11 @@ test('finding 1: forwarding routes by the dispatched attempt, not the id the gua
   try {
     const out: Record<string, unknown>[] = [];
     const ex = createExecutor(execConfig({ a1: f1.path, a2: f2.path }), m => out.push(m));
-    // A guard that forwards the first attempt's submission but stamps the request with the retry's id and target.
-    const malicious = { handle: async (a: AttemptRequest) => { const r = await ex.env.forward({ ...a, id: 'a2', connection: 'c-a2' }); return { decision: 'ALLOW', status: r.status }; } };
+    // A guard that forwards the first attempt's submission but stamps the request with the retry's id and target, and
+    // even wraps the call in its own AsyncLocalStorage set to "a2": the executor's binding is read from its own,
+    // module-private store, so routing still uses the dispatched attempt a1.
+    const guardOwnALS = new AsyncLocalStorage<string>();
+    const malicious = { handle: (a: AttemptRequest) => guardOwnALS.run('a2', async () => { const r = await ex.env.forward({ ...a, id: 'a2', connection: 'c-a2' }); return { decision: 'ALLOW', status: r.status }; }) };
     await ex.dispatch(sendReq('a1'), malicious);
     assert.deepEqual(f1.got, [{ attempt: 'a1', requestId: 'a2' }], "the send went to a1's forwarder, bound to the dispatched attempt");
     assert.deepEqual(f2.got, [], "a2's forwarder was never reached");
@@ -373,6 +378,41 @@ test('finding 1: forwarding routes by the dispatched attempt, not the id the gua
     assert.equal(stray.status, -1);
     assert.ok(out.some(m => m.event === 'forward_without_attempt'));
     assert.deepEqual(f1.got.length, 1);
+  } finally { f1.close(); f2.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('finding 1: the binding store is module-private, so the guard has no reference to open one', () => {
+  // The guard runs in-process; it must not be handed the AsyncLocalStorage that carries the forwarding right.
+  assert.ok(!('forwardBinding' in executorModule), 'forwardBinding must not be exported');
+  assert.deepEqual(Object.keys(executorModule).filter(k => executorModule[k as keyof typeof executorModule] instanceof AsyncLocalStorage), []);
+});
+
+test('finding 1: a deferred (afterSignal) send takes its identity only from the active dispatch, never from the argument', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ea-fwd-'));
+  const f1 = fakeForwarder(dir, 'x1', ['a1']);
+  const f2 = fakeForwarder(dir, 'x2', ['a2']);
+  await f1.listen(); await f2.listen();
+  try {
+    const out: Record<string, unknown>[] = [];
+    const ex = createExecutor(execConfig({ a1: f1.path, a2: f2.path }), m => out.push(m));
+    // Inside a1's dispatch the guard registers a deferred send naming a2; it must bind to a1, not a2.
+    const guard = { handle: async (a: AttemptRequest) => { ex.env.afterSignal('a2', 0, () => { void ex.env.forward({ ...a, id: 'a2', connection: 'c-a2' }); }); return { decision: 'DENY', status: null }; } };
+    await ex.dispatch(sendReq('a1'), guard);
+    // A signal naming a2 must not fire the a1-bound deferred send.
+    ex.deliverSignal('w', ['a2']);
+    await new Promise(r => setTimeout(r, 30));
+    assert.deepEqual(f1.got, [], 'the deferred send is bound to a1, so a2\'s signal does not fire it');
+    // a1's signal fires it, and it forwards through a1's forwarder.
+    ex.deliverSignal('w', ['a1']);
+    await new Promise(r => setTimeout(r, 30));
+    assert.deepEqual(f1.got, [{ attempt: 'a1', requestId: 'a2' }]);
+    assert.deepEqual(f2.got, []);
+    // afterSignal called with no active dispatch (as from guard initialization) is refused, not bound to the argument.
+    ex.env.afterSignal('a2', 0, () => { void ex.env.forward(sendReq('a2')); });
+    ex.deliverSignal('w', ['a2']);
+    await new Promise(r => setTimeout(r, 30));
+    assert.deepEqual(f2.got, [], 'a deferred send registered outside a dispatch never fires');
+    assert.ok(out.some(m => m.event === 'after_signal_without_attempt'));
   } finally { f1.close(); f2.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

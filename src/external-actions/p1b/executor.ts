@@ -37,8 +37,13 @@ export interface ExecutorConfig {
 type Guard = { handle(a: AttemptRequest): Promise<{ decision: string; status: number | null }> };
 type Out = (m: Record<string, unknown>) => void;
 
-/** The forwarding right bound to the attempt the harness dispatched; the guard cannot read or change it. */
-export const forwardBinding = new AsyncLocalStorage<string>();
+/**
+ * The forwarding right bound to the attempt the harness dispatched. Module-private on purpose: it is never exported, so
+ * the in-process guard has no reference to it and cannot open a binding for an identity it was not dispatched. A guard
+ * that creates its own AsyncLocalStorage cannot change this one. (A guard that executes arbitrary code to reach another
+ * forwarder socket directly is outside this boundary; see decisions.md, "Per-attempt identity", on the trust boundary.)
+ */
+const forwardBinding = new AsyncLocalStorage<string>();
 
 export interface Executor {
   env: { timing: ExecutorConfig['timing']; event: (e: string, a: string | null, d: unknown) => void; forward: (a: AttemptRequest) => Promise<{ status: number }>; afterSignal: (attempt: string, delayMs: number, fn: () => void) => void };
@@ -91,9 +96,12 @@ export function createExecutor(cfg: ExecutorConfig, out: Out): Executor {
     timing: cfg.timing,
     event: (event, attempt, detail) => out({ type: 'event', event, attempt, detail }),
     forward,
-    afterSignal: (attempt, delayMs, fn) => {
-      // The deferred send keeps the dispatching attempt's identity, so lateness cannot borrow another identity.
-      const boundId = forwardBinding.getStore() ?? attempt;
+    afterSignal: (_attempt, delayMs, fn) => {
+      // The deferred send keeps the dispatching attempt's identity, taken only from the active binding. The id the guard
+      // passes is never used: a deferred send registered outside a dispatched attempt (for example from the guard's
+      // own initialization) has no identity and is refused, so it cannot borrow one.
+      const boundId = forwardBinding.getStore();
+      if (boundId === undefined) { out({ type: 'event', event: 'after_signal_without_attempt', attempt: null, detail: { requested: _attempt } }); return; }
       pendingAfterSignal.push({ attempt: boundId, delayMs, fn: () => forwardBinding.run(boundId, fn) });
     },
   };

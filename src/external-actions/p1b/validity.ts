@@ -22,7 +22,7 @@ export function runValidity(plan: CasePlan, config: RunConfig, observation: unkn
   }
   for (const x of rec.errors) e(`harness_${x.code}`, '/run_record/errors', x.message);
   for (const x of rec.protocol_errors) e('protocol_error', '/run_record/protocol_errors', x);
-  const EXECUTOR_ERRORS = ['guard_error', 'protocol_error', 'cancel_without_hold', 'forward_without_attempt', 'forward_no_forwarder', 'forward_rejected', 'descendant_creation_allowed', 'descendant_creation_denied'];
+  const EXECUTOR_ERRORS = ['guard_error', 'protocol_error', 'cancel_without_hold', 'forward_without_attempt', 'forward_no_forwarder', 'forward_rejected', 'after_signal_without_attempt', 'descendant_creation_allowed', 'descendant_creation_denied'];
   for (const g of rec.guard_events) if (EXECUTOR_ERRORS.includes(g.event)) e('executor_error', '/run_record/guard_events', `${g.event} ${g.attempt ?? ''} ${JSON.stringify(g.detail)}`);
   // Descendant-process creation must be prevented, so that executor quiescence over the harness-started processes
   // covers the whole process tree (decisions, "Executor quiescence"). The executor reports the prevention at startup.
