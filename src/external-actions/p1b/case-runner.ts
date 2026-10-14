@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { canonicalJson } from '../../util/canonical-json';
 import {
   AttemptObservation, Entry, FinalClosure, Observation, OBSERVATION_FORMAT, PostCleanupCollection, Recipient, RecipientQuiescence, RecipientState,
-  States, Tracker,
+  States, Tracker, WindowFailure,
 } from '../spec/model';
 import type { CasePlan } from './config';
 import { AttemptTimeline, RUN_RECORD_FORMAT, RunRecord, WindowTimeline } from './record';
@@ -42,6 +42,38 @@ const RECIPIENTS: Recipient[] = ['P', 'Q'];
 const nowUs = (): number => Number(process.hrtime.bigint() / 1000n);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const send = (m: Record<string, unknown>) => process.stdout.write(JSON.stringify(m) + '\n');
+
+/**
+ * Whether every forward the window is waited on has settled: the executor reported a `forward_done` for each
+ * `forward_started` whose `attempt` is in `waited`. A forward the guard kicked off before the fence but not yet
+ * finished (a normal awaited send, a send whose response the recipient held, or a fire-and-forget send started under a
+ * reported DENY) is still in flight, so the window is not fenced yet and the forward's effect is journaled before the
+ * fence. The delay-element attempt is left out of `waited` on purpose: its traffic is held by the netem element so
+ * that its effect is observed after its own fence (the retry-delayed order proof), and waiting for it would defeat
+ * that. A send the guard schedules for after the closure signal has not been started at fence time, so it is absent
+ * here and stays genuinely late. Pure and exported for the window-closure regression test.
+ */
+export function groupForwardsSettled(guardEvents: { event: string; attempt: string | null }[], waited: ReadonlySet<string>): boolean {
+  let started = 0, done = 0;
+  for (const g of guardEvents) {
+    if (g.attempt === null || !waited.has(g.attempt)) continue;
+    if (g.event === 'forward_started') started++; else if (g.event === 'forward_done') done++;
+  }
+  return started === done;
+}
+
+/**
+ * The provisional-closure decision for one poll of the window loop: fence now (`close`), keep waiting (`wait`), or end
+ * with a failure reason. The window closes only when the doubles show no open connection and every waited forward has
+ * settled; past the `T_w` deadline it fails, naming why — no tracker reply (`fence_missing`), connections still open
+ * (`connections_open`), or a forward still in flight (`forward_in_flight`). Pure and exported for the test.
+ */
+export function windowClosure(input: { trackersAvailable: boolean; connectionsZero: boolean; forwardsSettled: boolean; pastDeadline: boolean }):
+  | { action: 'close' } | { action: 'wait' } | { action: 'fail'; reason: 'fence_missing' | 'connections_open' | 'forward_in_flight' } {
+  if (input.trackersAvailable && input.connectionsZero && input.forwardsSettled) return { action: 'close' };
+  if (input.pastDeadline) return { action: 'fail', reason: !input.trackersAvailable ? 'fence_missing' : input.forwardsSettled ? 'connections_open' : 'forward_in_flight' };
+  return { action: 'wait' };
+}
 
 /** A line-protocol client with one request in flight at a time and a bounded wait. */
 class LineClient {
@@ -184,35 +216,30 @@ async function main() {
     // Provisional closure of the group's window (decisions: keep-alive group window), bounded by the earliest T_w.
     const fenceId = group.length === 1 ? `w${plan.attempts.findIndex(x => x.request.id === group[0]) + 1}` : `w${plan.attempts.findIndex(x => x.request.id === group[0]) + 1}-${plan.attempts.findIndex(x => x.request.id === group[group.length - 1]) + 1}`;
     const deadline = Math.min(...[...issued.values()].map(x => x + timing.T_w_ms * 1000));
-    // A forward of this group that the executor has reported starting but not yet done is still in flight. The window
-    // is fenced only once every such forward has settled, so a forward the guard kicked off before the fence — a normal
-    // awaited send, a send whose response the recipient held, or a fire-and-forget send started under a reported DENY —
-    // has by then reached the recipient and its effect is journaled before this fence. Without this the fire-and-forget
-    // send races the fence and its effect is journaled after it only on some hosts, so the same guard would be judged
-    // late or in-window by timing alone. The delay-element attempt is excluded on purpose: its traffic is held by the
-    // netem element so its effect is observed after its own fence (the retry-delayed order proof), and waiting for it
-    // would defeat that. A send the guard schedules for after the closure signal has not started here and stays late.
-    // (decisions, "Provisional closure" and "retry-delayed".)
+    // The window is fenced only once the doubles show no open connection and every forward this group waits on has
+    // settled (groupForwardsSettled / windowClosure, above). Waiting on the forwards keeps a send the guard kicked off
+    // before the fence — a normal awaited send, a send whose response the recipient held, or a fire-and-forget send
+    // under a reported DENY — from racing the fence and being journaled before or after it by host timing alone. The
+    // delay-element attempt is excluded so its effect is still observed after its own fence (the retry-delayed order
+    // proof). (decisions, "Provisional closure" and "retry-delayed".)
     const delayAttempt = plan.delay_element?.attempt;
     const waited = new Set(group.filter(id => id !== delayAttempt));
-    const forwardsSettled = () => {
-      let started = 0, done = 0;
-      for (const g of guardEvents) {
-        if (g.attempt === null || !waited.has(g.attempt)) continue;
-        if (g.event === 'forward_started') started++; else if (g.event === 'forward_done') done++;
-      }
-      return started === done;
-    };
-    let reason: 'connections_open' | 'forward_in_flight' | 'fence_missing' | null = null;
+    let reason: WindowFailure | null = null;
     let closedAt: number | null = null;
     for (;;) {
       const tr = await trackers();
-      if (tr && tr.P.open_connections === 0 && tr.Q.open_connections === 0 && forwardsSettled()) {
+      const step = windowClosure({
+        trackersAvailable: !!tr,
+        connectionsZero: !!tr && tr.P.open_connections === 0 && tr.Q.open_connections === 0,
+        forwardsSettled: groupForwardsSettled(guardEvents, waited),
+        pastDeadline: nowUs() >= deadline,
+      });
+      if (step.action === 'close') {
         const f = nowUs() < deadline ? await fence(fenceId) : null;
         if (f && nowUs() <= deadline) { provisional.push({ fence_id: fenceId, states: states(f) }); closedAt = nowUs(); break; }
         reason = 'fence_missing'; break;
       }
-      if (nowUs() >= deadline) { reason = !tr ? 'fence_missing' : forwardsSettled() ? 'connections_open' : 'forward_in_flight'; break; }
+      if (step.action === 'fail') { reason = step.reason; break; }
       await sleep(timing.poll_interval_ms);
     }
     const w: WindowTimeline = { fence_id: fenceId, attempts: group, status: reason ? 'failed' : 'closed', failure_reason: reason, closed_at_us: closedAt, signal_sent_us: null };

@@ -15,6 +15,7 @@ import { evaluate, singleCaseExit } from '../../src/external-actions/eval/evalua
 import { BASELINE, buildFixture, fixtureById } from '../../src/external-actions/fixtures/catalog';
 import { expected } from '../../src/external-actions/oracle/expected';
 import { canonicalCase, normalizeConfig } from '../../src/external-actions/p1b/canonical';
+import { groupForwardsSettled, windowClosure } from '../../src/external-actions/p1b/case-runner';
 import { AttemptRequest, CasePlan, loadP1bProfile, loadRunConfig, P1B_PATHS, p1bConfigIssues, planCase } from '../../src/external-actions/p1b/config';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as executorModule from '../../src/external-actions/p1b/executor';
@@ -422,4 +423,54 @@ test('finding 1: a forwarder serves only the attempts of its own identity', () =
   assert.equal(forwarderDecision(new Set(['a1', 'a2']), { op: 'send', attempt: 'a2' }).ok, true);
   assert.equal(forwarderDecision(new Set(['a1']), { op: 'other', attempt: 'a1' }).ok, false);
   assert.equal(forwarderDecision(new Set(['a1']), { op: 'send' }).ok, false);
+});
+
+// ---------------------------------------------------------------- window-closure rule (XM12 :late race)
+
+// The provisional window is fenced only once the doubles show no open connection AND every forward the group waits on
+// has settled. This closes the race where XM12's fire-and-forget forward under a reported DENY (and a netem-held or
+// response-held forward) was journaled before or after the fence by host timing alone, giving `:late` effect findings
+// on some hosts and not others. These drive the pure decision helpers of the case runner with synthetic inputs, so
+// the rule is checked without the privileged harness. Reverting the rule (closing on no-open-connections alone, as
+// before this fix) makes the race cases below fail: `windowClosure` would return `close` where it now returns `wait`.
+const fw = (event: string, attempt: string | null) => ({ event, attempt });
+
+test('window rule: an in-flight forward of the group blocks the fence even with no open connection', () => {
+  const waited = new Set(['a2']);
+  // DENY answered, the fire-and-forget forward started but not yet done: not settled.
+  assert.equal(groupForwardsSettled([fw('forward_started', 'a2')], waited), false);
+  // The doubles show no open connection, but the forward is still in flight → keep waiting, do not fence.
+  assert.deepEqual(windowClosure({ trackersAvailable: true, connectionsZero: true, forwardsSettled: false, pastDeadline: false }), { action: 'wait' });
+});
+
+test('window rule: forward_done releases the wait; without it T_w ends with forward_in_flight', () => {
+  const waited = new Set(['a2']);
+  // The recipient has journaled the forward's effect and replied → forward_done → settled → fence now.
+  assert.equal(groupForwardsSettled([fw('forward_started', 'a2'), fw('forward_done', 'a2')], waited), true);
+  assert.deepEqual(windowClosure({ trackersAvailable: true, connectionsZero: true, forwardsSettled: true, pastDeadline: false }), { action: 'close' });
+  // A forward that never settles within T_w fails the window as forward_in_flight (not connections_open).
+  assert.deepEqual(windowClosure({ trackersAvailable: true, connectionsZero: true, forwardsSettled: false, pastDeadline: true }), { action: 'fail', reason: 'forward_in_flight' });
+  // Connections still open at the deadline, nothing in flight → connections_open; no tracker reply → fence_missing.
+  assert.deepEqual(windowClosure({ trackersAvailable: true, connectionsZero: false, forwardsSettled: true, pastDeadline: true }), { action: 'fail', reason: 'connections_open' });
+  assert.deepEqual(windowClosure({ trackersAvailable: false, connectionsZero: false, forwardsSettled: true, pastDeadline: true }), { action: 'fail', reason: 'fence_missing' });
+});
+
+test('window rule: the delay-element attempt is excluded from the wait, the retry is waited on', () => {
+  // retry-delayed: a1 is the delay element (its effect is meant to be observed after its own fence), a2 is the retry.
+  const waited = new Set(['a2']); // group a2's window never waits on a1
+  // a1's netem-held forward is in flight, but a1 is excluded → settled, a1's window may close early.
+  assert.equal(groupForwardsSettled([fw('forward_started', 'a1')], new Set<string>()), true);
+  // a2's fire-and-forget is in flight → a2's window is not settled until a2's forward_done.
+  assert.equal(groupForwardsSettled([fw('forward_started', 'a1'), fw('forward_started', 'a2')], waited), false);
+  assert.equal(groupForwardsSettled([fw('forward_started', 'a1'), fw('forward_started', 'a2'), fw('forward_done', 'a2')], waited), true);
+});
+
+test('window rule: a send scheduled after the closure signal has not started at fence time and stays late', () => {
+  // XM13 registers the forward through afterSignal; it is not started until after the fence and signal, so at fence
+  // time there is no forward_started for the group and the window closes. The send then lands after the fence (late),
+  // which is exactly the pinned XM13a/XM13b behaviour.
+  assert.equal(groupForwardsSettled([], new Set(['a2'])), true);
+  assert.deepEqual(windowClosure({ trackersAvailable: true, connectionsZero: true, forwardsSettled: true, pastDeadline: false }), { action: 'close' });
+  // A forward started for an attempt outside this group is never counted against it.
+  assert.equal(groupForwardsSettled([fw('forward_started', 'a1')], new Set(['a2'])), true);
 });
