@@ -368,11 +368,11 @@ jobs:
           for r in out/p1b/a/report.json out/p1b/b/report.json out/p1b/a-recorded/report.json; do node dist/src/external-actions-cli.js validate-report --file "$r"; done
       - name: 8. XM mutant runs, each over the full profile (exit codes are judged by the gate)
         run: |
-          mkdir -p out/p1b/gate
+          mkdir -p out/p1b/gate out/p1b/gate-stdout
           cp -r out/p1b/a out/p1b/gate/reference
           for m in XM5 XM6a XM6b XM7 XM9 XM10 XM11 XM12 XM13a XM13b; do
             set +e
-            sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-run --guard "$m" --out "out/p1b/gate/$m" > "out/p1b/gate/$m.stdout"
+            sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-run --guard "$m" --out "out/p1b/gate/$m" > "out/p1b/gate-stdout/$m.json"
             echo "$m exit $?"
             set -e
           done

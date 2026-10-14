@@ -153,7 +153,8 @@ async function p1b(command: string, args: string[]): Promise<number | null> {
     const dir = resolve(o.get('--runs')!);
     const runs: Record<string, RunSummary | null> = { reference: loadRun(join(dir, 'reference')) };
     for (const m of manifest.mutants) runs[m.id] = loadRun(join(dir, m.id));
-    for (const extra of readdirSync(dir)) if (!(extra in runs)) runs[extra] = loadRun(join(dir, extra));
+    // Every other directory is an unknown run; plain files are not runs.
+    for (const extra of readdirSync(dir, { withFileTypes: true })) if (extra.isDirectory() && !(extra.name in runs)) runs[extra.name] = loadRun(join(dir, extra.name));
     const r = runGate(root, manifest, runs, precheck);
     const out = resolve(o.get('--out')!);
     mkdirSync(dirname(out), { recursive: true });
