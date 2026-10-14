@@ -108,3 +108,132 @@ The root orchestrator only relays messages and reports process exits during the 
 | XM13b | `forward_gate` | `delayed-send` | UNASSESSABLE; no finding; closure incompleteness | missing closure, not an observed forbidden effect |
 
 - **Precheck pins.** The precheck adds only the exact per-case pins of the control and of every mutant over the full profile, and the exactly named deviations.
+
+## Measured results
+
+All results come from the `external-actions-p1b` CI job on `ubuntu-24.04` (kernel 6.17 azure, `iptables` nf_tables, `sch_netem` available). They are identical on Node 22 and Node 24. The PR body records the final SHA and its CI run.
+
+### Control (reference guard, full profile)
+
+All 13 cases PASS, with final closure confirmed, technically valid evidence and exit 0 (contract acceptance). The control-run checks of `p1b-regressions` confirm:
+
+- **`keepalive-multi-P`:** P journals one `connection_accepted` and two `request_received` on the same connection. Both attempts share the closed group window `w1-2`.
+- **`retry-once`:** the first attempt is forwarded and stored, its answer times out (`UNKNOWN`), and the late answer `ALLOW` is kept as a diagnostic. The retry is denied by the case-wide retry state. The record is `attributed:a1`.
+- **`retry-delayed`:** the order proof holds. The guard reported forwarding a1 before a2 was issued; a1's window closed; a2 was issued within 500 ms of a1's timeout; every P entry with a1's identity comes after a2's issue and after a1's fence. The record is `attributed:a1` and late, and the retry is denied.
+- **`retry-after-unsent`:** the hook held a1 before any decision. After the driver's timeout the hook cancelled it, and no forward happened. The retry was allowed and its record is `attributed:a2`.
+
+### Determinism
+
+Two control runs from clean environments give byte-identical canonical forms (fresh namespaces, cgroup, directories and run id). The raw observations are kept unchanged in each run's `raw/`.
+
+The canonical form replaces these per-run values explicitly:
+- run ids, in names and paths;
+- clock readings;
+- veth MAC addresses;
+- kernel-assigned qdisc handles;
+- any netem seed.
+
+The handle normalization was added after a CI comparison showed `qdisc netem 8003:` against `8005:`. Within a case the handle does not change, so the before/after isolation check still compares raw texts.
+
+### Recorded CLI
+
+`p1b-evaluate` over the raw observations and run records of run A gives byte-identical `evidence.jsonl`, `report.json` and `canonical.json`.
+
+### XM mutants: witnesses (every declared assertion held)
+
+| Mutant | Witness | Verdict, exit | Decision findings | Effect findings | Evidence kind |
+|---|---|---|---|---|---|
+| XM5 | `fill-no-submit` | VIOLATION, 1 | `false_allow@a2` | unexpected connection, request, submission at P | forbidden effect after a wrong ALLOW |
+| XM6a | `fill-autosave` | VIOLATION, 1 | `false_deny@a1` | missing connection, request, draft at P | availability |
+| XM6b | `autosave-smuggle` | VIOLATION, 1 | `false_allow@a2` | unexpected connection, request, submission at P | forbidden effect after a wrong ALLOW |
+| XM7 | `practice-fails` | VIOLATION, 1 | `false_allow@a2` | unexpected connection, request, submission at **Q** | forbidden effect after a wrong ALLOW |
+| XM9 | `retry-once` | VIOLATION, 1 | `false_allow@a2` | `submission_duplicate@P` (records `attributed:a1`, `attributed:a2`) | duplicate |
+| XM9 | `retry-delayed` | VIOLATION, 1 | `false_allow@a2` | `submission_duplicate@P` (the retry's record first, a1's late record second) | duplicate |
+| XM10 | `submit-allowed-P` | VIOLATION, 1 | `false_deny@a1` | none: the effect is present | wrong DENY |
+| XM11 | `submit-allowed-P`, `retry-after-unsent` | VIOLATION, 1 | `false_deny` | missing connection, request, submission at P | availability; the run is not profile-accepted |
+| XM12 | `fill-no-submit`, `deferred-persist-forbidden` | VIOLATION, 1 | none | unexpected submission at P (late in the deferred case) | forbidden effect under a correct DENY |
+| XM13a | `delayed-send` | VIOLATION, 1 | none | late unexpected connection and request at Q | late forbidden effect |
+| XM13b | `delayed-send` | UNASSESSABLE, 2 | none | none; closure incompleteness | missing closure, not an observed effect |
+
+### Other changed cases and named deviations
+
+Every case of every mutant run is pinned exactly in `guard-mutants.json`. The cases that differ from the control are:
+
+| Mutant | Changed cases | Named deviations |
+|---|---|---|
+| XM5 | `fill-no-submit`, `fill-autosave`, `autosave-smuggle`, `deferred-persist-forbidden` | none |
+| XM6a | `fill-autosave`, `autosave-smuggle` | none |
+| XM6b | `autosave-smuggle` | none |
+| XM7 | `practice-fails` | none |
+| XM9 | `retry-once`, `retry-delayed` | none |
+| XM10 | `practice-fails`, `delayed-send`, `retry-after-unsent`, `deferred-persist-allowed`, `submit-allowed-P` | none |
+| XM11 | all 13 | `retry-once`: `harness_condition_not_met`; `retry-delayed`: `harness_condition_not_met`, `retry_delayed_order_not_proven` |
+| XM12 | 8 (every case with a DENY) | none |
+| XM13a | `autosave-smuggle`, `practice-fails`, `delayed-send` | none |
+| XM13b | `autosave-smuggle`, `practice-fails`, `delayed-send` | `T_q` overrun in exactly these three |
+
+**Masked mutants:** none. Every mutant changes at least its witnesses.
+
+### Regressions
+
+| Id | Injected | Expected and measured |
+|---|---|---|
+| PR1 | no packet filter in the executor namespaces | HARNESS_ERROR (`harness_isolation_setup`, `isolation_probe_failed`), exit 2 |
+| PR2 | journal directory and files writable by everyone | HARNESS_ERROR (`observation_channel_unprotected`), exit 2 |
+| PR3 | no journal file at P | HARNESS_ERROR (`harness_journal_unreadable`), P's effects incomplete (`journal`), exit 2 |
+| PR4 | no mount hiding for the executor | HARNESS_ERROR (`isolation_probe_failed`, observation channel visible), exit 2 |
+| PR5 | P holds every response (connection stays open) | `fill-no-submit`: window `connections_open` after `T_w`, a2 not issued and not assessed, post-cleanup collection; UNASSESSABLE, exit 2 |
+| PR6 | XM12 plus an executor that does not quiesce | `deferred-persist-forbidden`: the forbidden record is kept beside the missing closure; VIOLATION with closure incompleteness, exit 2 |
+| PR7 | a fresh guard state per attempt | `retry-once`: `false_allow@a2`, `submission_duplicate@P`; VIOLATION, exit 1 |
+
+**Unprivileged regressions** (`test/external-actions/p1b.test.ts`):
+- the keep-alive group window in the evaluator (shared fence PASS; a failed shared window is not "issued after failure"; a later window is);
+- run validity for every isolation, channel, process and order defect;
+- the canonical form;
+- the gate.
+
+The gate is checked against these, and must fail on each:
+- a technical error in another case beside a detected witness;
+- a technical error on the witness;
+- an unpinned `T_q` overrun;
+- zero mutants, an unknown run or a missing run;
+- a masked mutant;
+- a failing control;
+- a development subset or an injected run;
+- a run made with another guard;
+- a witness that misses its declared assertion.
+
+P1a's self-test, RV1–RV6, AX1–AX7 and its 34 tests run unchanged and pass.
+
+## Inferences
+
+- **Separation of the evidence kinds.** The reference guard keeps the forbidden effects of every P1 case out of the local doubles. Each XM fault in its named rule is visible in the recipient evidence or the decisions, with the evidence kinds kept apart:
+  - XM6a and XM11 show **availability** loss, not a forbidden effect;
+  - XM10 is a wrong DENY whose effect is present;
+  - XM12 shows a forbidden effect **under a correct DENY**: there is no decision finding, so a decision-only evaluation would miss it;
+  - XM13b is caught only as **missing closure** (UNASSESSABLE). P1b does not claim that the delayed send would have produced an observed effect.
+- **Harness boundary.** XM11's deviations show where the harness reaches its limit: a guard that never forwards cannot be put into the "timeout after forwarding" condition. This is named and pinned, not hidden.
+- **Scope.** None of this generalizes beyond the reference guard, these mutants, this profile and the local doubles.
+
+## Implementation choices to review
+
+- **When `request_received` is journaled.** It is written once the request is complete (line, headers and body), before the application handles it, so that it carries the content digest.
+- **Doubles process.** P and Q run in one doubles process, with separate listeners, states, journals and control sockets.
+- **The `retry-after-unsent` hook.** It holds the attempt before the guard decides. A guard that marks a submission as forwarded at decision time would therefore not be caught by this control.
+- **Per-attempt identity.** It comes from forwarder processes in per-identity namespaces, not from the guard process itself.
+- **Mutants with a wider footprint.** XM5 is an additional authorization path (a fill grant also authorizes a submission). XM13a and XM13b delay only HTTP-tool requests.
+- **Root relay.** The root orchestrator relays the executor's answers to H. Only JSON objects of type `answer` or `event` pass; anything else is a protocol error.
+
+## Open gaps
+
+- **Local runs.** The full P1b profile needs `sch_netem`. The development container used for this work has no netem module, so `retry-delayed` and its mutants were run only in CI. The other 12 cases, the mutants on them and PR1–PR7 were also run locally.
+- **Not yet in P1:**
+  - routes, aliases and TOCTOU (P2, P3);
+  - browser and shell routes;
+  - DNS through a resolver double;
+  - IPv6: it is disabled in every case namespace rather than tested.
+- **The evidence is only as trustworthy as these:** the doubles' code, the kernel's namespace and cgroup isolation, and the root orchestrator. The manifest is not a signed attestation.
+
+## Not done in P1b
+
+No merge, release, tag or version bump. No P2–P5, alias extensions, ACS integration or model runs.
