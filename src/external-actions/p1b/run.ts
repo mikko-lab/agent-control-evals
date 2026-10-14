@@ -3,7 +3,7 @@
  * guard or one XM mutant), then the evaluation. Runs as root; the output directory is handed back to the invoking user.
  */
 import { randomBytes } from 'node:crypto';
-import { chownSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chownSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { canonicalJson, canonicalJsonLines } from '../../util/canonical-json';
 import { sha256Hex } from '../../util/hash';
@@ -56,7 +56,7 @@ export async function p1bRun(o: RunOptions): Promise<RunOutcome> {
   const profile = o.cases ? { ...fullProfile, profile_id: `${fullProfile.profile_id}/development-subset`, cases: fullProfile.cases.filter(c => o.cases!.includes(c)) } : fullProfile;
   const profileShaUsed = o.cases ? sha256Hex(canonicalJson(profile)) : profileSha;
   const out = resolve(o.out);
-  mkdirSync(dirname(out), { recursive: true });
+  const created = mkdirHandedBack(dirname(out));
   mkdirSync(out);
   const rawDir = join(out, 'raw');
   mkdirSync(rawDir);
@@ -89,14 +89,22 @@ export async function p1bRun(o: RunOptions): Promise<RunOutcome> {
   const result = evaluateP1bRun(profile, profileShaUsed, config, { observations: profile.cases.map(id => observations.find(x => (x as { case_id?: string }).case_id === id) ?? { case_id: id, missing: true }), records });
   writeRunBundle(o.root, out, profileShaUsed, configSha, guard, observations, records, result, { command: 'p1b-run', injections: [...o.inject].sort(), development_subset: o.cases ?? null, environment_ok: env.ok });
   handBack(out);
+  for (const d of created) handBack(d, false);
   return { result, env, out };
 }
 
-/** Gives the output back to the user who invoked sudo. */
-export function handBack(path: string) {
+/** Gives the output back to the user who invoked sudo (recursively, or the directory alone). */
+export function handBack(path: string, recursive = true) {
   const uid = Number(process.env.SUDO_UID), gid = Number(process.env.SUDO_GID);
   if (!Number.isInteger(uid) || !Number.isInteger(gid) || uid <= 0) return;
-  const walk = (p: string) => { chownSync(p, uid, gid); if (statSync(p).isDirectory()) for (const x of readdirSync(p)) walk(join(p, x)); };
+  const walk = (p: string) => { chownSync(p, uid, gid); if (recursive && statSync(p).isDirectory()) for (const x of readdirSync(p)) walk(join(p, x)); };
   walk(path);
+}
+/** Creates a directory and its missing parents; returns the directories it created, outermost first. */
+export function mkdirHandedBack(path: string): string[] {
+  const missing: string[] = [];
+  for (let p = resolve(path); !existsSync(p); p = dirname(p)) missing.unshift(p);
+  mkdirSync(path, { recursive: true });
+  return missing;
 }
 export { P1B_PATHS };

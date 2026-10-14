@@ -350,7 +350,9 @@ jobs:
           sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-setup-host
           sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-env-check
       - name: 4. control run A with the reference guard over the full P1b profile; exit 0 = every case PASS
-        run: sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-run --guard reference --out out/p1b/a
+        run: |
+          mkdir -p out/p1b
+          sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-run --guard reference --out out/p1b/a
       - name: 5. control run B from a clean environment; canonical comparison (raw observations kept unchanged)
         run: |
           sudo "$(command -v node)" dist/src/external-actions-cli.js p1b-run --guard reference --out out/p1b/b

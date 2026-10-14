@@ -28,7 +28,7 @@ import { evaluateP1bRun, missingObservation } from './external-actions/p1b/evalu
 import { GateManifest, guardSource, loadRun, runGate, RunSummary } from './external-actions/p1b/gate';
 import { P1B_PATHS } from './external-actions/p1b/config';
 import { INJECTIONS, Injection } from './external-actions/p1b/orchestrator';
-import { handBack, p1bRun, writeRunBundle } from './external-actions/p1b/run';
+import { handBack, mkdirHandedBack, p1bRun, writeRunBundle } from './external-actions/p1b/run';
 import { runPrivilegedRegressions } from './external-actions/p1b/regressions';
 
 const root = resolve(__dirname, '..', '..');
@@ -136,10 +136,11 @@ async function p1b(command: string, args: string[]): Promise<number | null> {
   if (command === 'p1b-regressions') {
     const o = options(args, ['--out', '--control'], ['--out']);
     const out = resolve(o.get('--out')!);
-    mkdirSync(out, { recursive: true });
+    const created = mkdirHandedBack(out);
     const r = await runPrivilegedRegressions(root, out, o.has('--control') ? resolve(o.get('--control')!) : null);
     writeFileSync(join(out, 'regressions.json'), JSON.stringify(r, null, 1) + '\n');
     handBack(out);
+    for (const d of created) handBack(d, false);
     console.log(JSON.stringify({ ok: r.ok, results: r.results.map(x => `${x.id}:${x.ok}`), control: r.control }));
     return r.ok ? 0 : 2;
   }
