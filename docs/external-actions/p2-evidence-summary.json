@@ -1,0 +1,85 @@
+{
+  "format": "p2-review-evidence-summary/1",
+  "review_date": "2026-11-17",
+  "review_method": "AI-assisted review in this conversation; not an external audit or certification",
+  "review_result": "Matrix-gate findings closed; approved for local commit/PR preparation only",
+  "base_head": "4aab6178c72d24e6980b452101be132546ae88e3",
+  "p2_acceptance": false,
+  "component": {
+    "scenarios": 16,
+    "allowed_controls": 7,
+    "evidence": "synthetic component projection; not independent recipient or network isolation evidence"
+  },
+  "linux_live": {
+    "historical_reference_runs": 6,
+    "node_majors": [
+      22,
+      24
+    ],
+    "guard_mutants": 5,
+    "mutant_runs": 10,
+    "technical_injections": 5,
+    "evidence": "recipient-owned journals in a bounded synthetic Linux network"
+  },
+  "matrix_gate": {
+    "passed": true,
+    "rows": 21,
+    "composition": {
+      "historical_runs": 20,
+      "new_channel_run": 1
+    },
+    "separate_new_reference_regressions": 2,
+    "original_channel_rejected": "missing structured permission-change diagnostic",
+    "offline_replay": "all 21 expected outcomes accepted; two identical complete gate evaluations",
+    "gate_sha256": "0a3030f8354a650a51f5f59e1b12ae9872c17e2706f5ea1865c51934f415ae28"
+  },
+  "previous_validation": {
+    "p2_tests_each_environment": {
+      "pass": 24,
+      "fail": 0,
+      "skip": 0
+    },
+    "environments": [
+      "local Node 26.8.2",
+      "Linux Node 22.23.2",
+      "Linux Node 24.22.3"
+    ],
+    "whole_repository": {
+      "pass": 583,
+      "fail": 0,
+      "skip": 35
+    },
+    "skip_dependency_closure": {
+      "files": 50,
+      "unchanged_from_base": true
+    },
+    "remote_ci": "not verified for this change"
+  },
+  "packages": [
+    {
+      "name": "p2-completion-evidence-2026-11-17.tar.gz",
+      "sha256": "752a5c0c3b7114c743d8f27669f0bf404bfeb60e6a3d81b3c05a248cc89155f5",
+      "availability": "local only; not uploaded or included in proposed commit"
+    },
+    {
+      "name": "p2-matrix-gate-evidence-2026-11-17.tar.gz",
+      "sha256": "3ccf5a440c09d475d4fd287a526958c4ffa60f9f7f94100347fee752befbdaae",
+      "availability": "local only; not uploaded or included in proposed commit"
+    }
+  ],
+  "trust": [
+    "collector",
+    "service code",
+    "operating system",
+    "container/host environment",
+    "original evidence bindings"
+  ],
+  "excluded": [
+    "DNS wire protocol",
+    "TOCTOU/rebinding",
+    "IPv6",
+    "browser/shell/redirect routes",
+    "arbitrary hostile in-process code containment"
+  ],
+  "note": "This new review summary does not alter historical reports or their acceptance fields. SHA-256 links bytes, not origin or runtime attestation."
+}

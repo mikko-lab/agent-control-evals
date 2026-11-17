@@ -14,6 +14,8 @@ How this harness relates to the control runtime and to the execution-evidence li
 
 External Action Boundary Evaluation, a separate track for effects at external recipients: [plan](docs/external-actions/evaluation-plan.md) and [decisions](docs/external-actions/decisions.md). Phases P1a and P1b are implemented (`npm run ace:external`). [P1a](docs/external-actions/p1a.md) is the observation model and evaluator over fixed synthetic observations; its results are synthetic harness validation. [P1b](docs/external-actions/p1b.md) runs a local synthetic reference guard and its planted XM mutants against local recipient doubles under enforced isolation (namespaces, separate users, a packet filter, a cgroup; root needed for setup only); its results cover only that reference guard and the named profile, not any real guard or service.
 
+[P2 routes and aliases](docs/external-actions/p2.md) add 16 synthetic scenarios, seven allowed controls, an isolated Linux resolver/proxy/recipient adapter, offline evidence evaluation and predeclared mutation witnesses. Component fixtures and actual recipient journals remain separate evidence classes. See the [review and evidence summary](docs/external-actions/p2-review.md) for Node 22/24 results, limitations and review status; component success alone never grants P2 acceptance.
+
 # ACS runtime-control evaluation
 
 The ACS track has exactly one System Under Test (SUT):

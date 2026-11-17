@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["format","evidence_kind","run_id","guard","node","platform","cases"],
+  "properties": {
+    "format": {"const":"external-action-p2-live-run/1"},
+    "evidence_kind": {"const":"local_recipient_observation"},
+    "run_id": {"type":"string","minLength":1},
+    "guard": {"enum":["reference","direct-ip-allow","alias-allow","proxy-final-unchecked","deny-all","deny-after-send"]},
+    "node":{"type":"string"}, "platform":{"const":"linux"},
+    "cases":{"type":"array","minItems":16,"maxItems":16,"items":{"$ref":"#/$defs/case"}}
+  },
+  "$defs": {
+    "event": {
+      "type":"object","additionalProperties":false,
+      "required":["run","case","attempt","service","seq","prev","hash","kind","data"],
+      "properties": {
+        "run":{"type":"string"},"case":{"type":"string"},"attempt":{"const":"a1"},
+        "service":{"enum":["e","x","r","p","q"]},"seq":{"type":"integer","minimum":0},
+        "prev":{"type":"string","pattern":"^[a-f0-9]{64}$"},"hash":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+        "kind":{"enum":["connection","request","stored","answer","connect_attempt","decision","closed","error"]},"data":{"type":"object"}
+      }
+    },
+    "case": {
+      "type":"object","additionalProperties":false,
+      "required":["run","case","attempt","decision","events","states","processes","isolation","errors"],
+      "properties": {
+        "run":{"type":"string"},"case":{"type":"string"},"attempt":{"const":"a1"},"decision":{"enum":["ALLOW","DENY","UNKNOWN"]},
+        "events":{"type":"object","required":["e","x","r","p","q"],"additionalProperties":false,"properties":{
+          "e":{"type":"array","items":{"$ref":"#/$defs/event"}},"x":{"type":"array","items":{"$ref":"#/$defs/event"}},
+          "r":{"type":"array","items":{"$ref":"#/$defs/event"}},"p":{"type":"array","items":{"$ref":"#/$defs/event"}},"q":{"type":"array","items":{"$ref":"#/$defs/event"}}
+        }},
+        "states":{"type":"object","required":["x","r","p","q"],"additionalProperties":{"type":"object","additionalProperties":false,"required":["records","open","active"],"properties":{"records":{"type":"array","items":{"type":"string"}},"open":{"type":"integer","minimum":0},"active":{"type":"integer","minimum":0}}}},
+        "processes":{"type":"array","minItems":5,"maxItems":5,"items":{"type":"object","additionalProperties":false,"required":["role","code","signal","timed_out"],"properties":{"role":{"enum":["e","x","r","p","q"]},"code":{"type":["integer","null"]},"signal":{"type":["string","null"]},"timed_out":{"type":"boolean"}}}},
+        "errors":{"type":"array","items":{"type":"string"}},
+        "isolation":{"type":"object","additionalProperties":false,"required":["before","after","before_hash","after_hash","probes","channels_before","channels_after"],"properties":{
+          "before":{"type":"string","minLength":1},"after":{"type":"string","minLength":1},"before_hash":{"type":"string"},"after_hash":{"type":"string"},
+          "probes":{"type":"object","required":["e","x","r","p","q"],"additionalProperties":{"type":"boolean"}},"channels_before":{"type":"boolean"},"channels_after":{"type":"boolean"}
+        }}
+      }
+    }
+  }
+}
