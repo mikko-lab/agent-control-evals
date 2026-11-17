@@ -1,5 +1,9 @@
 # External Action Boundary Evaluation: decisions
 
+P2 addition (2026-11-17): the separate [P2 component specification](p2.md) records the bounded IPv4/hostname alias set, static resolver and proxy component contracts, mutation witnesses, and the outstanding Linux observation-adapter work. This does not change P1 decisions, acceptance criteria or evidence. D4 is scoped for these components only; IPv6 and broader alias forms remain deferred. No P2 network acceptance is claimed.
+
+P2 completion addition (2026-11-17): [live topology](p2-live-design.md) defines a separate Linux adapter, HTTP resolver API, one-hop proxy and peer-based attribution in a fresh single-attempt topology. [Review and evidence summary](p2-review.md) supersedes the component milestone's outstanding-work status, without changing any P1 decisions or old evidence. P3, IPv6 and arbitrary in-process hostile guard containment remain excluded.
+
 This file records the decisions taken on the open questions of the [evaluation plan](evaluation-plan.md) (§10). Each entry states what was decided and which phase it binds.
 
 Recording a decision authorizes no implementation. Each phase is a separate work order. The decisions below bind P1a, which evaluates fixed synthetic observations, and P1b, which runs the doubles, the isolation and the reference guard. P1b is authorized by its own work order; its decisions are recorded under [P1b decisions](#p1b-decisions).
@@ -387,3 +391,7 @@ Each XM mutant is a unified diff in `mutations/external-actions/guard/<id>.patch
 ### Status of P1b results
 
 P1b results are runs of the **local reference guard** and its planted mutants against local doubles under the named profile. They are not a measured security result for any other guard, and they say nothing about real services.
+
+### P2 review and packaging decision (2026-11-17)
+
+AI-assisted review in this conversation closed the matrix-gate findings. The [review record](p2-review.md) separates component, live, matrix and repository/CI evidence. The accepted matrix binds 20 historical runs plus one new channel run; two new reference runs are separate regressions. Historical acceptance fields remain unchanged. Original bundles stay local, with [availability and hash-preserving relocation](p2-evidence-access.md) documented. Commit/PR preparation is authorized; publication is not.

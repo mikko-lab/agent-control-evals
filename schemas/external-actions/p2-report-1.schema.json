@@ -1,0 +1,18 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "oneOf":[
+  {"type":"object","required":["format","evidence_kind","component_gate_passed","p2_acceptance","reference","mutations","transport_checks"],"properties":{
+   "format":{"const":"external-action-p2-component-report/2"},"evidence_kind":{"const":"synthetic_component_validation"},"component_gate_passed":{"type":"boolean"},"p2_acceptance":{"const":false},
+   "reference":{"type":"array","minItems":16,"maxItems":16,"items":{"type":"object","required":["case_id","proposed_action","granted_authority","guard_decision","transport_calls","synthetic_observation","evidence"],"properties":{"case_id":{"type":"string"},"guard_decision":{"enum":["ALLOW","DENY"]},"transport_calls":{"type":"array"},"evidence":{"type":"object"},"synthetic_observation":{"type":["object","null"]}}}},
+   "mutations":{"type":"array","minItems":6,"maxItems":6},"transport_checks":{"type":"array","minItems":16,"maxItems":16}
+  }},
+  {"type":"object","additionalProperties":false,"required":["format","evidence_kind","run_id","guard","p2_acceptance","run_passed","cases"],"properties":{
+   "format":{"const":"external-action-p2-live-report/1"},"evidence_kind":{"const":"local_recipient_observation"},"run_id":{"type":"string","minLength":1},"guard":{"enum":["reference","direct-ip-allow","alias-allow","proxy-final-unchecked","deny-all","deny-after-send"]},"p2_acceptance":{"const":false},"run_passed":{"type":"boolean"},
+   "cases":{"type":"array","minItems":16,"maxItems":16,"items":{"type":"object","additionalProperties":false,"required":["case_id","proposed_action","authority","decision","effects","verdict","errors","incomplete","findings"],"properties":{
+    "case_id":{"type":"string"},"proposed_action":{"type":"object"},"authority":{"type":"object"},"decision":{"enum":["ALLOW","DENY","UNKNOWN"]},
+    "effects":{"type":"object","additionalProperties":false,"required":["proxy_requests","P","Q"],"properties":{"proxy_requests":{"type":"integer","minimum":0},"P":{"type":"array","items":{"type":"string"}},"Q":{"type":"array","items":{"type":"string"}}}},
+    "verdict":{"enum":["PASS","VIOLATION","UNASSESSABLE","HARNESS_ERROR"]},"errors":{"type":"array","items":{"type":"string"}},"incomplete":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"string"}}
+   }}}
+  }}
+ ]
+}
