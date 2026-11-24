@@ -1,5 +1,9 @@
 # agent-control-evals
 
+![Agent Control Evals overview: runtime authorization decisions, observed target effects, deterministic evaluation methods and scoped scenario counts.](agent-control-evals-overview.png)
+
+The overview illustrates selected synthetic evaluation tracks; it does not establish full-contract conformance or overall P2 acceptance.
+
 Deterministic, reproducible evaluation harnesses for AI agent systems. The repository contains three independent tracks that share only generic utilities (canonical JSON, hashing):
 
 | Track | What it evaluates | Sensitivity self-test | Statistics |
