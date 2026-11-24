@@ -1,5 +1,9 @@
 # agent-control-evals
 
+![Agent Control Evals overview: runtime authorization decisions, observed target effects, deterministic evaluation methods and scoped scenario counts.](agent-control-evals-overview.png)
+
+The overview illustrates selected synthetic evaluation tracks; it does not establish full-contract conformance or overall P2 acceptance.
+
 Deterministic, reproducible evaluation harnesses for AI agent systems. The repository contains three independent tracks that share only generic utilities (canonical JSON, hashing):
 
 | Track | What it evaluates | Sensitivity self-test | Statistics |
@@ -15,6 +19,16 @@ How this harness relates to the control runtime and to the execution-evidence li
 External Action Boundary Evaluation, a separate track for effects at external recipients: [plan](docs/external-actions/evaluation-plan.md) and [decisions](docs/external-actions/decisions.md). Phases P1a and P1b are implemented (`npm run ace:external`). [P1a](docs/external-actions/p1a.md) is the observation model and evaluator over fixed synthetic observations; its results are synthetic harness validation. [P1b](docs/external-actions/p1b.md) runs a local synthetic reference guard and its planted XM mutants against local recipient doubles under enforced isolation (namespaces, separate users, a packet filter, a cgroup; root needed for setup only); its results cover only that reference guard and the named profile, not any real guard or service.
 
 [P2 routes and aliases](docs/external-actions/p2.md) add 16 synthetic scenarios, seven allowed controls, an isolated Linux resolver/proxy/recipient adapter, offline evidence evaluation and predeclared mutation witnesses. Component fixtures and actual recipient journals remain separate evidence classes. See the [review and evidence summary](docs/external-actions/p2-review.md) for Node 22/24 results, limitations and review status; component success alone never grants P2 acceptance.
+
+## Related research / Tutkimustausta
+
+Elmasry (2026), [Authorization assurance for tool-using LLM agents](https://doi.org/10.1007/s10207-026-01343-w), examines the evidentiary limits of authorization claims for agent systems. The research is relevant to this repository's separation of policy decisions, enforcement and observed effects, including revocation.
+
+Elmasryn (2026) tutkimus tarkastelee agenttijärjestelmien valtuutuksia koskevien väitteiden evidenssirajoja. Se liittyy repositorion tapaan erottaa valtuutuspäätökset, toimeenpano ja havaitut vaikutukset toisistaan myös käyttövaltuuksien peruuttamisen yhteydessä.
+
+[Research context and coverage comparison / Tutkimustausta ja kattavuusvertailu (EN/FI)](docs/research/elmasry-2026.md).
+
+This reference does not imply external validation, collaboration or endorsement. / Viittaus ei tarkoita ulkopuolista validointia, tutkimusyhteistyötä tai hyväksyntää.
 
 # ACS runtime-control evaluation
 
