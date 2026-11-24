@@ -16,6 +16,16 @@ External Action Boundary Evaluation, a separate track for effects at external re
 
 [P2 routes and aliases](docs/external-actions/p2.md) add 16 synthetic scenarios, seven allowed controls, an isolated Linux resolver/proxy/recipient adapter, offline evidence evaluation and predeclared mutation witnesses. Component fixtures and actual recipient journals remain separate evidence classes. See the [review and evidence summary](docs/external-actions/p2-review.md) for Node 22/24 results, limitations and review status; component success alone never grants P2 acceptance.
 
+## Related research / Tutkimustausta
+
+Elmasry (2026), [Authorization assurance for tool-using LLM agents](https://doi.org/10.1007/s10207-026-01343-w), examines the evidentiary limits of authorization claims for agent systems. The research is relevant to this repository's separation of policy decisions, enforcement and observed effects, including revocation.
+
+Elmasryn (2026) tutkimus tarkastelee agenttijärjestelmien valtuutuksia koskevien väitteiden evidenssirajoja. Se liittyy repositorion tapaan erottaa valtuutuspäätökset, toimeenpano ja havaitut vaikutukset toisistaan myös käyttövaltuuksien peruuttamisen yhteydessä.
+
+[Research context and coverage comparison / Tutkimustausta ja kattavuusvertailu (EN/FI)](docs/research/elmasry-2026.md).
+
+This reference does not imply external validation, collaboration or endorsement. / Viittaus ei tarkoita ulkopuolista validointia, tutkimusyhteistyötä tai hyväksyntää.
+
 # ACS runtime-control evaluation
 
 The ACS track has exactly one System Under Test (SUT):
